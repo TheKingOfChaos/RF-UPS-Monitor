@@ -1,0 +1,172 @@
+# SNMP Pico Power Monitor Project Rules
+
+## Hardware Platform Requirements
+
+1. Microcontroller
+   - Must use Raspberry Pi Pico (RP2040)
+   - Must operate at default 125MHz clock speed
+   - Must utilize both cores:
+     * Core 0: Network and SNMP handling
+     * Core 1: Power monitoring and GPIO management
+   - Must use onboard LED for status indication
+
+2. Memory Utilization
+   - Must fit within 2MB of flash memory
+   - Must operate within 264KB of RAM
+   - Must implement efficient dual-core synchronization
+   - Must use appropriate memory barriers for core communication
+
+## Core Requirements
+
+1. SNMP Implementation
+   - SNMP v1 only
+   - No external SNMP libraries allowed
+   - Must support GetRequest and GetNextRequest operations
+   - Must implement proper ASN.1/BER encoding
+   - Community string must be configurable via CLI
+   - Default community string: "public"
+
+2. Power Monitoring
+   - GPIO27 must be used for mains power detection
+   - HIGH signal indicates power present
+   - LOW signal indicates power loss
+   - Must implement proper electrical isolation
+   - Must use voltage dividers/optocouplers for GPIO protection
+
+3. Network Configuration
+   - Must use W5500 Ethernet module
+   - DHCP must be default network configuration
+   - Must support static IP configuration via CLI
+   - No external network stack libraries allowed
+   - Must implement custom UDP/IP stack
+
+4. Factory Reset
+   - Must use GPIO22 for factory reset button
+   - Must require 10-second hold for activation
+   - Must provide visual feedback via onboard LED
+   - Must reset all settings to defaults:
+     * DHCP enabled
+     * Community string to "public"
+     * Clear all statistics
+     * Clear stored network settings
+
+## Safety Requirements
+
+1. Circuit Protection
+   - All GPIO inputs must be properly protected
+   - Power monitoring circuit must be galvanically isolated
+   - All ground connections must be properly implemented
+   - Voltage levels must not exceed 3.3V on any GPIO
+
+2. Hardware Configuration
+   - SPI pins must follow specified mapping:
+     * GPIO16: MISO
+     * GPIO17: CS
+     * GPIO18: SCK
+     * GPIO19: MOSI
+     * GPIO20: RST
+     * GPIO21: INT
+
+## Code Organization
+
+1. Project Structure
+   - Separate network stack implementation
+   - Isolated SNMP protocol handling
+   - Modular CLI implementation
+   - Clear separation of hardware abstraction layer
+
+2. Configuration Storage
+   - Must use internal flash for settings
+   - Must implement wear leveling
+   - Must validate stored data integrity
+   - Must handle corruption recovery
+
+## Documentation Requirements
+
+1. Code Documentation
+   - All functions must be documented
+   - MIB structure must be clearly defined
+   - Hardware connections must be documented
+   - Configuration options must be explained
+   - TODO.md must be updated when tasks are completed
+
+2. User Documentation
+   - CLI commands must be documented
+   - Network configuration process must be explained
+   - SNMP usage examples must be provided
+   - Troubleshooting guide must be included
+
+## Testing Requirements
+
+1. Hardware Testing
+   - Power monitoring must be verified with actual mains power
+   - Factory reset must be tested for timing accuracy
+   - Network connectivity must be verified
+   - All GPIO functions must be validated
+
+2. SNMP Testing
+   - Must verify all SNMP operations
+   - Must test community string validation
+   - Must verify MIB walk functionality
+   - Must test error conditions
+
+## Performance Requirements
+
+1. Response Times
+   - SNMP requests must be handled within 100ms
+   - CLI must respond within 50ms
+   - Power state changes must be detected within 10ms
+   - Factory reset must complete within 2 seconds
+
+2. Resource Usage
+   - Must not exceed 70% of available flash
+   - Must not exceed 50% of available RAM
+   - Must optimize network buffer usage
+   - Must implement efficient memory management
+
+## Security Requirements
+
+1. Access Control
+   - Must validate SNMP community string
+   - Must implement request rate limiting
+   - Must log access attempts
+   - Must sanitize all CLI inputs
+
+2. Configuration Protection
+   - Must validate all stored settings
+   - Must protect against buffer overflows
+   - Must handle malformed SNMP packets
+   - Must prevent unauthorized configuration changes
+
+## Maintenance Rules
+
+1. Code Updates
+   - Must maintain backward compatibility
+   - Must not break existing SNMP functionality
+   - Must preserve user configurations
+   - Must document all changes
+
+2. Version Control
+   - Must use semantic versioning
+   - Must tag all releases
+   - Must maintain changelog
+   - Must document breaking changes
+
+## Build Requirements
+
+1. Development Environment
+   - Must use PlatformIO with the following configuration:
+     * Platform: https://github.com/maxgerhardt/platform-raspberrypi.git
+     * Board: pico
+     * Framework: arduino
+     * Core: earlephilhower
+     * Filesystem: littlefs with 0.25MB size
+   - Must support offline builds
+   - Must minimize external dependencies
+   - Must maintain build documentation
+
+2. Quality Control
+   - Must implement error handling
+   - Must validate all inputs
+   - Must handle edge cases
+   - Must follow consistent coding style

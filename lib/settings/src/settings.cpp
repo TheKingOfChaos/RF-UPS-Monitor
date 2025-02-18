@@ -1,9 +1,9 @@
 #include "settings.h"
 
 // Settings file paths with wear leveling
-const char* SETTINGS_FILE_A = "/settings_a.json";
-const char* SETTINGS_FILE_B = "/settings_b.json";
-const char* ACTIVE_FILE_FLAG = "/active_file";
+const char* SETTINGS_FILE_A = "data/settings_a.json";
+const char* SETTINGS_FILE_B = "data/settings_b.json";
+const char* ACTIVE_FILE_FLAG = "data/active_file";
 const uint32_t SETTINGS_VERSION = 1;      // Increment when settings structure changes
 
 // Default settings

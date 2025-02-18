@@ -1,50 +1,25 @@
-#include <Arduino.h>
-#include <unity.h>
-#include <settings.h>
+#include "test_common.h"
+#include "../lib/network/include/network.h"
+#include "../lib/w5500/include/w5500.h"
 
-// the built-in Unity library of ArduinoCore-mbed can be used,
-// but we need to make sure we see the output on the intended serial port,
-// which is the USB serial port here.
-#ifdef ARDUINO_ARCH_MBED
-REDIRECT_STDOUT_TO(Serial);
-#endif
-
-// Test states and variables
+// External declarations
+extern W5500 eth;
+extern Network net;
 
 // Test states and variables
 unsigned long factoryResetStartTime = 0;
 bool factoryResetButtonPressed = false;
 
-void setUp(void) {
-    // Initialize Serial for debug output
-    Serial.begin(115200);
-    while (!Serial) {
-        delay(100);
-    }
-    
-    pinMode(POWER_PIN, INPUT);
-    pinMode(FACTORY_RESET_PIN, INPUT_PULLUP);
-    
-    // Initialize filesystem
-    TEST_ASSERT_TRUE(LittleFS.begin());
-}
-
-void tearDown(void) {
-    // Reset any test state
-    factoryResetStartTime = 0;
-    factoryResetButtonPressed = false;
-    
-    // Clean up filesystem
-    if (LittleFS.exists(SETTINGS_FILE_A)) {
-        LittleFS.remove(SETTINGS_FILE_A);
-    }
-    if (LittleFS.exists(SETTINGS_FILE_B)) {
-        LittleFS.remove(SETTINGS_FILE_B);
-    }
-    if (LittleFS.exists(ACTIVE_FILE_FLAG)) {
-        LittleFS.remove(ACTIVE_FILE_FLAG);
-    }
-}
+// Forward declarations of tests from other files
+void test_static_ip_configuration();
+void test_dhcp_configuration();
+void test_udp_socket_creation();
+void test_udp_packet_send_receive();
+void test_spi_initialization();
+void test_basic_read_write();
+void test_interrupt_handling();
+void test_register_access();
+void test_chip_identification();
 
 void test_power_monitoring_state(void) {
     // Simulate power present (HIGH)
@@ -245,13 +220,33 @@ void setup() {
     
     pinMode(LED_BUILTIN, OUTPUT);
     
+    // Initialize W5500 and Network for tests
+    eth.begin();
+    net.begin(&eth);
+    
     UNITY_BEGIN();
+    
+    // Basic functionality tests
     RUN_TEST(test_power_monitoring_state);
     RUN_TEST(test_factory_reset_timing);
     RUN_TEST(test_network_config);
     RUN_TEST(test_snmp_community);
     RUN_TEST(test_json_config);
     RUN_TEST(test_settings_file_operations);
+    
+    // W5500 driver tests
+    RUN_TEST(test_spi_initialization);
+    RUN_TEST(test_basic_read_write);
+    RUN_TEST(test_interrupt_handling);
+    RUN_TEST(test_register_access);
+    RUN_TEST(test_chip_identification);
+    
+    // Network stack tests
+    RUN_TEST(test_static_ip_configuration);
+    RUN_TEST(test_dhcp_configuration);
+    RUN_TEST(test_udp_socket_creation);
+    RUN_TEST(test_udp_packet_send_receive);
+    
     UNITY_END();
 }
 

@@ -1,0 +1,20 @@
+{
+    "name": "network",
+    "version": "1.0.0",
+    "description": "Custom UDP/IP stack implementation",
+    "keywords": "network, udp, ip, dhcp",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/yourusername/RF-UPS-Monitor-v3.git"
+    },
+    "authors": [
+        {
+            "name": "Kenneth",
+            "maintainer": true
+        }
+    ],
+    "license": "MIT",
+    "dependencies": {},
+    "frameworks": "arduino",
+    "platforms": "raspberrypi"
+}

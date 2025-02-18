@@ -1,8 +1,8 @@
 {
     "community": "public",
     "dhcpEnabled": true,
-    "staticIP": "192.168.1.100",
-    "subnetMask": "255.255.255.0",
-    "gateway": "192.168.1.1",
+    "staticIP": "10.132.0.200",
+    "subnetMask": "255.255.252.0",
+    "gateway": "10.132.0.1",
     "version": 1
 }

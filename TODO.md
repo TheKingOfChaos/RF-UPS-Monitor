@@ -1,15 +1,15 @@
 # SNMP Agent Implementation TODO List
 
 ## 1. Core Network Stack Implementation
-- [ ] Implement W5500 driver
-  - [ ] Set up SPI communication (GPIO16-21)
-  - [ ] Implement basic read/write operations
-  - [ ] Add interrupt handling for GPIO21
-- [ ] Create custom UDP/IP stack
-  - [ ] Implement UDP packet handling
-  - [ ] Add IP addressing functionality
-  - [ ] Implement DHCP client
-  - [ ] Add static IP configuration support
+- [x] Implement W5500 driver
+  - [x] Set up SPI communication (GPIO16-21)
+  - [x] Implement basic read/write operations
+  - [x] Add interrupt handling for GPIO21
+- [x] Create custom UDP/IP stack
+  - [x] Implement UDP packet handling
+  - [x] Add IP addressing functionality
+  - [x] Implement DHCP client (basic simulation)
+  - [x] Add static IP configuration support
   
 ## 2. SNMP Protocol Implementation
 ### 2.1 Core SNMP Engine

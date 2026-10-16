@@ -100,11 +100,28 @@ class Device:
         raise TimeoutError("menu prompt not seen within %.0f s" % timeout)
 
     def reconnect_after_reboot(self, timeout=40.0):
-        """Close, wait for the port to drop and return, reopen and wait for the menu."""
+        """Close, wait for the port to drop and return, reopen, wait for the menu and network."""
         self.close()
         time.sleep(1.5)
         self.open()
-        return self.wait_for_menu(timeout)
+        self.wait_for_menu(timeout)
+        return self.wait_connected(timeout)
+
+    def wait_connected(self, timeout=40.0):
+        """Poll the status screen until the device reports an address.
+
+        The menu is available right after boot, before the link and DHCP lease,
+        so anything that needs the network must wait for this first.
+        """
+        deadline = time.time() + timeout
+        st = None
+        while time.time() < deadline:
+            st = self.status()
+            if st["state"] == "connected" and st["ip"]:
+                return st
+            time.sleep(1.0)
+        raise TimeoutError("device not connected within %.0f s, last state: %s"
+                           % (timeout, st and st["state"]))
 
     # ---- menu helpers ----
 
@@ -114,6 +131,8 @@ class Device:
         info = {"raw": out}
         m = re.search(r"Mode: (\w+)", out)
         info["mode"] = m.group(1) if m else None
+        m = re.search(r"State: (.*?)\r?$", out, re.MULTILINE)
+        info["state"] = m.group(1) if m else None
         for key, label in (("ip", "IP"), ("subnet", "Subnet"), ("gateway", "Gateway")):
             m = re.search(r"^%s: ([\d.]+)" % label, out, re.MULTILINE)
             info[key] = m.group(1) if m else None

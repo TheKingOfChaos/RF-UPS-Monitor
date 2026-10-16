@@ -17,6 +17,7 @@ The device must be in DHCP mode before the run, and is left in DHCP mode.
 
 import os
 import re
+import time
 import unittest
 
 from device import Device, ping
@@ -29,7 +30,7 @@ class SerialMenuTest(unittest.TestCase):
         cls.dev = Device()
         cls.dev.open()
         cls.dev.wait_for_menu()
-        st = cls.dev.status()
+        st = cls.dev.wait_connected()
         if st["mode"] != "DHCP":
             cls.dev.close()
             raise unittest.SkipTest("device is in %s mode; switch it to DHCP before running HIL tests" % st["mode"])
@@ -56,6 +57,9 @@ class SerialMenuTest(unittest.TestCase):
         self.assertIsNotNone(st["ip"], st["raw"])
         self.assertNotEqual("0.0.0.0", st["ip"], "no DHCP lease")
         self.assertRegex(st["raw"], r"MAC: ([0-9A-F]{2}:){5}[0-9A-F]{2}")
+
+    def test_status_reports_connected_state(self):
+        self.assertEqual("connected", self.dev.status()["state"])
 
     def test_device_answers_ping(self):
         ip = self.dev.status()["ip"]
@@ -122,6 +126,28 @@ class SerialMenuTest(unittest.TestCase):
         self.assertEqual("DHCP", st["mode"])
         self.assertNotEqual("0.0.0.0", st["ip"])
         self.assertTrue(ping(st["ip"]), "no ping reply after reboot")
+
+    def test_menu_is_available_before_dhcp_lease(self):
+        """Boot must not wait for DHCP: the prompt comes first, the lease is reported later."""
+        d = self.dev
+        d.send("2", expect=r"\(y/n\): $")
+        d.send("y", expect=r"Rebooting", timeout=10)
+
+        d.close()
+        time.sleep(1.5)
+        d.open()  # Firmware waits for DTR before printing, so the boot log is captured
+        opened = time.time()
+        boot = d.read_until(r"> $", timeout=8)
+        prompt_after = time.time() - opened
+        self.assertIn("requesting DHCP lease in background", boot)
+        self.assertNotIn("Network up", boot, "lease reported before the menu, boot is still blocking")
+        self.assertLess(prompt_after, 5.0, "menu took %.1f s to appear" % prompt_after)
+
+        # Menu works while the lease is pending, and the lease still arrives
+        out = d.send("1", expect=r"DNS: .*\r?\n> ")
+        self.assertRegex(out, r"State: (link up, waiting for DHCP lease|no Ethernet link|connected)")
+        d.read_until(r"Network up after \d+ ms", timeout=30)
+        self.assertEqual("connected", d.wait_connected(timeout=5)["state"])
 
     @unittest.skipUnless(os.environ.get("RFUPS_STATIC_IP"), "set RFUPS_STATIC_IP to a free address to run")
     def test_static_ip_applies_after_reboot(self):

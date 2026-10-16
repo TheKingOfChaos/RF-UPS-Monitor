@@ -64,7 +64,7 @@ These run against the real firmware, so flash it first:
 
 They use the Python and `pyserial` that come with PlatformIO, so there is nothing to install.
 
-The device must be in DHCP mode when the run starts, and is left in DHCP mode. The static IP test is skipped unless you give it a free address:
+The device must be in DHCP mode when the run starts, and is left in DHCP mode. The menu is available before the network is up, so tests that need the network call `Device.wait_connected()` first. The static IP test is skipped unless you give it a free address:
 
 ```powershell
 $env:RFUPS_STATIC_IP = "10.10.6.250"   # must not be in use on the LAN
@@ -100,7 +100,8 @@ Uses `test/settings_a.json` and `test/settings_b.json`, never the real settings.
 - W5500 detected over SPI, link up, DHCP lease with a gateway, gateway answers ping
 
 ### `test/hil/test_serial_menu.py`: the flashed firmware
-- Menu text, status output with lease and MAC, ping from the PC
+- Menu text, status output with state, lease and MAC, ping from the PC
+- Boot does not wait for DHCP: the prompt appears within 5 s, before `Network up`, and the lease still arrives
 - Unknown input, backspace editing
 - Each invalid entry rejected with one clear message; cancel leaves settings unchanged
 - DHCP save → reboot → reconnect → ping

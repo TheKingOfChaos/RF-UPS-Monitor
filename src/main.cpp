@@ -9,12 +9,27 @@
 // W5500 on SPI0 (MISO 16, CS 17, SCK 18, MOSI 19) with interrupt on GPIO21
 Wiznet5500lwIP eth(W5500_CS_PIN, SPI, W5500_INT_PIN);
 
-const uint32_t DHCP_WAIT_MS = 15000;      // How long setup() waits for a lease
+// false if the W5500 did not respond at boot
+static bool ethPresent = false;
 
 /**
- * @brief Print the current interface addresses
+ * @brief Print the interface state and addresses
+ *
+ * DHCP runs in the background (lwIP keeps retrying until a server answers),
+ * so this can be called at any time, before or after a lease is obtained.
  */
 void printNetworkInfo() {
+    if (!ethPresent) {
+        Serial.println("State: W5500 not detected, check wiring");
+    } else if (!eth.isLinked()) {
+        Serial.println("State: no Ethernet link, check cable");
+    } else if (!eth.connected()) {
+        Serial.println(currentSettings.dhcpEnabled ? "State: link up, waiting for DHCP lease"
+                                                   : "State: link up, no address");
+    } else {
+        Serial.println("State: connected");
+    }
+
     uint8_t mac[6];
     eth.macAddress(mac);
     Serial.printf("MAC: %02X:%02X:%02X:%02X:%02X:%02X\n", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
@@ -26,6 +41,10 @@ void printNetworkInfo() {
 
 /**
  * @brief Reset the W5500 and bring up the interface using DHCP or static settings
+ *
+ * Does not wait for a DHCP lease: lwIP obtains it in the background and
+ * loop() reports when the address changes.
+ *
  * @return true if the W5500 was detected
  */
 bool startEthernet() {
@@ -56,21 +75,10 @@ bool startEthernet() {
         return false;
     }
     eth.setDefault();
+    ethPresent = true;
 
-    Serial.print(currentSettings.dhcpEnabled ? "Waiting for DHCP lease" : "Using static IP");
-    uint32_t start = millis();
-    while (!eth.connected() && millis() - start < DHCP_WAIT_MS) {
-        Serial.print(".");
-        delay(500);
-    }
-    Serial.println();
-
-    if (eth.connected()) {
-        printNetworkInfo();
-    } else {
-        Serial.printf("No IP address after %lu ms (link %s), still trying in background\n",
-                      DHCP_WAIT_MS, eth.isLinked() ? "up" : "down");
-    }
+    Serial.println(currentSettings.dhcpEnabled ? "Ethernet started, requesting DHCP lease in background"
+                                               : "Ethernet started with static IP");
     return true;
 }
 
@@ -157,15 +165,16 @@ void setup() {
 }
 
 void loop() {
-    // Report when the address is obtained or lost
-    static bool wasConnected = eth.connected();
-    if (eth.connected() != wasConnected) {
-        wasConnected = eth.connected();
-        if (wasConnected) {
-            Serial.println("Network up");
+    // Report when the address is obtained, changed or lost
+    static uint32_t lastIP = 0;
+    uint32_t ip = eth.connected() ? (uint32_t)eth.localIP() : 0;
+    if (ip != lastIP) {
+        lastIP = ip;
+        if (ip) {
+            Serial.printf("\nNetwork up after %lu ms\n", (unsigned long)millis());
             printNetworkInfo();
         } else {
-            Serial.println("Network down");
+            Serial.println("\nNetwork down, retrying");
         }
     }
 
@@ -175,6 +184,5 @@ void loop() {
     // Check for factory reset
     handleFactoryReset();
 
-    // Main loop functionality
-    // TODO: Implement network and SNMP handling
+    // TODO: SNMP handling
 }

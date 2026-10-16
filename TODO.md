@@ -5,10 +5,12 @@ An item is only ticked when it is implemented **and** its tests exist and pass (
 ## 1. Network
 - [x] W5500 bring-up via the core's lwIP driver (`Wiznet5500lwIP`), hardware reset on GPIO20
 - [x] DHCP client (lwIP), lease renewal — `test/embedded/test_ethernet`, HIL
-- [ ] Static IP from settings — implemented; run HIL `test_static_ip_applies_after_reboot` with a free `RFUPS_STATIC_IP` to verify
+- [x] Static IP from settings — HIL `test_static_ip_applies_after_reboot` (passed with 10.10.6.249, 2026-10-16)
 - [x] Boot without a serial terminal attached (3 s wait max)
-- [ ] Fall back to static settings if DHCP gets no lease? (decide)
-- [ ] Don't block `setup()` for up to 15 s waiting for DHCP
+- [x] No lease: keep retrying DHCP, no fallback address (decided 2026-10-16, avoids IP conflicts)
+- [x] Boot does not wait for DHCP, menu available immediately — HIL `test_menu_is_available_before_dhcp_lease`
+- [x] Status shows connection state (connected / waiting for lease / no link / no W5500) — HIL
+- [ ] Test the "no link" and "no DHCP server" states (needs a switchable port or isolated network)
 - [x] Delete the obsolete custom stack (`lib/w5500`, `lib/network`) and its tests
 
 ## 2. SNMP v1 agent

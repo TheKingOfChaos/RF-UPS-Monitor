@@ -41,7 +41,7 @@ All assignments are in [include/pins.h](include/pins.h).
 
 ## Serial menu
 
-Connect to the Pico's USB serial port (`COM16` here) at **115200 baud, 8N1**, with PuTTY or any terminal. The menu appears once the network is up (a few seconds after boot). Press `?` and Enter to show it again.
+Connect to the Pico's USB serial port (`COM16` here) at **115200 baud, 8N1**, with PuTTY or any terminal. The menu appears right after boot, without waiting for the network; a `Network up after ... ms` message follows when the address is obtained. Press `?` and Enter to show the menu again.
 
 ```
 === RF-UPS-Monitor Network Menu ===
@@ -52,7 +52,14 @@ Connect to the Pico's USB serial port (`COM16` here) at **115200 baud, 8N1**, wi
 >
 ```
 
-**1. Show network status** prints the configured mode, the stored static settings, and the live interface: MAC, IP, subnet, gateway and DNS.
+**1. Show network status** prints the configured mode, the stored static settings, and the live interface: state, MAC, IP, subnet, gateway and DNS. The state line is one of:
+
+| State | Meaning |
+|---|---|
+| `connected` | Address assigned, device reachable |
+| `link up, waiting for DHCP lease` | Cable OK, no DHCP answer yet (keeps retrying) |
+| `no Ethernet link, check cable` | No link on the W5500 port |
+| `W5500 not detected, check wiring` | The Ethernet module did not respond at boot |
 
 **2. Use DHCP** switches to DHCP after you confirm with `y`.
 
@@ -82,7 +89,7 @@ If you lock yourself out with a wrong static address, use the serial menu to swi
 
 ## Network
 
-- **DHCP** is the default. The device waits up to 15 s for a lease at boot and keeps trying in the background after that. Lease renewal is automatic.
+- **DHCP** is the default. The lease is requested in the background, so boot and the menu never wait for it. If no DHCP server answers, the device keeps retrying indefinitely and does not fall back to another address (to avoid IP conflicts). Lease renewal is automatic, and the serial log reports when the address is obtained, changes or is lost.
 - **Static IP** is set through the serial menu.
 - The MAC address is derived from the Pico's unique chip ID, so it is stable across reboots. Reserve it in your DHCP server for a fixed address.
 - Networking uses the Arduino-Pico core's lwIP driver for the W5500 (`Wiznet5500lwIP`).
@@ -187,7 +194,7 @@ snmpget  -v1 -c public <device-ip> .1.3.6.1.4.1.63050.1.0
 
 | Problem | What to check |
 |---|---|
-| No IP address | Cable and link LED; DHCP server on that network; status with menu option 1 |
+| No IP address | Menu option 1 shows the state: cable/link, or no DHCP answer (it keeps retrying) |
 | Unreachable after setting static IP | Use the serial menu to check or switch back to DHCP, or factory reset |
 | Upload fails with "Access denied" | Close PuTTY or the serial monitor |
 | Upload fails with "unable to connect" in BOOTSEL | Install the WinUSB driver with Zadig |

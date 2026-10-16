@@ -2,40 +2,55 @@
 
 // ---- RateLimiter ----
 
+/**
+ * @brief Eviction priority: free slot first, then untrusted, then trusted; least recently seen within each
+ */
+static int evictionRank(bool used, bool trusted) {
+    return !used ? 0 : (trusted ? 2 : 1);
+}
+
 RateLimiter::Bucket* RateLimiter::find(uint32_t source, uint32_t nowMs) {
     Bucket* victim = nullptr;
     for (Bucket& b : _buckets) {
         if (b.used && b.source == source) return &b;
-        if (!b.used) {
-            if (victim == nullptr || victim->used) victim = &b;
-        } else if (victim == nullptr || (victim->used && nowMs - b.lastMs > nowMs - victim->lastMs)) {
-            // Least recently seen source so far
+        if (victim == nullptr) {
             victim = &b;
+            continue;
         }
+        int rb = evictionRank(b.used, b.trusted), rv = evictionRank(victim->used, victim->trusted);
+        if (rb < rv || (rb == rv && b.used && nowMs - b.lastMs > nowMs - victim->lastMs)) victim = &b;
     }
-    // New source: start with a full bucket
+    // New source: start with a full bucket (the global bucket limits new sources as a group)
     victim->used = true;
+    victim->trusted = false;
     victim->source = source;
     victim->milliTokens = _burst * 1000;
     victim->lastMs = nowMs;
     return victim;
 }
 
+void RateLimiter::markTrusted(uint32_t source) {
+    for (Bucket& b : _buckets) {
+        if (b.used && b.source == source) b.trusted = true;
+    }
+}
+
 void RateLimiter::refill(uint32_t& milliTokens, uint32_t& lastMs, uint32_t rate, uint32_t burst, uint32_t nowMs) {
-    // An older timestamp than the last one adds nothing
-    int32_t elapsed = (int32_t)(nowMs - lastMs);
-    if (elapsed <= 0) return;
-    uint64_t tokens = (uint64_t)milliTokens + (uint64_t)elapsed * rate;
-    uint64_t full = (uint64_t)burst * 1000;
-    milliTokens = (uint32_t)(tokens > full ? full : tokens);
+    // Unsigned: millis() only moves forward, and a gap of any length (even
+    // more than 2^31 ms) must refill rather than look negative and freeze
+    uint32_t elapsed = nowMs - lastMs;
     lastMs = nowMs;
+    uint64_t full = (uint64_t)burst * 1000;
+    uint64_t tokens = (uint64_t)milliTokens + (uint64_t)elapsed * rate;
+    milliTokens = (uint32_t)(tokens > full ? full : tokens);
 }
 
 bool RateLimiter::allow(uint32_t source, uint32_t nowMs) {
     Bucket* b = find(source, nowMs);
     refill(b->milliTokens, b->lastMs, _rate, _burst, nowMs);
 
-    bool useGlobal = _global.rate > 0;
+    // Trusted sources (authenticated before) are not limited by the shared bucket
+    bool useGlobal = _global.rate > 0 && !b->trusted;
     if (useGlobal) {
         if (!_global.started) {
             _global.started = true;

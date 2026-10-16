@@ -72,11 +72,19 @@ static void test_rate_limiter_survives_millis_wraparound() {
     TEST_ASSERT_TRUE(r.allow(PC, 49));          // 100 ms later, across the wrap
 }
 
-static void test_time_going_backwards_does_not_add_tokens() {
-    RateLimiter r(10, 1);
+static void test_idle_gap_longer_than_24_days_refills_instead_of_freezing() {
+    // A gap above 2^31 ms looks negative as a signed value; the bucket must
+    // still refill, and keep working afterwards
+    RateLimiter r(10, 2, 100, 3);
     TEST_ASSERT_TRUE(r.allow(PC, 1000));
-    // A sample older than the last one (e.g. from another core) must not refill
-    TEST_ASSERT_FALSE(r.allow(PC, 999));
+    TEST_ASSERT_TRUE(r.allow(PC, 1000));
+    TEST_ASSERT_FALSE(r.allow(PC, 1000));
+    uint32_t later = 1000 + 0x80000000u + 5000;   // ~24.9 days later
+    TEST_ASSERT_TRUE(r.allow(PC, later));
+    TEST_ASSERT_TRUE(r.allow(PC, later));
+    TEST_ASSERT_FALSE(r.allow(PC, later));
+    TEST_ASSERT_TRUE(r.allow(PC, later + 100));     // normal refill continues
+    TEST_ASSERT_TRUE(r.allow(OTHER, later + 100));  // global bucket refilled too
 }
 
 // ---- global limit (cannot be reset by rotating or spoofed sources) ----
@@ -107,6 +115,50 @@ static void test_single_source_is_limited_by_its_own_bucket_under_global() {
         if (r.allow(PC, t)) allowed++;
     }
     TEST_ASSERT_UINT32_WITHIN(2, 100 + 500, allowed);
+}
+
+static void test_trusted_manager_is_not_starved_by_spoofed_flood() {
+    const uint32_t MANAGER = 0x0A0A0610;
+    RateLimiter r(50, 100, 100, 200);
+    TEST_ASSERT_TRUE(r.allow(MANAGER, 0));
+    r.markTrusted(MANAGER);
+    // Spoofed sources drain the global bucket completely
+    for (uint32_t i = 0; i < 1000; i++) r.allow(0xC0000000u + i, 1);
+    TEST_ASSERT_FALSE(r.allow(0xC0001000u, 1));
+    // The trusted manager is only limited by its own bucket: 99 tokens left
+    uint32_t allowed = 0;
+    for (int i = 0; i < 120; i++) {
+        if (r.allow(MANAGER, 2)) allowed++;
+    }
+    TEST_ASSERT_EQUAL_UINT32(99, allowed);
+}
+
+static void test_spoofed_sources_cannot_evict_trusted_ones() {
+    RateLimiter r(1, 1, 1000, 1000);
+    const uint32_t MANAGER = 0x0A0A0610;
+    TEST_ASSERT_TRUE(r.allow(MANAGER, 0));
+    r.markTrusted(MANAGER);
+    // Thousands of new sources rotate through the table
+    for (uint32_t i = 0; i < 5000; i++) r.allow(0xC0000000u + i, 10 + i / 100);
+    // Still tracked: its bucket (empty, 1/s) was not reset by an eviction
+    TEST_ASSERT_FALSE(r.allow(MANAGER, 100));
+    TEST_ASSERT_TRUE(r.allow(MANAGER, 1100));
+}
+
+static void test_untrusted_entries_are_evicted_before_trusted_ones() {
+    RateLimiter r(1, 1);
+    // Fill the table: one trusted (oldest), the rest untrusted
+    r.allow(1, 0);
+    r.markTrusted(1);
+    for (uint32_t i = 2; i <= RateLimiter::MAX_SOURCES; i++) r.allow(i, i);
+    r.allow(999, 100);                      // evicts the oldest untrusted (2), not trusted 1
+    TEST_ASSERT_FALSE(r.allow(1, 100 + 500)); // 1 is still tracked with its empty bucket
+}
+
+static void test_mark_trusted_of_unknown_source_is_ignored() {
+    RateLimiter r(10, 1, 10, 1);
+    r.markTrusted(PC);                      // never seen: nothing happens, nothing breaks
+    TEST_ASSERT_TRUE(r.allow(PC, 0));
 }
 
 static void test_global_limit_is_off_by_default() {
@@ -186,10 +238,14 @@ int main() {
     RUN_TEST(test_sources_are_limited_independently);
     RUN_TEST(test_full_table_replaces_least_recently_seen_source);
     RUN_TEST(test_rate_limiter_survives_millis_wraparound);
-    RUN_TEST(test_time_going_backwards_does_not_add_tokens);
+    RUN_TEST(test_idle_gap_longer_than_24_days_refills_instead_of_freezing);
     RUN_TEST(test_rotating_sources_cannot_exceed_global_limit);
     RUN_TEST(test_refused_source_does_not_drain_global_bucket);
     RUN_TEST(test_single_source_is_limited_by_its_own_bucket_under_global);
+    RUN_TEST(test_trusted_manager_is_not_starved_by_spoofed_flood);
+    RUN_TEST(test_spoofed_sources_cannot_evict_trusted_ones);
+    RUN_TEST(test_untrusted_entries_are_evicted_before_trusted_ones);
+    RUN_TEST(test_mark_trusted_of_unknown_source_is_ignored);
     RUN_TEST(test_global_limit_is_off_by_default);
     RUN_TEST(test_log_records_newest_first);
     RUN_TEST(test_repeats_are_folded_into_one_entry);

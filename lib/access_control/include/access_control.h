@@ -20,10 +20,17 @@
  * seen least recently is replaced and the new one starts with a full bucket.
  *
  * Because of that, rotating or spoofed source addresses (trivial with UDP)
- * would each get a fresh bucket. The optional global bucket, shared by all
- * requests, caps the total no matter how many sources appear. A request
- * refused by its source bucket does not take a global token, so one flooding
- * source cannot starve the others. Wrap-around safe for millis().
+ * would each get a fresh bucket. The optional global bucket caps the total
+ * for all untrusted sources together, no matter how many appear. A request
+ * refused by its source bucket does not take a global token.
+ *
+ * Sources that sent a request with the right community are marked trusted
+ * (markTrusted). Trusted sources skip the global bucket, so a spoofed flood
+ * cannot starve a real manager, and they are evicted from the table only
+ * when no untrusted entry is left.
+ *
+ * Time comes from millis() on a single core and only moves forward; a gap
+ * long enough to fill a bucket (including more than 2^31 ms) fills it.
  */
 class RateLimiter {
 public:
@@ -43,6 +50,14 @@ public:
      */
     bool allow(uint32_t source, uint32_t nowMs);
 
+    /**
+     * @brief Mark a tracked source as trusted (it authenticated successfully)
+     *
+     * Call after allow() for a request that had the right community. Unknown
+     * sources are ignored.
+     */
+    void markTrusted(uint32_t source);
+
     /// Requests refused since start
     uint32_t refused() const { return _refused; }
 
@@ -52,6 +67,7 @@ private:
         uint32_t milliTokens;  // tokens * 1000, avoids floating point
         uint32_t lastMs;
         bool used;
+        bool trusted;
     };
 
     struct GlobalBucket {

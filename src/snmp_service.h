@@ -21,8 +21,9 @@ constexpr uint16_t SNMP_PORT = 161;
 constexpr uint32_t SNMP_RATE_PER_SECOND = 50;
 constexpr uint32_t SNMP_RATE_BURST = 100;
 
-/// Requests per second from all sources together, so rotating or spoofed
-/// source addresses cannot bypass the per-source limit
+/// Requests per second from all untrusted sources together, so rotating or
+/// spoofed source addresses cannot bypass the per-source limit. Sources that
+/// sent the right community are trusted and not counted here.
 constexpr uint32_t SNMP_GLOBAL_RATE_PER_SECOND = 100;
 constexpr uint32_t SNMP_GLOBAL_RATE_BURST = 200;
 

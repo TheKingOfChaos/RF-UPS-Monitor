@@ -150,6 +150,11 @@ void snmpPoll() {
         size_t len = agent.handle(inBuf, (size_t)n, outBuf, sizeof(outBuf), captureState());
 
         switch (agent.lastOutcome()) {
+        case SnmpOutcome::Responded:
+        case SnmpOutcome::NoRoom:
+            // Right community: exempt from the shared bucket, so spoofed floods cannot starve it
+            limiter.markTrusted(source);
+            break;
         case SnmpOutcome::BadCommunity:
             logAccess(source, AccessEvent::BadCommunity);
             if (authTrapThrottle.allow(millis())) {
@@ -160,7 +165,10 @@ void snmpPoll() {
             break;
         case SnmpOutcome::BadVersion:  logAccess(source, AccessEvent::BadVersion); break;
         case SnmpOutcome::ParseError:  logAccess(source, AccessEvent::Malformed); break;
-        case SnmpOutcome::SetRejected: logAccess(source, AccessEvent::SetRejected); break;
+        case SnmpOutcome::SetRejected:
+            limiter.markTrusted(source);
+            logAccess(source, AccessEvent::SetRejected);
+            break;
         default: break;
         }
         if (len == 0) continue;

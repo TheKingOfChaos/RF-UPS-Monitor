@@ -47,7 +47,9 @@ To receive traps on Linux, run `snmptrapd -f -Lo` (package `snmptrapd`). On Wind
 
 Each source address may send 50 requests per second on average, with bursts of up to 100. Requests beyond that are dropped without a response and counted on the status screen ("rate limited"). Up to 8 sources are tracked at once; when more appear, the one seen least recently is forgotten. A flood from one source does not affect others.
 
-On top of that, all sources together may send at most 100 requests per second (bursts of 200). Source addresses are easy to fake with UDP, and a new address starts with a full bucket, so without this global limit an attacker rotating through many addresses could bypass the per-source limit. A request refused for its own source does not count against the global limit, so one flooding source cannot lock out the others.
+On top of that, all untrusted sources together may send at most 100 requests per second (bursts of 200). Source addresses are easy to fake with UDP, and a new address starts with a full bucket, so without this global limit an attacker rotating through many addresses could bypass the per-source limit. A request refused for its own source does not count against the global limit.
+
+A source becomes trusted once it sends a request with the right community. Trusted sources (your SNMP managers) are only limited by their own 50/s: a flood from faked addresses can use up the global limit but cannot starve them. They are also kept in the 8-entry table in preference to untrusted sources, so a flood cannot push them out and reset their state. The limiter keeps working after any idle period, including gaps of more than 24.8 days (the point where `millis()` differences turn negative when read as signed values).
 
 Rejected requests are recorded in the access log (menu option 5): wrong community, SNMPv2c/v3, malformed or oversized packets, rate-limited requests and SetRequests, with the source address. The newest 16 entries are kept; repeats from the same source are folded into one entry with a count.
 

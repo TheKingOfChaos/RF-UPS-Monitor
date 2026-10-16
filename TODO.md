@@ -108,7 +108,8 @@ An item is only ticked when it is implemented **and** its tests exist and pass (
 ## 8. Security
 - [x] Request rate limiting: 50/s per source, burst 100, 8 sources tracked (`lib/access_control`) — native + HIL
 - [x] Global limit 100/s, burst 200, so rotating/spoofed sources cannot reset the per-source buckets (found by automated security review) — native `test_rotating_sources_cannot_exceed_global_limit`
-- [x] Sources with the right community are trusted: skip the global bucket and are evicted last, so a spoofed flood cannot starve managers — native `test_trusted_manager_is_not_starved_by_spoofed_flood`, `test_spoofed_sources_cannot_evict_trusted_ones`
+- [x] Sources with the right community are trusted: own shared bucket and evicted last, so a spoofed flood cannot starve managers — native `test_trusted_manager_is_not_starved_by_spoofed_flood`, `test_spoofed_sources_cannot_evict_trusted_ones`
+- [x] Trust bounded: trusted sources share 200/s (burst 400), at most 4 trusted, trust expires after 10 min idle, cleared when the community changes — native `test_trusted_sources_share_their_own_bounded_bucket`, `test_number_of_trusted_sources_is_capped`, `test_trust_expires_after_inactivity`, `test_clear_trust_revokes_every_trusted_source`; HIL checks the clear on community change
 - [x] Rate limiter no longer freezes after an idle gap of more than 2^31 ms — native `test_idle_gap_longer_than_24_days_refills_instead_of_freezing`
 - [x] Access logging: rejected requests with source, folded repeats, menu option 5 and serial log — native + HIL
 - [x] authenticationFailure trap for wrong communities, throttled (see 2.6)

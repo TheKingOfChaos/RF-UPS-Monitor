@@ -372,6 +372,7 @@ static void handleLine(const char* line) {
     case CLI_SNMP_CONFIRM:
         if (line[0] == 'y' || line[0] == 'Y') {
             Settings saved = currentSettings;
+            bool communityChanged = strcmp(currentSettings.community, newCommunity) != 0;
             strlcpy(currentSettings.community, newCommunity, sizeof(currentSettings.community));
             strlcpy(currentSettings.sysName, newSysName, sizeof(currentSettings.sysName));
             strlcpy(currentSettings.sysContact, newSysContact, sizeof(currentSettings.sysContact));
@@ -379,6 +380,7 @@ static void handleLine(const char* line) {
             strlcpy(currentSettings.trapTarget, newTrapTarget, sizeof(currentSettings.trapTarget));
             // The SNMP agent reads these on every request, so no reboot is needed
             if (saveSettings()) {
+                if (communityChanged) snmpCommunityChanged();
                 Serial.println("SNMP settings saved and active");
             } else {
                 currentSettings = saved;

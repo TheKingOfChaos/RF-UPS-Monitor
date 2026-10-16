@@ -256,7 +256,7 @@ snmpget  -v1 -c public 10.10.6.111 1.3.6.1.4.1.63050.1.0
 
 **Traps** go to the trap destination set in menu option 4 (UDP 162): `coldStart` at boot, `mainsPowerLost` and `mainsPowerRestored` (enterprise 63050, specific-trap 1 and 2, with the three mains objects), and `authenticationFailure` for a wrong community (at most one per 10 s).
 
-**Security:** each source address may send 50 requests per second on average, with bursts of 100, and all sources together at most 100 per second (so faked source addresses cannot get around the limit); more is dropped and logged. Rejected requests are kept in the access log (menu option 5).
+**Security:** each source address may send 50 requests per second on average, with bursts of 100. Sources that have not shown the right community share a limit of 100 per second, so faked source addresses cannot get around it or starve your managers; managers that use the community share a separate limit of 200 per second. More is dropped and logged. Change the community from `public` (menu option 4): SNMPv1 has no other authentication. Rejected requests are kept in the access log (menu option 5).
 
 Object details, traps, error behaviour, limits and the MIB file: [docs/MIB.md](docs/MIB.md). The status screen (menu option 1) shows the SNMP counters, rate-limited requests and traps sent.
 

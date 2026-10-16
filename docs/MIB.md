@@ -49,7 +49,15 @@ Each source address may send 50 requests per second on average, with bursts of u
 
 On top of that, all untrusted sources together may send at most 100 requests per second (bursts of 200). Source addresses are easy to fake with UDP, and a new address starts with a full bucket, so without this global limit an attacker rotating through many addresses could bypass the per-source limit. A request refused for its own source does not count against the global limit.
 
-A source becomes trusted once it sends a request with the right community. Trusted sources (your SNMP managers) are only limited by their own 50/s: a flood from faked addresses can use up the global limit but cannot starve them. They are also kept in the 8-entry table in preference to untrusted sources, so a flood cannot push them out and reset their state. The limiter keeps working after any idle period, including gaps of more than 24.8 days (the point where `millis()` differences turn negative when read as signed values).
+A source becomes trusted once it sends a request with the right community. Trusted sources (your SNMP managers) use a separate shared limit of 200 requests per second (bursts of 400) instead of the untrusted one, so a flood from addresses that do not know the community cannot starve them. They are also kept in the 8-entry table in preference to untrusted sources, so such a flood cannot push them out and reset their state.
+
+Trust is deliberately bounded, because the community is only a weak secret: the default `public` is well known, and SNMPv1 sends it in clear text.
+- At most 4 sources are trusted at once.
+- Trust expires after 10 minutes without requests.
+- Changing the community (menu option 4) revokes all trust immediately.
+- All trusted sources together stay within 200/s, so knowing the community does not give unlimited throughput.
+
+Anyone who knows the community is treated like a manager; that is a limit of SNMPv1. **Change the community from `public`** to keep this protection meaningful. The limiter keeps working after any idle period, including gaps of more than 24.8 days (the point where `millis()` differences turn negative when read as signed values).
 
 Rejected requests are recorded in the access log (menu option 5): wrong community, SNMPv2c/v3, malformed or oversized packets, rate-limited requests and SetRequests, with the source address. The newest 16 entries are kept; repeats from the same source are folded into one entry with a count.
 

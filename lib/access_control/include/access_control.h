@@ -13,21 +13,27 @@
 #include <stdint.h>
 
 /**
- * @brief Token bucket per source address, plus one global bucket
+ * @brief Token bucket per source address, plus shared buckets for untrusted and trusted sources
  *
  * Each source may send `burst` requests at once and then `ratePerSecond` on
  * average. Sources are tracked in a small table; when it is full, the source
  * seen least recently is replaced and the new one starts with a full bucket.
  *
  * Because of that, rotating or spoofed source addresses (trivial with UDP)
- * would each get a fresh bucket. The optional global bucket caps the total
- * for all untrusted sources together, no matter how many appear. A request
- * refused by its source bucket does not take a global token.
+ * would each get a fresh bucket. The global bucket caps all untrusted
+ * sources together, no matter how many appear.
  *
- * Sources that sent a request with the right community are marked trusted
- * (markTrusted). Trusted sources skip the global bucket, so a spoofed flood
- * cannot starve a real manager, and they are evicted from the table only
- * when no untrusted entry is left.
+ * Sources that sent a request with the right community can be marked trusted
+ * (markTrusted). They draw from a separate shared trusted bucket instead, so
+ * a flood from unauthenticated addresses cannot starve a real manager. Trust
+ * is limited, because the community may be the well-known default or be
+ * sniffed (SNMPv1 sends it in clear text):
+ *   - the trusted bucket caps all trusted sources together
+ *   - at most `maxTrusted` sources are trusted at once
+ *   - trust expires after `trustTimeoutMs` without requests
+ *   - clearTrust() revokes all trust, e.g. when the community changes
+ * Trusted sources are evicted from the table only when no untrusted entry is
+ * left. A request refused by its source bucket takes no shared token.
  *
  * Time comes from millis() on a single core and only moves forward; a gap
  * long enough to fill a bucket (including more than 2^31 ms) fills it.
@@ -38,10 +44,19 @@ public:
     static constexpr uint8_t MAX_SOURCES = 8;
 
     /**
-     * @param globalRatePerSecond 0 disables the global bucket
+     * @param globalRatePerSecond Shared limit for untrusted sources; 0 disables it
      */
     RateLimiter(uint32_t ratePerSecond, uint32_t burst, uint32_t globalRatePerSecond = 0, uint32_t globalBurst = 0)
         : _rate(ratePerSecond), _burst(burst), _global{globalRatePerSecond, globalBurst, globalBurst * 1000u, 0, false} {}
+
+    /**
+     * @brief Limits for trusted sources (default: no shared cap, up to MAX_SOURCES, no expiry)
+     * @param globalRatePerSecond Shared limit for all trusted sources; 0 disables it
+     * @param maxTrusted          Most sources trusted at once
+     * @param trustTimeoutMs      Trust is dropped after this long without requests; 0 = never
+     */
+    void configureTrusted(uint32_t globalRatePerSecond, uint32_t globalBurst, uint8_t maxTrusted,
+                          uint32_t trustTimeoutMs = 0);
 
     /**
      * @brief Take one token for this source
@@ -54,9 +69,15 @@ public:
      * @brief Mark a tracked source as trusted (it authenticated successfully)
      *
      * Call after allow() for a request that had the right community. Unknown
-     * sources are ignored.
+     * sources are ignored, and nothing happens when maxTrusted is reached.
      */
     void markTrusted(uint32_t source);
+
+    /// Revoke trust of every source (call when the community changes)
+    void clearTrust();
+
+    /// Sources currently trusted
+    uint8_t trustedCount() const;
 
     /// Requests refused since start
     uint32_t refused() const { return _refused; }
@@ -70,7 +91,7 @@ private:
         bool trusted;
     };
 
-    struct GlobalBucket {
+    struct SharedBucket {
         uint32_t rate;
         uint32_t burst;
         uint32_t milliTokens;
@@ -80,10 +101,14 @@ private:
 
     Bucket* find(uint32_t source, uint32_t nowMs);
     static void refill(uint32_t& milliTokens, uint32_t& lastMs, uint32_t rate, uint32_t burst, uint32_t nowMs);
+    static void refillShared(SharedBucket& b, uint32_t nowMs);
 
     uint32_t _rate;
     uint32_t _burst;
-    GlobalBucket _global;
+    SharedBucket _global;
+    SharedBucket _trustedGlobal = {0, 0, 0, 0, false};
+    uint8_t _maxTrusted = MAX_SOURCES;
+    uint32_t _trustTimeoutMs = 0;
     uint32_t _refused = 0;
     Bucket _buckets[MAX_SOURCES] = {};
 };

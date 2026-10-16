@@ -161,6 +161,88 @@ static void test_mark_trusted_of_unknown_source_is_ignored() {
     TEST_ASSERT_TRUE(r.allow(PC, 0));
 }
 
+static void test_trusted_sources_share_their_own_bounded_bucket() {
+    // Knowing the community (often the default "public") must not give unlimited throughput.
+    // Per-source limits set high so the shared trusted bucket is the one that binds.
+    RateLimiter r(1000, 1000, 100, 200);
+    r.configureTrusted(200, 400, 4);
+    for (uint32_t s = 1; s <= 4; s++) {
+        r.allow(s, 0);
+        r.markTrusted(s);
+    }
+    uint32_t allowed = 0;
+    for (uint32_t t = 1; t <= 1000; t++) {
+        for (uint32_t s = 1; s <= 4; s++) {
+            if (r.allow(s, t)) allowed++;
+        }
+    }
+    // Trusted burst 400 + 1 s * 200/s, not 4 * 1000
+    TEST_ASSERT_UINT32_WITHIN(5, 400 + 200, allowed);
+}
+
+static void test_number_of_trusted_sources_is_capped() {
+    RateLimiter r(1, 1, 1, 1);
+    r.configureTrusted(1000, 1000, 2);
+    for (uint32_t s = 1; s <= 3; s++) {
+        r.allow(s, 0);
+        r.markTrusted(s);
+    }
+    TEST_ASSERT_EQUAL_UINT8(2, r.trustedCount());
+    // Another untrusted source takes the one untrusted shared token...
+    TEST_ASSERT_TRUE(r.allow(4, 2000));
+    // ...so source 3, which stayed untrusted, is refused, while trusted source 1 is not
+    TEST_ASSERT_FALSE(r.allow(3, 2000));
+    TEST_ASSERT_TRUE(r.allow(1, 2000));
+}
+
+static void test_evicted_trusted_source_frees_its_slot() {
+    RateLimiter r(1, 1);
+    r.configureTrusted(1000, 1000, RateLimiter::MAX_SOURCES);
+    for (uint32_t i = 1; i <= RateLimiter::MAX_SOURCES; i++) {
+        r.allow(i, i);
+        r.markTrusted(i);
+    }
+    TEST_ASSERT_EQUAL_UINT8(RateLimiter::MAX_SOURCES, r.trustedCount());
+    // Table full of trusted sources: a new one evicts the least recently seen (1)
+    r.allow(999, 100);
+    TEST_ASSERT_EQUAL_UINT8(RateLimiter::MAX_SOURCES - 1, r.trustedCount());
+    r.markTrusted(999);
+    TEST_ASSERT_EQUAL_UINT8(RateLimiter::MAX_SOURCES, r.trustedCount());
+}
+
+static void test_clear_trust_revokes_every_trusted_source() {
+    // Used when the community changes: trust earned with the old one must not carry over
+    RateLimiter r(1000, 1000, 1, 1);
+    r.configureTrusted(1000, 1000, 4);
+    r.allow(PC, 0);
+    r.markTrusted(PC);
+    TEST_ASSERT_EQUAL_UINT8(1, r.trustedCount());
+    r.clearTrust();
+    TEST_ASSERT_EQUAL_UINT8(0, r.trustedCount());
+    // Back on the untrusted global bucket (1 token, already used by the first request)
+    TEST_ASSERT_FALSE(r.allow(PC, 0));
+}
+
+static void test_trust_expires_after_inactivity() {
+    RateLimiter r(1000, 1000, 1, 1);
+    r.configureTrusted(1000, 1000, 4, 60000);
+    r.allow(PC, 0);
+    r.markTrusted(PC);
+    TEST_ASSERT_TRUE(r.allow(PC, 59000));       // still active, still trusted
+    TEST_ASSERT_EQUAL_UINT8(1, r.trustedCount());
+    TEST_ASSERT_TRUE(r.allow(PC, 59000 + 60001)); // idle for longer than the timeout: trust dropped,
+    TEST_ASSERT_EQUAL_UINT8(0, r.trustedCount()); // this request used the refilled untrusted bucket
+    TEST_ASSERT_FALSE(r.allow(PC, 59000 + 60001));
+}
+
+static void test_default_keeps_trusted_sources_out_of_global_limit() {
+    // Without configureTrusted(): trusted sources have no shared cap (backward compatible)
+    RateLimiter r(1000, 1000, 1, 1);
+    r.allow(PC, 0);
+    r.markTrusted(PC);
+    for (int i = 0; i < 500; i++) TEST_ASSERT_TRUE(r.allow(PC, 1));
+}
+
 static void test_global_limit_is_off_by_default() {
     RateLimiter r(10, 1);
     for (uint32_t i = 0; i < 1000; i++) TEST_ASSERT_TRUE(r.allow(i, 0));   // all new sources
@@ -246,6 +328,12 @@ int main() {
     RUN_TEST(test_spoofed_sources_cannot_evict_trusted_ones);
     RUN_TEST(test_untrusted_entries_are_evicted_before_trusted_ones);
     RUN_TEST(test_mark_trusted_of_unknown_source_is_ignored);
+    RUN_TEST(test_trusted_sources_share_their_own_bounded_bucket);
+    RUN_TEST(test_number_of_trusted_sources_is_capped);
+    RUN_TEST(test_evicted_trusted_source_frees_its_slot);
+    RUN_TEST(test_clear_trust_revokes_every_trusted_source);
+    RUN_TEST(test_trust_expires_after_inactivity);
+    RUN_TEST(test_default_keeps_trusted_sources_out_of_global_limit);
     RUN_TEST(test_global_limit_is_off_by_default);
     RUN_TEST(test_log_records_newest_first);
     RUN_TEST(test_repeats_are_folded_into_one_entry);

@@ -102,6 +102,8 @@ static void sendTrap(size_t len, const char* what) {
 }
 
 bool snmpBegin() {
+    limiter.configureTrusted(SNMP_TRUSTED_RATE_PER_SECOND, SNMP_TRUSTED_RATE_BURST, SNMP_MAX_TRUSTED_SOURCES,
+                             SNMP_TRUST_TIMEOUT_MS);
     started = udp.begin(SNMP_PORT) == 1;
     Serial.printf(started ? "SNMP agent listening on UDP %u\n" : "SNMP: cannot bind UDP %u\n", SNMP_PORT);
     return started;
@@ -113,6 +115,12 @@ void snmpNetworkUp(const IPAddress& localIP) {
     coldStartSent = true;
     sendTrap(snmpBuildColdStartTrap(currentSettings.community, agentAddr, uptimeTicks(), outBuf, sizeof(outBuf)),
              "coldStart");
+}
+
+void snmpCommunityChanged() {
+    // Trust was earned with the old community and must not carry over
+    limiter.clearTrust();
+    Serial.println("SNMP: community changed, rate-limit trust cleared");
 }
 
 void snmpNotifyMainsChange() {

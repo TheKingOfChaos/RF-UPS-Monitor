@@ -164,6 +164,8 @@ class SnmpAgentTest(unittest.TestCase):
         try:
             out = d.set_snmp("hil-community", "hil-name", "hil@example.com", 'HIL bench "A"')
             self.assertIn("SNMP settings saved and active", out)
+            # Rate-limit trust earned with the old community is revoked
+            self.assertIn("community changed, rate-limit trust cleared", out)
 
             rc, out = self.snmp("snmpget", "1.3.6.1.2.1.1.5.0", "1.3.6.1.2.1.1.4.0", "1.3.6.1.2.1.1.6.0",
                                 community="hil-community")

@@ -29,10 +29,29 @@ RateLimiter::Bucket* RateLimiter::find(uint32_t source, uint32_t nowMs) {
     return victim;
 }
 
+void RateLimiter::configureTrusted(uint32_t globalRatePerSecond, uint32_t globalBurst, uint8_t maxTrusted,
+                                   uint32_t trustTimeoutMs) {
+    _trustedGlobal = {globalRatePerSecond, globalBurst, globalBurst * 1000u, 0, false};
+    _maxTrusted = maxTrusted > MAX_SOURCES ? MAX_SOURCES : maxTrusted;
+    _trustTimeoutMs = trustTimeoutMs;
+}
+
 void RateLimiter::markTrusted(uint32_t source) {
     for (Bucket& b : _buckets) {
-        if (b.used && b.source == source) b.trusted = true;
+        if (b.used && b.source == source && !b.trusted && trustedCount() < _maxTrusted) b.trusted = true;
     }
+}
+
+void RateLimiter::clearTrust() {
+    for (Bucket& b : _buckets) b.trusted = false;
+}
+
+uint8_t RateLimiter::trustedCount() const {
+    uint8_t n = 0;
+    for (const Bucket& b : _buckets) {
+        if (b.used && b.trusted) n++;
+    }
+    return n;
 }
 
 void RateLimiter::refill(uint32_t& milliTokens, uint32_t& lastMs, uint32_t rate, uint32_t burst, uint32_t nowMs) {
@@ -45,24 +64,31 @@ void RateLimiter::refill(uint32_t& milliTokens, uint32_t& lastMs, uint32_t rate,
     milliTokens = (uint32_t)(tokens > full ? full : tokens);
 }
 
+void RateLimiter::refillShared(SharedBucket& b, uint32_t nowMs) {
+    if (!b.started) {
+        b.started = true;
+        b.lastMs = nowMs;
+    }
+    refill(b.milliTokens, b.lastMs, b.rate, b.burst, nowMs);
+}
+
 bool RateLimiter::allow(uint32_t source, uint32_t nowMs) {
     Bucket* b = find(source, nowMs);
+
+    // Trust ends after a period without requests
+    if (b->trusted && _trustTimeoutMs > 0 && nowMs - b->lastMs > _trustTimeoutMs) b->trusted = false;
+
     refill(b->milliTokens, b->lastMs, _rate, _burst, nowMs);
 
-    // Trusted sources (authenticated before) are not limited by the shared bucket
-    bool useGlobal = _global.rate > 0 && !b->trusted;
-    if (useGlobal) {
-        if (!_global.started) {
-            _global.started = true;
-            _global.lastMs = nowMs;
-        }
-        refill(_global.milliTokens, _global.lastMs, _global.rate, _global.burst, nowMs);
-    }
+    // Trusted and untrusted sources each share their own bucket
+    SharedBucket& shared = b->trusted ? _trustedGlobal : _global;
+    bool useShared = shared.rate > 0;
+    if (useShared) refillShared(shared, nowMs);
 
-    // Take tokens only if both buckets have one, so a refused source costs the global bucket nothing
-    if (b->milliTokens >= 1000 && (!useGlobal || _global.milliTokens >= 1000)) {
+    // Take tokens only if both buckets have one, so a refused source costs the shared bucket nothing
+    if (b->milliTokens >= 1000 && (!useShared || shared.milliTokens >= 1000)) {
         b->milliTokens -= 1000;
-        if (useGlobal) _global.milliTokens -= 1000;
+        if (useShared) shared.milliTokens -= 1000;
         return true;
     }
     _refused++;

@@ -27,6 +27,13 @@ constexpr uint32_t SNMP_RATE_BURST = 100;
 constexpr uint32_t SNMP_GLOBAL_RATE_PER_SECOND = 100;
 constexpr uint32_t SNMP_GLOBAL_RATE_BURST = 200;
 
+/// Trusted sources share their own, larger bucket. Trust is bounded because
+/// the community may be the well-known default or sniffed (SNMPv1 is clear text).
+constexpr uint32_t SNMP_TRUSTED_RATE_PER_SECOND = 200;
+constexpr uint32_t SNMP_TRUSTED_RATE_BURST = 400;
+constexpr uint8_t SNMP_MAX_TRUSTED_SOURCES = 4;
+constexpr uint32_t SNMP_TRUST_TIMEOUT_MS = 10UL * 60 * 1000;
+
 /// At most one authenticationFailure trap per interval
 constexpr uint32_t AUTH_TRAP_INTERVAL_MS = 10000;
 
@@ -55,6 +62,11 @@ void snmpNetworkUp(const IPAddress& localIP);
  * @brief Handle pending requests. Call from loop() on core 0.
  */
 void snmpPoll();
+
+/**
+ * @brief Revoke all rate-limit trust; call when the community has changed
+ */
+void snmpCommunityChanged();
 
 /**
  * @brief Send mainsPowerLost or mainsPowerRestored for the current mains state

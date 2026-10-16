@@ -1,0 +1,20 @@
+{
+    "name": "settings_codec",
+    "version": "1.0.0",
+    "description": "Settings JSON encoding/validation and A/B copy selection (pure C++, host testable)",
+    "keywords": "settings, json",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3.git"
+    },
+    "authors": [
+        {
+            "name": "kenneth Foli Jørgensen",
+            "email": "kenneth@tkoc.dk",
+            "maintainer": true
+        }
+    ],
+    "license": "MIT",
+    "frameworks": "*",
+    "platforms": "*"
+}

@@ -1,269 +1,132 @@
 #include "settings.h"
 
-// Settings file paths with wear leveling
-const char* SETTINGS_FILE_A = "data/settings_a.json";
-const char* SETTINGS_FILE_B = "data/settings_b.json";
-const char* ACTIVE_FILE_FLAG = "data/active_file";
-const uint32_t SETTINGS_VERSION = 1;      // Increment when settings structure changes
+#include <LittleFS.h>
 
-// Default settings
-const char* DEFAULT_COMMUNITY = "public";
-const bool DEFAULT_DHCP_ENABLED = true;
-const char* DEFAULT_STATIC_IP = "192.168.1.100";
-const char* DEFAULT_SUBNET_MASK = "255.255.255.0";
-const char* DEFAULT_GATEWAY = "192.168.1.1";
+const char* const SETTINGS_FILE_A = "data/settings_a.json";
+const char* const SETTINGS_FILE_B = "data/settings_b.json";
 
-// Global settings instance
+// Pointer file used by v1 storage, removed on first load
+static const char* const LEGACY_ACTIVE_FILE = "data/active_file";
+
 Settings currentSettings;
 bool settingsLoaded = false;
 
-// Initialize settings with defaults
-void loadDefaultSettings() {
-    // Initialize all memory to 0
-    memset(&currentSettings, 0, sizeof(Settings));
-    
-    // Copy strings with null termination
-    strncpy(currentSettings.community, DEFAULT_COMMUNITY, sizeof(currentSettings.community) - 1);
-    currentSettings.community[sizeof(currentSettings.community) - 1] = '\0';
-    
-    currentSettings.dhcpEnabled = DEFAULT_DHCP_ENABLED;
-    
-    strncpy(currentSettings.staticIP, DEFAULT_STATIC_IP, sizeof(currentSettings.staticIP) - 1);
-    currentSettings.staticIP[sizeof(currentSettings.staticIP) - 1] = '\0';
-    
-    strncpy(currentSettings.subnetMask, DEFAULT_SUBNET_MASK, sizeof(currentSettings.subnetMask) - 1);
-    currentSettings.subnetMask[sizeof(currentSettings.subnetMask) - 1] = '\0';
-    
-    strncpy(currentSettings.gateway, DEFAULT_GATEWAY, sizeof(currentSettings.gateway) - 1);
-    currentSettings.gateway[sizeof(currentSettings.gateway) - 1] = '\0';
-    currentSettings.version = SETTINGS_VERSION;
+static SettingsStore defaultStore(SETTINGS_FILE_A, SETTINGS_FILE_B);
+
+/**
+ * @brief Name of a slot for log output
+ */
+static const char* slotName(SettingsSlot slot) {
+    switch (slot) {
+    case SettingsSlot::A: return "A";
+    case SettingsSlot::B: return "B";
+    default:              return "none";
+    }
 }
 
-// Save settings to flash with wear leveling
-bool saveSettings() {
-    StaticJsonDocument<512> doc;
-    
-    // Serialize settings to JSON
-    doc["community"] = currentSettings.community;
-    doc["dhcpEnabled"] = currentSettings.dhcpEnabled;
-    doc["staticIP"] = currentSettings.staticIP;
-    doc["subnetMask"] = currentSettings.subnetMask;
-    doc["gateway"] = currentSettings.gateway;
-    doc["version"] = currentSettings.version;
+bool SettingsStore::readSlot(const char* path, Settings& out) {
+    File f = LittleFS.open(path, "r");
+    if (!f) return false;
 
-    // Determine which file to write to
-    File activeFlag = LittleFS.open(ACTIVE_FILE_FLAG, "r");
-    String currentFile = activeFlag.readString();
-    activeFlag.close();
+    char buf[SETTINGS_JSON_MAX];
+    size_t len = f.readBytes(buf, sizeof(buf) - 1);
+    bool tooBig = f.available() > 0;
+    f.close();
+    buf[len] = '\0';
 
-    const char* newFile = (currentFile == SETTINGS_FILE_A) ? SETTINGS_FILE_B : SETTINGS_FILE_A;
-    
-    // Write settings to the new file
-    File settingsFile = LittleFS.open(newFile, "w");
-    if (!settingsFile) {
-        Serial.print("Failed to open file for writing: ");
-        Serial.println(newFile);
+    if (tooBig) {
+        Serial.printf("Settings %s: file too large, ignored\n", path);
         return false;
     }
 
-    // Debug output
-    Serial.println("Saving settings:");
-    serializeJsonPretty(doc, Serial);
-    Serial.println();
-
-    // Serialize JSON to file
-    if (serializeJson(doc, settingsFile) == 0) {
-        Serial.println("Failed to write settings");
-        settingsFile.close();
+    SettingsParseError err = settingsFromJson(buf, out);
+    if (err != SettingsParseError::None) {
+        Serial.printf("Settings %s: %s, ignored\n", path, settingsParseErrorMessage(err));
         return false;
     }
-    settingsFile.flush();
-    settingsFile.close();
-
-    // Verify written content
-    settingsFile = LittleFS.open(newFile, "r");
-    if (settingsFile) {
-        String content = settingsFile.readString();
-        Serial.println("Verifying written content:");
-        Serial.print("Raw content: '");
-        Serial.print(content);
-        Serial.println("'");
-        
-        // Try to parse the written content
-        StaticJsonDocument<512> verifyDoc;
-        DeserializationError verifyError = deserializeJson(verifyDoc, content);
-        if (!verifyError) {
-            Serial.println("Parsed content:");
-            serializeJsonPretty(verifyDoc, Serial);
-            Serial.println();
-        } else {
-            Serial.print("Failed to parse written content: ");
-            Serial.println(verifyError.c_str());
-        }
-        settingsFile.close();
-    }
-
-    // Update active file flag
-    activeFlag = LittleFS.open(ACTIVE_FILE_FLAG, "w");
-    activeFlag.print(newFile);
-    activeFlag.flush();
-    activeFlag.close();
-
-    // Verify active file flag
-    activeFlag = LittleFS.open(ACTIVE_FILE_FLAG, "r");
-    if (activeFlag) {
-        String verifyFlag = activeFlag.readString();
-        Serial.print("Verifying active file flag. Expected: '");
-        Serial.print(newFile);
-        Serial.print("', Actual: '");
-        Serial.print(verifyFlag);
-        Serial.println("'");
-        activeFlag.close();
-    }
-
     return true;
 }
 
-// Load settings from flash with validation
+SettingsSlot SettingsStore::load(Settings& out) {
+    Settings a, b;
+    bool aValid = readSlot(_pathA, a);
+    bool bValid = readSlot(_pathB, b);
+
+    _active = chooseActiveSlot(aValid, a.sequence, bValid, b.sequence);
+    switch (_active) {
+    case SettingsSlot::A: out = a; break;
+    case SettingsSlot::B: out = b; break;
+    default:              settingsDefaults(out); break;
+    }
+    _activeSequence = out.sequence;
+    return _active;
+}
+
+bool SettingsStore::save(Settings& s) {
+    SettingsSlot target = nextWriteSlot(_active);
+    const char* path = pathFor(target);
+
+    Settings toWrite = s;
+    toWrite.version = SETTINGS_VERSION;
+    toWrite.sequence = (_active == SettingsSlot::None) ? 1 : _activeSequence + 1;
+
+    char json[SETTINGS_JSON_MAX];
+    size_t len = settingsToJson(toWrite, json, sizeof(json));
+    if (len == 0) {
+        Serial.println("Settings: serialization failed");
+        return false;
+    }
+
+    File f = LittleFS.open(path, "w");
+    if (!f) {
+        Serial.printf("Settings %s: cannot open for writing\n", path);
+        return false;
+    }
+    size_t written = f.write((const uint8_t*)json, len);
+    f.close();
+    if (written != len) {
+        Serial.printf("Settings %s: short write (%u of %u bytes)\n", path, (unsigned)written, (unsigned)len);
+        return false;
+    }
+
+    // Only switch to the new copy once it reads back identical
+    Settings verify;
+    if (!readSlot(path, verify) || !settingsEqual(verify, toWrite)) {
+        Serial.printf("Settings %s: verification failed, keeping previous copy\n", path);
+        return false;
+    }
+
+    _active = target;
+    _activeSequence = toWrite.sequence;
+    s = toWrite;
+    return true;
+}
+
 bool loadSettings() {
-    // Try to read active file flag
-    File activeFlag = LittleFS.open(ACTIVE_FILE_FLAG, "r");
-    String activeFile;
-    
-    if (!activeFlag) {
-        // First time setup
-        activeFile = SETTINGS_FILE_A;
-        activeFlag = LittleFS.open(ACTIVE_FILE_FLAG, "w");
-        activeFlag.print(activeFile);
-        activeFlag.flush();
-        activeFlag.close();
-        loadDefaultSettings();
-        return saveSettings();
-    }
-    
-    activeFile = activeFlag.readString();
-    activeFlag.close();
+    SettingsSlot slot = defaultStore.load(currentSettings);
 
-    Serial.print("Active file is: ");
-    Serial.println(activeFile);
-
-    // Read settings file
-    File settingsFile = LittleFS.open(activeFile.c_str(), "r");
-    if (!settingsFile) {
-        Serial.print("Failed to open active file: ");
-        Serial.println(activeFile);
-        
-        // Try backup file
-        const char* backupFile = (activeFile == SETTINGS_FILE_A) ? SETTINGS_FILE_B : SETTINGS_FILE_A;
-        Serial.print("Trying backup file: ");
-        Serial.println(backupFile);
-        
-        settingsFile = LittleFS.open(backupFile, "r");
-        if (!settingsFile) {
-            Serial.println("Failed to open backup file, loading defaults");
-            loadDefaultSettings();
-            return saveSettings();
-        }
+    if (LittleFS.exists(LEGACY_ACTIVE_FILE)) {
+        LittleFS.remove(LEGACY_ACTIVE_FILE);
     }
 
-    // Read file contents
-    String fileContents = settingsFile.readString();
-    Serial.println("Raw file contents:");
-    Serial.println(fileContents);
-    
-    // Parse JSON
-    StaticJsonDocument<512> doc;
-    DeserializationError error = deserializeJson(doc, fileContents);
-    
-    // Debug output
-    Serial.println("Loading settings:");
-    serializeJsonPretty(doc, Serial);
-    Serial.println();
-    
-    settingsFile.close();
-
-    if (error) {
-        Serial.print("JSON parse error: ");
-        Serial.println(error.c_str());
+    if (slot == SettingsSlot::None) {
+        Serial.println("Settings: no valid copy, saving factory defaults");
+        settingsLoaded = saveSettings();
+        return settingsLoaded;
     }
 
-    if (error || doc["version"] != SETTINGS_VERSION) {
-        loadDefaultSettings();
-        return saveSettings();
-    }
-
-    // Initialize memory before loading settings
-    memset(&currentSettings, 0, sizeof(Settings));
-    
-    // Get values from JSON
-    const char* community = doc["community"] | DEFAULT_COMMUNITY;
-    bool dhcpEnabled = doc["dhcpEnabled"] | DEFAULT_DHCP_ENABLED;
-    const char* staticIP = doc["staticIP"] | DEFAULT_STATIC_IP;
-    const char* subnetMask = doc["subnetMask"] | DEFAULT_SUBNET_MASK;
-    const char* gateway = doc["gateway"] | DEFAULT_GATEWAY;
-    
-    Serial.println("JSON values:");
-    Serial.print("community: '"); Serial.print(community); Serial.println("'");
-    Serial.print("dhcpEnabled: "); Serial.println(dhcpEnabled);
-    Serial.print("staticIP: "); Serial.println(staticIP);
-    Serial.print("subnetMask: "); Serial.println(subnetMask);
-    Serial.print("gateway: "); Serial.println(gateway);
-    
-    // Copy values to settings
-    strlcpy(currentSettings.community, community, sizeof(currentSettings.community));
-    currentSettings.community[sizeof(currentSettings.community) - 1] = '\0';
-    
-    currentSettings.dhcpEnabled = dhcpEnabled;
-    
-    strlcpy(currentSettings.staticIP, staticIP, sizeof(currentSettings.staticIP));
-    currentSettings.staticIP[sizeof(currentSettings.staticIP) - 1] = '\0';
-    
-    strlcpy(currentSettings.subnetMask, subnetMask, sizeof(currentSettings.subnetMask));
-    currentSettings.subnetMask[sizeof(currentSettings.subnetMask) - 1] = '\0';
-    
-    strlcpy(currentSettings.gateway, gateway, sizeof(currentSettings.gateway));
-    currentSettings.gateway[sizeof(currentSettings.gateway) - 1] = '\0';
-    currentSettings.version = SETTINGS_VERSION;
-    
-    Serial.println("Loaded settings:");
-    Serial.print("community: '"); Serial.print(currentSettings.community); Serial.println("'");
-    Serial.print("dhcpEnabled: "); Serial.println(currentSettings.dhcpEnabled);
-    Serial.print("staticIP: "); Serial.println(currentSettings.staticIP);
-    Serial.print("subnetMask: "); Serial.println(currentSettings.subnetMask);
-    Serial.print("gateway: "); Serial.println(currentSettings.gateway);
-
+    Serial.printf("Settings: loaded slot %s (sequence %lu), %s\n", slotName(slot),
+                  (unsigned long)currentSettings.sequence,
+                  currentSettings.dhcpEnabled ? "DHCP" : "static IP");
+    settingsLoaded = true;
     return true;
 }
 
-// Check if factory reset is requested (10-second button hold)
-bool isFactoryResetRequested() {
-    if (digitalRead(FACTORY_RESET_PIN) == LOW) {
-        unsigned long startTime = millis();
-        while (digitalRead(FACTORY_RESET_PIN) == LOW) {
-            if (millis() - startTime >= 10000) {
-                return true;
-            }
-            delay(100);
-        }
+bool saveSettings() {
+    bool ok = defaultStore.save(currentSettings);
+    if (ok) {
+        Serial.printf("Settings: saved slot %s (sequence %lu)\n", slotName(defaultStore.activeSlot()),
+                      (unsigned long)currentSettings.sequence);
     }
-    return false;
-}
-
-// Visual feedback during factory reset
-void indicateFactoryReset() {
-    for (int i = 0; i < 5; i++) {
-        digitalWrite(LED_PIN, HIGH);
-        delay(100);
-        digitalWrite(LED_PIN, LOW);
-        delay(100);
-    }
-}
-
-// Handle factory reset
-void handleFactoryReset() {
-    if (isFactoryResetRequested()) {
-        indicateFactoryReset();
-        loadDefaultSettings();
-        saveSettings();
-    }
+    return ok;
 }

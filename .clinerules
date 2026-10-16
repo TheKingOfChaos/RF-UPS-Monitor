@@ -37,8 +37,9 @@
    - Must use W5500 Ethernet module
    - DHCP must be default network configuration
    - Must support static IP configuration via CLI
-   - No external network stack libraries allowed
-   - Must implement custom UDP/IP stack
+   - Networking uses the Arduino-Pico core's lwIP W5500 driver (`W5500lwIP.h`,
+     `Wiznet5500lwIP`) for DHCP, IP and UDP. External networking libraries are
+     allowed when they help; the SNMP protocol itself stays our own code
 
 4. Factory Reset
    - Must use GPIO22 for factory reset button
@@ -70,16 +71,23 @@
 ## Code Organization
 
 1. Project Structure
-   - Separate network stack implementation
-   - Isolated SNMP protocol handling
-   - Modular CLI implementation
-   - Clear separation of hardware abstraction layer
+   - Logic that does not need hardware goes in a pure C++ library under `lib/`
+     with no `Arduino.h`, `LittleFS.h` or SPI includes (e.g. `lib/netconfig`,
+     `lib/settings_codec`), so it can be unit tested on the PC
+   - Hardware and file I/O stay in thin layers (`lib/settings`, `src/`) that
+     call the pure libraries
+   - Isolated SNMP protocol handling (BER codec and MIB as pure libraries)
+   - Modular CLI implementation (`src/cli.cpp`)
+   - GPIO assignments live only in `include/pins.h`
 
 2. Configuration Storage
-   - Must use internal flash for settings
-   - Must implement wear leveling
-   - Must validate stored data integrity
-   - Must handle corruption recovery
+   - Must use internal flash (LittleFS) for settings
+   - Two copies (slot A/B) with a save sequence number; saves write the
+     inactive slot, loads pick the newest copy that passes validation
+   - Must validate stored data integrity, reject rather than truncate
+   - Must recover from a corrupt or half-written copy by using the other one
+   - Changes to the JSON layout must keep older files loadable, or bump
+     SETTINGS_VERSION and add a migration with a test
 
 ## Documentation Requirements
 
@@ -97,6 +105,36 @@
    - Troubleshooting guide must be included
 
 ## Testing Requirements
+
+See docs/TESTING.md for how to run each layer.
+
+0. Test Rules (apply to every change)
+   - Every change to logic comes with tests in the same commit. A bug fix
+     starts with a test that fails without the fix
+   - Pick the lowest layer that can test the behaviour:
+     * `test/native/`   host unit tests (`pio test -e native`), for anything
+       in a pure library. This is where most tests belong
+     * `test/embedded/` on-device Unity tests (`pio test -e pico`), only for
+       behaviour that needs the Pico: LittleFS, W5500, GPIO, timing
+     * `test/hil/`      Python tests over the serial port, for end-to-end
+       behaviour of the flashed firmware (menu, reboot, ping, later SNMP)
+   - All native and embedded tests must pass before a commit. Run HIL tests
+     when firmware behaviour visible over serial or network changes
+   - A test must be able to fail: assert on the code under test, never on
+     values the test itself just set. When adding a test, check it fails
+     against a broken implementation
+   - Tests are independent and repeatable: no order dependence, they clean
+     up what they create, and they never touch the device's real settings
+     (use SettingsStore with paths under `test/`)
+   - Name tests `test_<what>_<expected behaviour>`, e.g.
+     `test_parse_rejects_out_of_range_octet`. One behaviour per test
+   - Cover edge cases explicitly: empty/null input, maximum lengths,
+     boundaries (0, 255, /31, /32), wrap-around, malformed data
+   - Native code builds with `-Wall -Wextra -Werror`; do not silence warnings
+   - Tests that change device state (reboot, static IP) restore it, and
+     anything that needs a specific network resource is opt-in via an
+     environment variable rather than hard-coded
+   - Do not mark a TODO item done until its tests exist and pass
 
 1. Hardware Testing
    - Power monitoring must be verified with actual mains power
@@ -161,6 +199,8 @@
      * Framework: arduino
      * Core: earlephilhower
      * Filesystem: littlefs with 0.25MB size
+   - Environments: `pico` (firmware and on-device tests) and `native`
+     (host unit tests, needs MinGW-w64 g++ on PATH)
    - Must support offline builds
    - Must minimize external dependencies
    - Must maintain build documentation

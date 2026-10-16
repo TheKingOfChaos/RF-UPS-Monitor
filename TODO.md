@@ -1,215 +1,85 @@
-# SNMP Agent Implementation TODO List
+# RF-UPS-Monitor TODO
 
-## 1. Core Network Stack Implementation
-- [x] Implement W5500 driver
-  - [x] Set up SPI communication (GPIO16-21)
-  - [x] Implement basic read/write operations
-  - [x] Add interrupt handling for GPIO21
-- [x] Create custom UDP/IP stack
-  - [x] Implement UDP packet handling
-  - [x] Add IP addressing functionality
-  - [x] Implement DHCP client (basic simulation)
-  - [x] Add static IP configuration support
-  
-## 2. SNMP Protocol Implementation
-### 2.1 Core SNMP Engine
-- [ ] Implement ASN.1/BER encoding
-  - [ ] Create BER type definitions
-  - [ ] Implement encoding functions
-  - [ ] Implement decoding functions
-  - [ ] Add length encoding/decoding
-  - [ ] Add OID encoding/decoding
-  - [ ] Handle integer encoding/decoding
-  - [ ] Handle string encoding/decoding
-  - [ ] Handle NULL encoding/decoding
-  - [ ] Handle sequence encoding/decoding
-  - [ ] Add validation checks
+An item is only ticked when it is implemented **and** its tests exist and pass (see `.clinerules`, Test Rules).
 
-### 2.2 Message Processing
-- [ ] Implement SNMP message structure
-  - [ ] Create message parser
-  - [ ] Add version handling (v1)
-  - [ ] Implement community string validation
-  - [ ] Add PDU type detection
-  - [ ] Create message builder
-  - [ ] Add error handling
-  - [ ] Implement message validation
+## 1. Network
+- [x] W5500 bring-up via the core's lwIP driver (`Wiznet5500lwIP`), hardware reset on GPIO20
+- [x] DHCP client (lwIP), lease renewal — `test/embedded/test_ethernet`, HIL
+- [ ] Static IP from settings — implemented; run HIL `test_static_ip_applies_after_reboot` with a free `RFUPS_STATIC_IP` to verify
+- [x] Boot without a serial terminal attached (3 s wait max)
+- [ ] Fall back to static settings if DHCP gets no lease? (decide)
+- [ ] Don't block `setup()` for up to 15 s waiting for DHCP
+- [ ] Delete the obsolete `lib/w5500` and `lib/network` (currently excluded with `lib_ignore`)
 
-### 2.3 Protocol Operations
-- [ ] Implement GetRequest handling
-  - [ ] Create request parser
-  - [ ] Add OID validation
-  - [ ] Implement value retrieval
-  - [ ] Create response builder
-  - [ ] Add error response handling
-- [ ] Implement GetNextRequest handling
-  - [ ] Create request parser
-  - [ ] Add next OID logic
-  - [ ] Implement value retrieval
-  - [ ] Create response builder
-  - [ ] Add error response handling
+## 2. SNMP v1 agent
+### 2.1 BER codec (pure library, native tests)
+- [ ] Length encoding/decoding (short and long form)
+- [ ] INTEGER, OCTET STRING, NULL, OBJECT IDENTIFIER, SEQUENCE
+- [ ] TimeTicks, Counter32, Gauge32
+- [ ] Reject malformed and truncated input, bounds checks on every read
+### 2.2 Message handling (pure library, native tests)
+- [ ] Parse Message (version 0, community, PDU)
+- [ ] Community string check, wrong community silently dropped
+- [ ] Build GetResponse with error-status/error-index
+### 2.3 Operations
+- [ ] GetRequest, noSuchName for unknown OIDs
+- [ ] GetNextRequest, lexicographic OID order, endOfMib as noSuchName (v1)
+### 2.4 MIB
+- [ ] system group: sysDescr, sysObjectID, sysUpTime, sysContact, sysName, sysLocation
+- [ ] private .1.3.6.1.4.1.63050.1 mainsPowerStatus
+- [ ] OID table in sorted order, walk test
+### 2.5 Integration
+- [ ] UDP port 161 listener on lwIP
+- [ ] HIL tests with `snmpget` / `snmpwalk` from WSL
+- [ ] Response time < 100 ms
 
-### 2.4 MIB Implementation
-- [ ] Create MIB structure
-  - [ ] Define OID tree
-  - [ ] Add system group
-  - [ ] Add power monitoring group
-  - [ ] Add configuration group
-  - [ ] Implement OID lookup
-  - [ ] Add value getters/setters
-  - [ ] Create MIB walk functionality
-  - [ ] Add data validation
-  - [ ] Implement access control
+## 3. Power monitoring
+- [ ] GPIO27 input with debounce, state change within 10 ms
+- [ ] Expose in MIB and on the status screen
+- [ ] Run on core 1 per `.clinerules`, safe hand-over to core 0
 
-### 2.5 Testing Framework
-- [ ] Unit Tests
-  - [ ] ASN.1/BER encoding/decoding
-  - [ ] Message structure handling
-  - [ ] MIB operations
-  - [ ] JSON parsing/serialization
-  - [ ] Configuration validation
-- [ ] Integration Tests
-  - [ ] End-to-end request handling
-  - [ ] MIB walk operations
-  - [ ] Error conditions
-  - [ ] LittleFS operations
-  - [ ] Configuration persistence
-- [ ] Performance Tests
-  - [ ] Response timing
-  - [ ] Memory usage
-  - [ ] Rate limiting
-  - [ ] Storage read/write speed
-  - [ ] Flash wear analysis
+## 4. Configuration storage
+- [x] LittleFS mount
+- [x] JSON settings with validation (`lib/settings_codec`) — `test/native/test_settings_codec`
+- [x] A/B copies with sequence number, power-cut safe — `test/embedded/test_settings_store`
+- [x] Read-back verification on save
+- [x] Load v1 files without `sequence`, remove old `active_file`
+- [x] Factory defaults when no copy is valid
+- [ ] Store sysName / sysLocation / sysContact
+- [ ] Remove leftover `config.bak` / `config.schema.json` from older firmware
 
-## 3. Power Monitoring System
-- [ ] Set up GPIO27 for power detection
-  - [ ] Configure pin as input with proper pull-up/down
-  - [ ] Implement interrupt handling for state changes
-  - [ ] Add debouncing for reliable detection
-- [ ] Create power status monitoring
-  - [ ] Implement status checking function
-  - [ ] Add status to MIB structure
-  - [ ] Create status change notification system
+## 5. Serial menu
+- [x] Show status (mode, stored static config, live interface)
+- [x] Switch to DHCP
+- [x] Set static IP with validation (`lib/netconfig`) — `test/native/test_netconfig`, HIL
+- [x] Confirm, save, reboot; cancel leaves settings unchanged — HIL
+- [x] Echo and backspace for terminals without local echo — HIL
+- [ ] Set SNMP community string
+- [ ] Set sysName / sysLocation / sysContact
+- [ ] Show SNMP statistics
 
-## 4. Configuration Storage System
-- [ ] Implement LittleFS
-  - [ ] Initialize filesystem
-  - [ ] Add wear leveling support
-  - [ ] Implement backup/recovery system
-  - [ ] Handle filesystem corruption
-  - [ ] Monitor flash usage and wear
-  - [ ] Implement filesystem cleanup
-- [x] JSON Configuration
-  - [x] Create config file structure
-  - [x] Implement read/write functions
-  - [x] Add validation and error handling
-  - [x] Implement backup configuration
-  - [x] Add JSON parsing and serialization
-  - [x] Create default configuration template
-  - [x] Handle migration of existing settings
-  - [x] Implement configuration versioning
-  - [x] Add schema validation
-  - [x] Create configuration reset function
-- [ ] Testing
-  - [ ] Unit test JSON parsing/serialization
-  - [ ] Test configuration validation
-  - [ ] Test error handling
-  - [x] Test backup/recovery system
-  - [x] Test flash wear leveling
-  - [ ] Benchmark storage operations
-  - [x] Test configuration migration
-  - [x] Test schema validation
+## 6. Factory reset
+- [ ] 10 s hold on GPIO22, LED feedback, defaults saved, reboot — implemented, needs a test with the real button (timing within spec)
+- [ ] Non-blocking hold detection (currently blocks `loop()` while held)
 
-## 5. CLI Interface Implementation
-- [ ] Configuration Commands
-  - [ ] Add load configuration command
-  - [ ] Add save configuration command
-  - [ ] Add reset configuration command
-  - [ ] Add configuration display command
-  - [ ] Add configuration edit commands
-- [ ] JSON Settings Interface
-  - [ ] Implement settings viewer
-  - [ ] Add JSON validation feedback
-  - [ ] Add configuration backup interface
-  - [ ] Add restore from backup option
-- [ ] Error Handling
-  - [ ] Add filesystem error reporting
-  - [ ] Add JSON parsing error display
-  - [ ] Implement validation error messages
-  - [ ] Add recovery suggestions
-- [ ] Testing
-  - [ ] Test configuration commands
-  - [ ] Validate error handling
-  - [ ] Test user input validation
-  - [ ] Test configuration persistence
+## 7. Testing infrastructure
+- [x] `native` environment, MinGW-w64 on Windows, `-Wall -Wextra -Werror`
+- [x] On-device Unity tests in `test/embedded`, auto-wait for the USB port after flashing
+- [x] HIL tests in `test/hil` (Python, pyserial from PlatformIO)
+- [x] Test rules in `.clinerules`, guide in `docs/TESTING.md`
+- [ ] Run native tests in CI (GitHub Actions)
 
-## 6. Testing & Validation
-- [ ] Create hardware test suite
-  - [ ] Test power monitoring circuit
-  - [ ] Validate GPIO configurations
-  - [ ] Test W5500 communication
-  - [ ] Verify factory reset functionality
-- [ ] Implement SNMP testing
-  - [ ] Test GetRequest operations
-  - [ ] Validate GetNextRequest functionality
-  - [ ] Test community string validation
-  - [ ] Verify MIB walk operations
-- [ ] Performance testing
-  - [ ] Measure SNMP response times
-  - [ ] Verify CLI responsiveness
-  - [ ] Test power state detection speed
-  - [ ] Validate factory reset timing
+## 8. Security
+- [ ] Request rate limiting
+- [ ] Access logging
+- [ ] Malformed SNMP packet fuzzing in native tests
 
-## 7. Documentation
-- [ ] Code documentation
-  - [ ] Add function documentation
-  - [ ] Document MIB structure
-  - [ ] Add hardware connection details
-  - [ ] Document configuration options
-- [ ] User documentation
-  - [ ] Create CLI command guide
-  - [ ] Add network configuration guide
-  - [ ] Provide SNMP usage examples
-  - [ ] Create troubleshooting guide
-
-## 8. Safety & Security Implementation
-- [ ] Implement security measures
-  - [ ] Add request rate limiting
-  - [ ] Implement access logging
-  - [ ] Add buffer overflow protection
-  - [ ] Implement packet validation
-- [ ] Add circuit protection
-  - [ ] Implement GPIO protection
-  - [ ] Add power monitoring isolation
-  - [ ] Verify voltage levels
-
-## 9. Build System & Quality Control
-- [ ] Set up PlatformIO configuration
-  - [ ] Configure build environment
-  - [ ] Set up dependency management
-  - [ ] Add build documentation
-- [ ] Implement error handling
-  - [ ] Add global error handling system
-  - [ ] Implement recovery procedures
-  - [ ] Add error logging
-
-
-## Priority Order
-1. Core Network Stack (required for basic communication)
-2. SNMP Protocol (core functionality)
-3. Configuration Storage System (required for persistence)
-   - LittleFS implementation
-   - JSON configuration handling
-4. Power Monitoring (main feature)
-5. CLI Interface (user configuration)
-6. Safety & Security (critical for deployment)
-7. Testing & Validation
-8. Documentation
-9. Build System & Quality Control
+## 9. Documentation
+- [x] README: hardware, menu, storage, build, test
+- [x] docs/TESTING.md
+- [ ] MIB document
+- [ ] CHANGELOG and version tags
 
 ## Notes
-- All GPIO inputs must include proper protection circuits
-- Network stack must be implemented without external libraries
-- SNMP implementation must be v1 only
-- Memory usage must not exceed specified limits (70% flash, 50% RAM)
-- All changes must be documented and version controlled
+- SNMP must be v1 only and our own code; networking may use libraries
+- Memory limits: 70 % flash, 50 % RAM (now 14 % / 26 %)

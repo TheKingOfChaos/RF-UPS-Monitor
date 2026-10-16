@@ -1,48 +1,85 @@
 #pragma once
 
+/**
+ * @file settings.h
+ * @brief Settings persistence on the Pico's internal flash (LittleFS).
+ *
+ * Two copies are stored (slot A and slot B). See settings_codec.h for the
+ * storage model and validation rules. This layer only does file I/O; all
+ * logic that can run on the host lives in settings_codec.
+ */
+
 #include <Arduino.h>
-#include <ArduinoJson.h>
-#include <LittleFS.h>
+#include "settings_codec.h"
 
-// Pin definitions
-const uint8_t LED_PIN = LED_BUILTIN;      // Onboard LED
-const uint8_t POWER_PIN = 27;             // Mains power detection
-const uint8_t FACTORY_RESET_PIN = 22;     // Factory reset button
-const uint8_t W5500_CS_PIN = 17;          // W5500 CS
-const uint8_t W5500_INT_PIN = 21;         // W5500 INT
-const uint8_t W5500_RST_PIN = 20;         // W5500 RST
+/// Default slot paths, kept from v1 so existing devices keep their settings
+extern const char* const SETTINGS_FILE_A;
+extern const char* const SETTINGS_FILE_B;
 
-// Settings file paths with wear leveling
-extern const char* SETTINGS_FILE_A;
-extern const char* SETTINGS_FILE_B;
-extern const char* ACTIVE_FILE_FLAG;
-extern const uint32_t SETTINGS_VERSION;
+/**
+ * @brief Reads and writes the two settings copies at a pair of paths
+ *
+ * Production code uses the default paths; tests use their own paths so they
+ * never touch the device's real settings.
+ */
+class SettingsStore {
+public:
+    SettingsStore(const char* pathA, const char* pathB) : _pathA(pathA), _pathB(pathB) {}
 
-// Default settings
-extern const char* DEFAULT_COMMUNITY;
-extern const bool DEFAULT_DHCP_ENABLED;
-extern const char* DEFAULT_STATIC_IP;
-extern const char* DEFAULT_SUBNET_MASK;
-extern const char* DEFAULT_GATEWAY;
+    /**
+     * @brief Load the newest valid copy
+     *
+     * LittleFS must already be mounted. Invalid copies are logged and ignored.
+     *
+     * @param out Receives the loaded settings, or factory defaults if no copy is valid
+     * @return The slot loaded from, or SettingsSlot::None if defaults were used
+     */
+    SettingsSlot load(Settings& out);
 
-// Settings structure
-struct Settings {
-    char community[32];        // SNMP community string
-    bool dhcpEnabled;         // DHCP enable flag
-    char staticIP[16];        // Static IP if DHCP disabled
-    char subnetMask[16];      // Subnet mask
-    char gateway[16];         // Gateway address
-    uint32_t version;         // Settings version for validation
+    /**
+     * @brief Save settings to the inactive slot and make it active
+     *
+     * The sequence number is assigned here (active sequence + 1), so callers
+     * cannot make a save older than the copy already stored. The file is read
+     * back and parsed before it is considered saved.
+     *
+     * @param s Settings to save; s.sequence and s.version are updated on success
+     * @return true if the new copy was written and verified
+     */
+    bool save(Settings& s);
+
+    /// Slot that the last load() or save() selected
+    SettingsSlot activeSlot() const { return _active; }
+
+    /// Sequence of the active copy
+    uint32_t activeSequence() const { return _activeSequence; }
+
+    /// Path of a slot
+    const char* pathFor(SettingsSlot slot) const { return slot == SettingsSlot::B ? _pathB : _pathA; }
+
+private:
+    bool readSlot(const char* path, Settings& out);
+
+    const char* _pathA;
+    const char* _pathB;
+    SettingsSlot _active = SettingsSlot::None;
+    uint32_t _activeSequence = 0;
 };
 
-// Global settings instance
+/// Settings in use by the firmware
 extern Settings currentSettings;
+
+/// true once loadSettings() has run
 extern bool settingsLoaded;
 
-// Function declarations
-void loadDefaultSettings();
-bool saveSettings();
+/**
+ * @brief Load currentSettings from the default store, saving defaults if no copy is valid
+ * @return true if valid settings were loaded or defaults were saved
+ */
 bool loadSettings();
-void handleFactoryReset();
-bool isFactoryResetRequested();
-void indicateFactoryReset();
+
+/**
+ * @brief Save currentSettings to the default store
+ * @return true if saved and verified
+ */
+bool saveSettings();

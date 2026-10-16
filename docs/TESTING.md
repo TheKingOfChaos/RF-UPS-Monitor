@@ -158,6 +158,7 @@ Flashing an embedded test replaces the firmware, so always reflash with `pio run
 ### `test/native/test_access_control`: rate limiter and access log
 - Burst then refusal, refill at the configured rate, refill capped at the burst, sustained rate over 10 s within 2 requests of the theory
 - Independent per-source buckets; full table evicts the least recently seen source; wrap-around; time going backwards adds nothing
+- Global bucket: a new source address on every request is capped at global burst + rate; a source refused by its own bucket does not drain the global one; a single source is still limited by its own bucket; off by default
 - Log newest-first, folding of repeats with first/last time and count, new entry on a different source or event, ring buffer keeps the newest 16, clamped index
 - Event names, IPv4 formatting
 

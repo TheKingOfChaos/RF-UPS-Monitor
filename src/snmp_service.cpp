@@ -19,7 +19,8 @@ static bool coldStartSent = false;
 static uint8_t agentAddr[4] = {0, 0, 0, 0};
 
 static SnmpAgent agent(currentSettings.community);
-static RateLimiter limiter(SNMP_RATE_PER_SECOND, SNMP_RATE_BURST);
+static RateLimiter limiter(SNMP_RATE_PER_SECOND, SNMP_RATE_BURST, SNMP_GLOBAL_RATE_PER_SECOND,
+                           SNMP_GLOBAL_RATE_BURST);
 static AccessLog accessLog;
 static TrapThrottle authTrapThrottle(AUTH_TRAP_INTERVAL_MS);
 static SnmpServiceStats serviceStats = {};

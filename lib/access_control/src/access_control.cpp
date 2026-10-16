@@ -21,20 +21,33 @@ RateLimiter::Bucket* RateLimiter::find(uint32_t source, uint32_t nowMs) {
     return victim;
 }
 
+void RateLimiter::refill(uint32_t& milliTokens, uint32_t& lastMs, uint32_t rate, uint32_t burst, uint32_t nowMs) {
+    // An older timestamp than the last one adds nothing
+    int32_t elapsed = (int32_t)(nowMs - lastMs);
+    if (elapsed <= 0) return;
+    uint64_t tokens = (uint64_t)milliTokens + (uint64_t)elapsed * rate;
+    uint64_t full = (uint64_t)burst * 1000;
+    milliTokens = (uint32_t)(tokens > full ? full : tokens);
+    lastMs = nowMs;
+}
+
 bool RateLimiter::allow(uint32_t source, uint32_t nowMs) {
     Bucket* b = find(source, nowMs);
+    refill(b->milliTokens, b->lastMs, _rate, _burst, nowMs);
 
-    // Refill; an older timestamp than the last one adds nothing
-    int32_t elapsed = (int32_t)(nowMs - b->lastMs);
-    if (elapsed > 0) {
-        uint64_t tokens = (uint64_t)b->milliTokens + (uint64_t)elapsed * _rate;
-        uint64_t full = (uint64_t)_burst * 1000;
-        b->milliTokens = (uint32_t)(tokens > full ? full : tokens);
-        b->lastMs = nowMs;
+    bool useGlobal = _global.rate > 0;
+    if (useGlobal) {
+        if (!_global.started) {
+            _global.started = true;
+            _global.lastMs = nowMs;
+        }
+        refill(_global.milliTokens, _global.lastMs, _global.rate, _global.burst, nowMs);
     }
 
-    if (b->milliTokens >= 1000) {
+    // Take tokens only if both buckets have one, so a refused source costs the global bucket nothing
+    if (b->milliTokens >= 1000 && (!useGlobal || _global.milliTokens >= 1000)) {
         b->milliTokens -= 1000;
+        if (useGlobal) _global.milliTokens -= 1000;
         return true;
     }
     _refused++;

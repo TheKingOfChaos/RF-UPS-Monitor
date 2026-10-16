@@ -107,6 +107,7 @@ An item is only ticked when it is implemented **and** its tests exist and pass (
 
 ## 8. Security
 - [x] Request rate limiting: 50/s per source, burst 100, 8 sources tracked (`lib/access_control`) — native + HIL
+- [x] Global limit 100/s, burst 200, so rotating/spoofed sources cannot reset the per-source buckets (found by automated security review) — native `test_rotating_sources_cannot_exceed_global_limit`
 - [x] Access logging: rejected requests with source, folded repeats, menu option 5 and serial log — native + HIL
 - [x] authenticationFailure trap for wrong communities, throttled (see 2.6)
 - [x] Malformed packet tests for the BER layer (truncation, every single-byte corruption, sanitizers)

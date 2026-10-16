@@ -21,6 +21,11 @@ constexpr uint16_t SNMP_PORT = 161;
 constexpr uint32_t SNMP_RATE_PER_SECOND = 50;
 constexpr uint32_t SNMP_RATE_BURST = 100;
 
+/// Requests per second from all sources together, so rotating or spoofed
+/// source addresses cannot bypass the per-source limit
+constexpr uint32_t SNMP_GLOBAL_RATE_PER_SECOND = 100;
+constexpr uint32_t SNMP_GLOBAL_RATE_BURST = 200;
+
 /// At most one authenticationFailure trap per interval
 constexpr uint32_t AUTH_TRAP_INTERVAL_MS = 10000;
 

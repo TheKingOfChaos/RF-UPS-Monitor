@@ -13,18 +13,28 @@
 #include <stdint.h>
 
 /**
- * @brief Token bucket per source address
+ * @brief Token bucket per source address, plus one global bucket
  *
  * Each source may send `burst` requests at once and then `ratePerSecond` on
  * average. Sources are tracked in a small table; when it is full, the source
- * seen least recently is replaced. Wrap-around safe for millis().
+ * seen least recently is replaced and the new one starts with a full bucket.
+ *
+ * Because of that, rotating or spoofed source addresses (trivial with UDP)
+ * would each get a fresh bucket. The optional global bucket, shared by all
+ * requests, caps the total no matter how many sources appear. A request
+ * refused by its source bucket does not take a global token, so one flooding
+ * source cannot starve the others. Wrap-around safe for millis().
  */
 class RateLimiter {
 public:
     /// Sources tracked at the same time
     static constexpr uint8_t MAX_SOURCES = 8;
 
-    RateLimiter(uint32_t ratePerSecond, uint32_t burst) : _rate(ratePerSecond), _burst(burst) {}
+    /**
+     * @param globalRatePerSecond 0 disables the global bucket
+     */
+    RateLimiter(uint32_t ratePerSecond, uint32_t burst, uint32_t globalRatePerSecond = 0, uint32_t globalBurst = 0)
+        : _rate(ratePerSecond), _burst(burst), _global{globalRatePerSecond, globalBurst, globalBurst * 1000u, 0, false} {}
 
     /**
      * @brief Take one token for this source
@@ -44,10 +54,20 @@ private:
         bool used;
     };
 
+    struct GlobalBucket {
+        uint32_t rate;
+        uint32_t burst;
+        uint32_t milliTokens;
+        uint32_t lastMs;
+        bool started;
+    };
+
     Bucket* find(uint32_t source, uint32_t nowMs);
+    static void refill(uint32_t& milliTokens, uint32_t& lastMs, uint32_t rate, uint32_t burst, uint32_t nowMs);
 
     uint32_t _rate;
     uint32_t _burst;
+    GlobalBucket _global;
     uint32_t _refused = 0;
     Bucket _buckets[MAX_SOURCES] = {};
 };

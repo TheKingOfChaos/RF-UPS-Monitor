@@ -79,6 +79,41 @@ static void test_time_going_backwards_does_not_add_tokens() {
     TEST_ASSERT_FALSE(r.allow(PC, 999));
 }
 
+// ---- global limit (cannot be reset by rotating or spoofed sources) ----
+
+static void test_rotating_sources_cannot_exceed_global_limit() {
+    // Every request from a new address: each one would get a fresh per-source bucket
+    RateLimiter r(50, 100, 100, 200);
+    uint32_t allowed = 0;
+    for (uint32_t t = 0; t < 1000; t++) {
+        if (r.allow(0x0A000000u + t, t)) allowed++;
+    }
+    // Global burst 200 + 1 s * 100/s
+    TEST_ASSERT_UINT32_WITHIN(2, 300, allowed);
+}
+
+static void test_refused_source_does_not_drain_global_bucket() {
+    RateLimiter r(10, 2, 100, 3);
+    TEST_ASSERT_TRUE(r.allow(PC, 0));
+    TEST_ASSERT_TRUE(r.allow(PC, 0));
+    for (int i = 0; i < 50; i++) TEST_ASSERT_FALSE(r.allow(PC, 0));   // PC flooding, refused per source
+    TEST_ASSERT_TRUE(r.allow(OTHER, 0));                             // global still has its third token
+}
+
+static void test_single_source_is_limited_by_its_own_bucket_under_global() {
+    RateLimiter r(50, 100, 100, 200);
+    uint32_t allowed = 0;
+    for (uint32_t t = 0; t < 10000; t++) {
+        if (r.allow(PC, t)) allowed++;
+    }
+    TEST_ASSERT_UINT32_WITHIN(2, 100 + 500, allowed);
+}
+
+static void test_global_limit_is_off_by_default() {
+    RateLimiter r(10, 1);
+    for (uint32_t i = 0; i < 1000; i++) TEST_ASSERT_TRUE(r.allow(i, 0));   // all new sources
+}
+
 // ---- AccessLog ----
 
 static void test_log_records_newest_first() {
@@ -152,6 +187,10 @@ int main() {
     RUN_TEST(test_full_table_replaces_least_recently_seen_source);
     RUN_TEST(test_rate_limiter_survives_millis_wraparound);
     RUN_TEST(test_time_going_backwards_does_not_add_tokens);
+    RUN_TEST(test_rotating_sources_cannot_exceed_global_limit);
+    RUN_TEST(test_refused_source_does_not_drain_global_bucket);
+    RUN_TEST(test_single_source_is_limited_by_its_own_bucket_under_global);
+    RUN_TEST(test_global_limit_is_off_by_default);
     RUN_TEST(test_log_records_newest_first);
     RUN_TEST(test_repeats_are_folded_into_one_entry);
     RUN_TEST(test_different_event_or_source_starts_new_entry);

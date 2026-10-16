@@ -1,5 +1,6 @@
 #include "cli.h"
 
+#include <mains_input.h>
 #include <netconfig.h>
 #include <settings.h>
 
@@ -40,6 +41,18 @@ static void printMenu() {
  */
 static void printStatus() {
     Serial.println();
+
+    MainsSnapshot mains;
+    if (!mainsRead(mains)) {
+        Serial.println("Mains power: unknown (monitor not running)");
+    } else if (mains.changes == 0) {
+        Serial.printf("Mains power: %s (no changes since boot)\n", mains.present ? "present" : "LOST");
+    } else {
+        Serial.printf("Mains power: %s (%lu changes, last change %lu s ago)\n",
+                      mains.present ? "present" : "LOST", (unsigned long)mains.changes,
+                      (unsigned long)((millis() - mains.lastChangeMs) / 1000));
+    }
+
     Serial.printf("Mode: %s\n", currentSettings.dhcpEnabled ? "DHCP" : "Static");
     Serial.printf("Stored static IP: %s / %s, gateway %s\n",
                   currentSettings.staticIP, currentSettings.subnetMask, currentSettings.gateway);

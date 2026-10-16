@@ -1,0 +1,20 @@
+{
+    "name": "mains_input",
+    "version": "1.0.0",
+    "description": "GPIO27 mains detection sampled on core 1, seqlock hand-over to core 0",
+    "keywords": "power, gpio, multicore",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3.git"
+    },
+    "authors": [
+        {
+            "name": "kenneth Foli Jørgensen",
+            "email": "kenneth@tkoc.dk",
+            "maintainer": true
+        }
+    ],
+    "license": "MIT",
+    "frameworks": "arduino",
+    "platforms": "raspberrypi"
+}

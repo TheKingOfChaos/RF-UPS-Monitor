@@ -2,6 +2,7 @@
 #include <settings.h>
 #include <LittleFS.h>
 #include <W5500lwIP.h>
+#include <mains_input.h>
 #include "cli.h"
 #include "factory_reset.h"
 #include "pins.h"
@@ -121,9 +122,8 @@ void setup() {
     while (!Serial && millis() - serialWait < 3000) delay(10);
     Serial.println("\nRF-UPS-Monitor v3 Starting...");
 
-    // Initialize pins
+    // Initialize pins (POWER_PIN is configured by mainsBegin() on core 1)
     pinMode(LED_PIN, OUTPUT);
-    pinMode(POWER_PIN, INPUT);
     pinMode(FACTORY_RESET_PIN, INPUT_PULLUP);
     pinMode(W5500_INT_PIN, INPUT);
     pinMode(W5500_RST_PIN, OUTPUT);
@@ -178,6 +178,15 @@ void loop() {
         }
     }
 
+    // Report mains power changes detected by core 1
+    static uint32_t lastMainsChanges = 0;
+    MainsSnapshot mains;
+    if (mainsRead(mains) && mains.changes != lastMainsChanges) {
+        lastMainsChanges = mains.changes;
+        Serial.printf("\nMains power %s at %lu ms\n", mains.present ? "RESTORED" : "LOST",
+                      (unsigned long)mains.lastChangeMs);
+    }
+
     // Serial configuration menu
     cliProcess();
 
@@ -185,4 +194,14 @@ void loop() {
     handleFactoryReset();
 
     // TODO: SNMP handling
+}
+
+// Core 1: mains power monitoring (.clinerules: core 1 handles power monitoring and GPIO)
+void setup1() {
+    mainsBegin();
+}
+
+void loop1() {
+    mainsSample();
+    delay(1);
 }

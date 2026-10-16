@@ -10,8 +10,8 @@ A mains power monitor built on a Raspberry Pi Pico with a W5500 Ethernet module.
 | Serial menu for network configuration | Working |
 | Settings stored in flash, power-cut safe | Working |
 | Factory reset button (GPIO22, 10 s hold) | Implemented, not yet tested with a button |
+| Mains power monitoring on GPIO27 (core 1, debounced) | Working, verified with real mains loss/restore |
 | SNMP v1 agent (GetRequest, GetNextRequest, walk) | Planned |
-| Mains power monitoring on GPIO27 | Planned |
 
 See [TODO.md](TODO.md) for the detailed plan.
 
@@ -36,7 +36,7 @@ All assignments are in [include/pins.h](include/pins.h).
 | GPIO20 | W5500 RST | Pulsed low at boot |
 | GPIO21 | W5500 INT | Interrupt-driven receive |
 | GPIO22 | Factory reset | Active low, internal pull-up |
-| GPIO27 | Mains power detection | HIGH = power present |
+| GPIO27 | Mains power detection | HIGH = power present, internal pull-down |
 | LED | Onboard LED | Status / reset feedback |
 
 ## Serial menu
@@ -52,7 +52,7 @@ Connect to the Pico's USB serial port (`COM16` here) at **115200 baud, 8N1**, wi
 >
 ```
 
-**1. Show network status** prints the configured mode, the stored static settings, and the live interface: state, MAC, IP, subnet, gateway and DNS. The state line is one of:
+**1. Show network status** prints the mains power state, the configured mode, the stored static settings, and the live interface: state, MAC, IP, subnet, gateway and DNS. The interface state line is one of:
 
 | State | Meaning |
 |---|---|
@@ -93,6 +93,20 @@ If you lock yourself out with a wrong static address, use the serial menu to swi
 - **Static IP** is set through the serial menu.
 - The MAC address is derived from the Pico's unique chip ID, so it is stable across reboots. Reserve it in your DHCP server for a fixed address.
 - Networking uses the Arduino-Pico core's lwIP driver for the W5500 (`Wiznet5500lwIP`).
+
+## Mains power monitoring
+
+GPIO27 reads the mains detection circuit: HIGH = mains present, LOW = mains lost. The internal pull-down is enabled, so a disconnected input reads as "lost" rather than floating.
+
+- Core 1 samples the pin every millisecond and only accepts a new level once it has held for 5 ms, so short glitches and contact bounce are ignored. A real change is detected within 6 ms (requirement: 10 ms).
+- Core 0 (network, menu, later SNMP) reads the state through a sequence lock, so it never sees a half-updated value and core 1 never waits.
+- Every change is logged on the serial port, e.g. `Mains power LOST at 123456 ms`, and the status screen shows the state, the number of changes and the time since the last one:
+
+```
+Mains power: present (2 changes, last change 37 s ago)
+```
+
+The input must be a clean DC level from an isolated circuit (optocoupler with filtering). An unfiltered optocoupler on AC toggles at 100 Hz and would be read as constant power loss and restore; `pio test -e pico -f embedded/test_mains_input -v` prints the raw toggle rate to check this. On the current hardware it reads 0 toggles/s.
 
 ## Factory reset
 
@@ -159,6 +173,8 @@ src/factory_reset.cpp       Reset button handling
 lib/netconfig/              IPv4 parsing and validation (pure C++)
 lib/settings_codec/         Settings JSON, validation, A/B selection (pure C++)
 lib/settings/               LittleFS storage on top of settings_codec
+lib/power_monitor/          Mains input debouncer (pure C++)
+lib/mains_input/            GPIO27 sampler on core 1, seqlock hand-over to core 0
 test/native/                Unit tests, run on the PC
 test/embedded/              Unity tests, run on the Pico
 test/hil/                   Python tests over the serial port

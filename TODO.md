@@ -36,9 +36,12 @@ An item is only ticked when it is implemented **and** its tests exist and pass (
 - [ ] Response time < 100 ms
 
 ## 3. Power monitoring
-- [ ] GPIO27 input with debounce, state change within 10 ms
-- [ ] Expose in MIB and on the status screen
-- [ ] Run on core 1 per `.clinerules`, safe hand-over to core 0
+- [x] Debouncer (5 ms), detection within 10 ms — `test/native/test_power_debouncer`
+- [x] GPIO27 sampled at 1 kHz on core 1, seqlock hand-over to core 0 — `test/embedded/test_mains_input`
+- [x] Status screen line and serial log on every change — HIL `test_status_reports_mains_power`
+- [x] Verify loss/restore with real mains — HIL `test_mains_loss_and_restore_are_reported` (manual, `RFUPS_MANUAL_MAINS=1`, passed 2026-10-16)
+- [ ] Expose in MIB (`mainsPowerStatus`), plus change count / last change as extra OIDs?
+- [ ] SNMP trap on change? (v1 trap, needs a trap destination setting)
 
 ## 4. Configuration storage
 - [x] LittleFS mount

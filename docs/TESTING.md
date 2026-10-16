@@ -70,6 +70,7 @@ The device must be in DHCP mode when the run starts, and is left in DHCP mode. T
 $env:RFUPS_STATIC_IP = "10.10.6.250"   # must not be in use on the LAN
 $env:RFUPS_STATIC_MASK = "255.255.0.0" # optional, default 255.255.0.0
 $env:RFUPS_STATIC_GW = "10.10.0.1"     # optional, default: current DHCP gateway
+$env:RFUPS_MANUAL_MAINS = "1"          # optional, interactive mains off/on test
 ```
 
 Flashing an embedded test replaces the firmware, so always reflash with `pio run -e pico -t upload` before HIL tests or normal use.
@@ -87,6 +88,19 @@ Flashing an embedded test replaces the firmware, so always reflash with `pio run
 - Rejection of empty, malformed, wrong-version, mistyped, over-long and unprintable data, with no truncation
 - Static configuration is validated only when DHCP is off
 - Sequence comparison across 32-bit wrap-around, A/B slot selection, and fallback when the newer copy is invalid
+
+### `test/native/test_power_debouncer`: `lib/power_monitor`
+- Initial state not counted as a change, stable input never changes
+- Change accepted exactly after the debounce time, detection within the 10 ms requirement
+- Glitches and contact bounce ignored, the timer restarts on every bounce
+- Change counting, `millis()` wrap-around, delayed (sparse) samples
+
+### `test/embedded/test_mains_input`: `lib/mains_input` on core 1
+Works with or without the mains circuit connected.
+- Core 1 publishes a snapshot and samples at about 1 kHz
+- 200 000 reads from core 0 while core 1 writes: counters never go backwards
+- Debounced state follows a stable pin
+- Diagnostic (`-v`): raw toggle rate and duty cycle of GPIO27, to spot an unfiltered AC signal
 
 ### `test/embedded/test_settings_store`: `lib/settings` on LittleFS
 Uses `test/settings_a.json` and `test/settings_b.json`, never the real settings.
@@ -106,6 +120,8 @@ Uses `test/settings_a.json` and `test/settings_b.json`, never the real settings.
 - Each invalid entry rejected with one clear message; cancel leaves settings unchanged
 - DHCP save → reboot → reconnect → ping
 - Static IP applied after reboot, then DHCP restored (opt-in)
+- Mains power line on the status screen
+- Mains loss and restore reported in the log and status (manual: `RFUPS_MANUAL_MAINS=1`, you switch mains off and on when asked)
 
 ## Adding a test
 

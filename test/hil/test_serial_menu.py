@@ -61,6 +61,28 @@ class SerialMenuTest(unittest.TestCase):
     def test_status_reports_connected_state(self):
         self.assertEqual("connected", self.dev.status()["state"])
 
+    def test_status_reports_mains_power(self):
+        st = self.dev.status()
+        self.assertIn(st["mains"], ("present", "LOST"), st["raw"])
+        self.assertRegex(st["raw"],
+                         r"Mains power: \w+ \((no changes since boot|\d+ changes, last change \d+ s ago)\)")
+
+    @unittest.skipUnless(os.environ.get("RFUPS_MANUAL_MAINS"),
+                         "manual: set RFUPS_MANUAL_MAINS=1 and switch mains off and on when asked")
+    def test_mains_loss_and_restore_are_reported(self):
+        d = self.dev
+        self.assertEqual("present", d.status()["mains"], "mains must be on when the test starts")
+        print("\n>>> Switch mains power OFF now (60 s)...", flush=True)
+        d.read_until(r"Mains power LOST at \d+ ms", timeout=60)
+        d.wait_for_menu(timeout=5)
+        self.assertEqual("LOST", d.status()["mains"])
+        print(">>> Switch mains power ON again (60 s)...", flush=True)
+        d.read_until(r"Mains power RESTORED at \d+ ms", timeout=60)
+        d.wait_for_menu(timeout=5)
+        st = d.status()
+        self.assertEqual("present", st["mains"])
+        self.assertRegex(st["raw"], r"Mains power: present \(\d+ changes, last change \d+ s ago\)")
+
     def test_device_answers_ping(self):
         ip = self.dev.status()["ip"]
         self.assertTrue(ping(ip), "no ping reply from %s" % ip)

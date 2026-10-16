@@ -1,0 +1,20 @@
+{
+    "name": "power_monitor",
+    "version": "1.0.0",
+    "description": "Mains detection input debouncing (pure C++, host testable)",
+    "keywords": "debounce, power",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3.git"
+    },
+    "authors": [
+        {
+            "name": "kenneth Foli Jørgensen",
+            "email": "kenneth@tkoc.dk",
+            "maintainer": true
+        }
+    ],
+    "license": "MIT",
+    "frameworks": "*",
+    "platforms": "*"
+}

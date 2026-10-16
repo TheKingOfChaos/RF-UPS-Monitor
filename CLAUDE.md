@@ -32,4 +32,5 @@ Details and setup are in `docs/TESTING.md`.
 - `include/pins.h`: all GPIO assignments
 - `lib/netconfig`, `lib/settings_codec`: pure C++, host tested
 - `lib/settings`: LittleFS A/B storage on top of `settings_codec`
+- `lib/power_monitor` (pure, host tested) and `lib/mains_input` (GPIO27 on core 1, `setup1()`/`loop1()` in `main.cpp`)
 - `test/native`, `test/embedded`, `test/hil`: the three test layers

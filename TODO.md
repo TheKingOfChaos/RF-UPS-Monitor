@@ -9,7 +9,7 @@ An item is only ticked when it is implemented **and** its tests exist and pass (
 - [x] Boot without a serial terminal attached (3 s wait max)
 - [ ] Fall back to static settings if DHCP gets no lease? (decide)
 - [ ] Don't block `setup()` for up to 15 s waiting for DHCP
-- [ ] Delete the obsolete `lib/w5500` and `lib/network` (currently excluded with `lib_ignore`)
+- [x] Delete the obsolete custom stack (`lib/w5500`, `lib/network`) and its tests
 
 ## 2. SNMP v1 agent
 ### 2.1 BER codec (pure library, native tests)

@@ -33,4 +33,3 @@ Details and setup are in `docs/TESTING.md`.
 - `lib/netconfig`, `lib/settings_codec`: pure C++, host tested
 - `lib/settings`: LittleFS A/B storage on top of `settings_codec`
 - `test/native`, `test/embedded`, `test/hil`: the three test layers
-- `lib/w5500`, `lib/network`: obsolete custom stack, excluded with `lib_ignore`, to be deleted

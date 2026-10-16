@@ -30,7 +30,8 @@
  * sniffed (SNMPv1 sends it in clear text):
  *   - the trusted bucket caps all trusted sources together
  *   - at most `maxTrusted` sources are trusted at once
- *   - trust expires after `trustTimeoutMs` without requests
+ *   - trust expires after `trustTimeoutMs` without requests; every allow()
+ *     sweeps the whole table, so idle sources release their slots
  *   - clearTrust() revokes all trust, e.g. when the community changes
  * Trusted sources are evicted from the table only when no untrusted entry is
  * left. A request refused by its source bucket takes no shared token.
@@ -100,6 +101,7 @@ private:
     };
 
     Bucket* find(uint32_t source, uint32_t nowMs);
+    void expireTrust(uint32_t nowMs);
     static void refill(uint32_t& milliTokens, uint32_t& lastMs, uint32_t rate, uint32_t burst, uint32_t nowMs);
     static void refillShared(SharedBucket& b, uint32_t nowMs);
 

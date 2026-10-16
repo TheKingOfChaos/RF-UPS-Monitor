@@ -235,6 +235,37 @@ static void test_trust_expires_after_inactivity() {
     TEST_ASSERT_FALSE(r.allow(PC, 59000 + 60001));
 }
 
+static void test_idle_trusted_sources_release_their_slots() {
+    // Managers that went quiet must not hold the trust slots forever
+    RateLimiter r(1000, 1000, 1000, 1000);
+    r.configureTrusted(1000, 1000, 4, 60000);
+    for (uint32_t s = 1; s <= 4; s++) {
+        r.allow(s, 0);
+        r.markTrusted(s);
+    }
+    TEST_ASSERT_EQUAL_UINT8(4, r.trustedCount());
+    // None of them sends again; a new manager arrives after the timeout
+    const uint32_t NEW_MANAGER = 99;
+    r.allow(NEW_MANAGER, 70000);
+    r.markTrusted(NEW_MANAGER);
+    TEST_ASSERT_EQUAL_UINT8(1, r.trustedCount());
+}
+
+static void test_expired_trust_does_not_protect_against_eviction() {
+    RateLimiter r(1, 1, 1000, 1000);
+    r.configureTrusted(1000, 1000, RateLimiter::MAX_SOURCES, 60000);
+    // Fill the table with trusted sources, then let their trust expire
+    for (uint32_t s = 1; s <= RateLimiter::MAX_SOURCES; s++) {
+        r.allow(s, s);
+        r.markTrusted(s);
+    }
+    // A new source at 70 s evicts source 1 (oldest); all entries are untrusted by then
+    r.allow(100, 70000);
+    TEST_ASSERT_EQUAL_UINT8(0, r.trustedCount());
+    // Source 2 is still tracked (only one eviction happened): its bucket refilled normally
+    TEST_ASSERT_TRUE(r.allow(2, 70001));
+}
+
 static void test_default_keeps_trusted_sources_out_of_global_limit() {
     // Without configureTrusted(): trusted sources have no shared cap (backward compatible)
     RateLimiter r(1000, 1000, 1, 1);
@@ -333,6 +364,8 @@ int main() {
     RUN_TEST(test_evicted_trusted_source_frees_its_slot);
     RUN_TEST(test_clear_trust_revokes_every_trusted_source);
     RUN_TEST(test_trust_expires_after_inactivity);
+    RUN_TEST(test_idle_trusted_sources_release_their_slots);
+    RUN_TEST(test_expired_trust_does_not_protect_against_eviction);
     RUN_TEST(test_default_keeps_trusted_sources_out_of_global_limit);
     RUN_TEST(test_global_limit_is_off_by_default);
     RUN_TEST(test_log_records_newest_first);

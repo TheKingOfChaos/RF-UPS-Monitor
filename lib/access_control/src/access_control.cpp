@@ -72,12 +72,20 @@ void RateLimiter::refillShared(SharedBucket& b, uint32_t nowMs) {
     refill(b.milliTokens, b.lastMs, b.rate, b.burst, nowMs);
 }
 
+void RateLimiter::expireTrust(uint32_t nowMs) {
+    if (_trustTimeoutMs == 0) return;
+    for (Bucket& b : _buckets) {
+        if (b.used && b.trusted && nowMs - b.lastMs > _trustTimeoutMs) b.trusted = false;
+    }
+}
+
 bool RateLimiter::allow(uint32_t source, uint32_t nowMs) {
+    // Trust ends after a period without requests. Sweep the whole table, not
+    // only this source, so idle managers do not keep trust slots or eviction
+    // protection forever.
+    expireTrust(nowMs);
+
     Bucket* b = find(source, nowMs);
-
-    // Trust ends after a period without requests
-    if (b->trusted && _trustTimeoutMs > 0 && nowMs - b->lastMs > _trustTimeoutMs) b->trusted = false;
-
     refill(b->milliTokens, b->lastMs, _rate, _burst, nowMs);
 
     // Trusted and untrusted sources each share their own bucket

@@ -166,8 +166,158 @@ static void test_ignores_unknown_fields() {
                                        "\"future\":123}", s));
 }
 
+// ---- SNMP text fields (sysName, sysContact, sysLocation) ----
+
+static void test_defaults_include_sys_text() {
+    Settings s;
+    memset(&s, 0xAA, sizeof(s));
+    settingsDefaults(s);
+    TEST_ASSERT_EQUAL_STRING("rf-ups-monitor", s.sysName);
+    TEST_ASSERT_EQUAL_STRING("", s.sysContact);
+    TEST_ASSERT_EQUAL_STRING("", s.sysLocation);
+}
+
+static void test_round_trip_sys_text_with_characters_json_must_escape() {
+    Settings in = staticSettings();
+    strcpy(in.sysName, "ups \"rack\" 4");
+    strcpy(in.sysContact, "C:\\ops <ops@example.com>");
+    strcpy(in.sysLocation, "Server room / 2nd floor");
+    char json[SETTINGS_JSON_MAX];
+    TEST_ASSERT_GREATER_THAN(0, settingsToJson(in, json, sizeof(json)));
+    Settings out;
+    TEST_ASSERT_EQUAL(SettingsParseError::None, settingsFromJson(json, out));
+    TEST_ASSERT_TRUE(settingsEqual(in, out));
+}
+
+static void test_worst_case_escaped_settings_fit_and_round_trip() {
+    // Every text field at maximum length and made of characters JSON escapes to two bytes
+    Settings in = staticSettings();
+    memset(in.community, '"', COMMUNITY_MAX_LENGTH);
+    in.community[COMMUNITY_MAX_LENGTH] = '\0';
+    memset(in.sysName, '\\', SYS_TEXT_MAX_LENGTH);
+    in.sysName[SYS_TEXT_MAX_LENGTH] = '\0';
+    memset(in.sysContact, '"', SYS_TEXT_MAX_LENGTH);
+    in.sysContact[SYS_TEXT_MAX_LENGTH] = '\0';
+    memset(in.sysLocation, '\\', SYS_TEXT_MAX_LENGTH);
+    in.sysLocation[SYS_TEXT_MAX_LENGTH] = '\0';
+    strcpy(in.trapTarget, "255.255.255.255");
+    strcpy(in.staticIP, "255.255.255.254");
+    strcpy(in.subnetMask, "255.255.255.254");
+    strcpy(in.gateway, "255.255.255.255");
+    in.sequence = 0xFFFFFFFFu;
+
+    char json[SETTINGS_JSON_MAX];
+    TEST_ASSERT_GREATER_THAN(0, settingsToJson(in, json, sizeof(json)));
+    Settings out;
+    TEST_ASSERT_EQUAL(SettingsParseError::None, settingsFromJson(json, out));
+    TEST_ASSERT_TRUE(settingsEqual(in, out));
+}
+
+static void test_file_without_sys_text_loads_with_defaults() {
+    // Files written by firmware up to v3.1.0 have no sysName/sysContact/sysLocation
+    Settings s;
+    TEST_ASSERT_EQUAL(SettingsParseError::None, settingsFromJson(LEGACY_V1_JSON, s));
+    TEST_ASSERT_EQUAL_STRING("rf-ups-monitor", s.sysName);
+    TEST_ASSERT_EQUAL_STRING("", s.sysContact);
+    TEST_ASSERT_EQUAL_STRING("", s.sysLocation);
+}
+
+/// Legacy v1 document plus one extra field
+static void withField(char* json, size_t size, const char* field) {
+    snprintf(json, size,
+             "{\"community\":\"public\",\"dhcpEnabled\":true,\"staticIP\":\"192.168.1.100\","
+             "\"subnetMask\":\"255.255.255.0\",\"gateway\":\"192.168.1.1\",\"version\":1,%s}", field);
+}
+
+static void test_rejects_overlong_sys_text() {
+    char json[SETTINGS_JSON_MAX], field[128];
+    char text[SYS_TEXT_MAX_LENGTH + 2];
+    memset(text, 'x', SYS_TEXT_MAX_LENGTH + 1);
+    text[SYS_TEXT_MAX_LENGTH + 1] = '\0';
+    Settings s;
+    const char* names[] = {"sysName", "sysContact", "sysLocation"};
+    for (const char* name : names) {
+        snprintf(field, sizeof(field), "\"%s\":\"%s\"", name, text);
+        withField(json, sizeof(json), field);
+        TEST_ASSERT_EQUAL_MESSAGE(SettingsParseError::FieldTooLong, settingsFromJson(json, s), name);
+    }
+    text[SYS_TEXT_MAX_LENGTH] = '\0';  // exactly the maximum is fine
+    snprintf(field, sizeof(field), "\"sysName\":\"%s\"", text);
+    withField(json, sizeof(json), field);
+    TEST_ASSERT_EQUAL(SettingsParseError::None, settingsFromJson(json, s));
+}
+
+static void test_rejects_unprintable_or_mistyped_sys_text() {
+    char json[SETTINGS_JSON_MAX];
+    Settings s;
+    withField(json, sizeof(json), "\"sysContact\":\"line1\\nline2\"");
+    TEST_ASSERT_EQUAL(SettingsParseError::BadSysText, settingsFromJson(json, s));
+    withField(json, sizeof(json), "\"sysLocation\":\"caf\\u00e9\"");  // non-ASCII
+    TEST_ASSERT_EQUAL(SettingsParseError::BadSysText, settingsFromJson(json, s));
+    withField(json, sizeof(json), "\"sysName\":42");
+    TEST_ASSERT_EQUAL(SettingsParseError::MissingField, settingsFromJson(json, s));
+}
+
+static void test_empty_sys_text_is_allowed() {
+    char json[SETTINGS_JSON_MAX];
+    Settings s;
+    withField(json, sizeof(json), "\"sysName\":\"\",\"sysContact\":\"\",\"sysLocation\":\"\"");
+    TEST_ASSERT_EQUAL(SettingsParseError::None, settingsFromJson(json, s));
+    TEST_ASSERT_EQUAL_STRING("", s.sysName);
+}
+
+static void test_settings_text_is_valid() {
+    TEST_ASSERT_TRUE(settingsTextIsValid("public", COMMUNITY_MAX_LENGTH, false));
+    TEST_ASSERT_TRUE(settingsTextIsValid(" ~!\"#$%&'()*+,-./0123456789:;<=>?@[\\]^_`{|}", 63, false));
+    TEST_ASSERT_TRUE(settingsTextIsValid("", 63, true));
+    TEST_ASSERT_FALSE(settingsTextIsValid("", 31, false));
+    TEST_ASSERT_FALSE(settingsTextIsValid(nullptr, 31, true));
+    TEST_ASSERT_FALSE(settingsTextIsValid("tab\there", 63, true));
+    TEST_ASSERT_FALSE(settingsTextIsValid("del\x7f", 63, true));
+    TEST_ASSERT_FALSE(settingsTextIsValid("\xc3\xa9", 63, true));
+    TEST_ASSERT_TRUE(settingsTextIsValid("abc", 3, false));
+    TEST_ASSERT_FALSE(settingsTextIsValid("abcd", 3, false));
+}
+
+// ---- trap destination ----
+
+static void test_trap_target_defaults_to_off() {
+    Settings s;
+    settingsDefaults(s);
+    TEST_ASSERT_EQUAL_STRING("", s.trapTarget);
+    TEST_ASSERT_EQUAL(SettingsParseError::None, settingsFromJson(LEGACY_V1_JSON, s));
+    TEST_ASSERT_EQUAL_STRING("", s.trapTarget);
+}
+
+static void test_trap_target_round_trip() {
+    Settings in = staticSettings();
+    strcpy(in.trapTarget, "10.10.6.65");
+    char json[SETTINGS_JSON_MAX];
+    TEST_ASSERT_GREATER_THAN(0, settingsToJson(in, json, sizeof(json)));
+    Settings out;
+    TEST_ASSERT_EQUAL(SettingsParseError::None, settingsFromJson(json, out));
+    TEST_ASSERT_EQUAL_STRING("10.10.6.65", out.trapTarget);
+    TEST_ASSERT_TRUE(settingsEqual(in, out));
+    Settings other = in;
+    strcpy(other.trapTarget, "10.10.6.66");
+    TEST_ASSERT_FALSE(settingsEqual(in, other));
+}
+
+static void test_rejects_invalid_trap_target() {
+    char json[SETTINGS_JSON_MAX];
+    Settings s;
+    withField(json, sizeof(json), "\"trapTarget\":\"not-an-ip\"");
+    TEST_ASSERT_EQUAL(SettingsParseError::BadTrapTarget, settingsFromJson(json, s));
+    withField(json, sizeof(json), "\"trapTarget\":\"10.10.6.256\"");
+    TEST_ASSERT_EQUAL(SettingsParseError::BadTrapTarget, settingsFromJson(json, s));
+    withField(json, sizeof(json), "\"trapTarget\":\"255.255.255.255.1\"");
+    TEST_ASSERT_EQUAL(SettingsParseError::FieldTooLong, settingsFromJson(json, s));
+    withField(json, sizeof(json), "\"trapTarget\":\"\"");
+    TEST_ASSERT_EQUAL(SettingsParseError::None, settingsFromJson(json, s));
+}
+
 static void test_every_parse_error_has_a_message() {
-    for (uint8_t e = 0; e <= (uint8_t)SettingsParseError::BadStaticConfig; e++) {
+    for (uint8_t e = 0; e <= (uint8_t)SettingsParseError::BadTrapTarget; e++) {
         TEST_ASSERT_TRUE_MESSAGE(strcmp("unknown error", settingsParseErrorMessage((SettingsParseError)e)) != 0,
                                  "error code has no message");
     }
@@ -182,9 +332,22 @@ static void test_equal_ignores_bytes_after_terminator() {
     strcpy(b.staticIP, "10.132.0.255");
     strcpy(b.staticIP, "10.132.0.200");
     b.community[10] = 'Z';
+    strcpy(b.sysName, "a-much-longer-name");
+    strcpy(b.sysName, a.sysName);
     TEST_ASSERT_TRUE(settingsEqual(a, b));
     b.sequence++;
     TEST_ASSERT_FALSE(settingsEqual(a, b));
+
+    // Each SNMP text field takes part in the comparison
+    Settings c = a;
+    strcpy(c.sysName, "other");
+    TEST_ASSERT_FALSE(settingsEqual(a, c));
+    c = a;
+    strcpy(c.sysContact, "other");
+    TEST_ASSERT_FALSE(settingsEqual(a, c));
+    c = a;
+    strcpy(c.sysLocation, "other");
+    TEST_ASSERT_FALSE(settingsEqual(a, c));
 }
 
 // ---- sequence and slot selection ----
@@ -236,6 +399,17 @@ int main() {
     RUN_TEST(test_static_config_validated_only_when_dhcp_disabled);
     RUN_TEST(test_failed_parse_leaves_output_untouched);
     RUN_TEST(test_ignores_unknown_fields);
+    RUN_TEST(test_defaults_include_sys_text);
+    RUN_TEST(test_round_trip_sys_text_with_characters_json_must_escape);
+    RUN_TEST(test_worst_case_escaped_settings_fit_and_round_trip);
+    RUN_TEST(test_file_without_sys_text_loads_with_defaults);
+    RUN_TEST(test_rejects_overlong_sys_text);
+    RUN_TEST(test_rejects_unprintable_or_mistyped_sys_text);
+    RUN_TEST(test_empty_sys_text_is_allowed);
+    RUN_TEST(test_settings_text_is_valid);
+    RUN_TEST(test_trap_target_defaults_to_off);
+    RUN_TEST(test_trap_target_round_trip);
+    RUN_TEST(test_rejects_invalid_trap_target);
     RUN_TEST(test_every_parse_error_has_a_message);
     RUN_TEST(test_equal_ignores_bytes_after_terminator);
     RUN_TEST(test_sequence_newer_handles_wraparound);

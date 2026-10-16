@@ -9,9 +9,11 @@ A mains power monitor built on a Raspberry Pi Pico with a W5500 Ethernet module.
 | Ethernet with DHCP (default) or static IP | Working |
 | Serial menu for network configuration | Working |
 | Settings stored in flash, power-cut safe | Working |
-| Factory reset button (GPIO22, 10 s hold) | Implemented, not yet tested with a button |
+| Factory reset button (GPIO22, 10 s hold, non-blocking, LED feedback) | Implemented; manual test with the real button pending |
 | Mains power monitoring on GPIO27 (core 1, debounced) | Working, verified with real mains loss/restore |
-| SNMP v1 agent (GetRequest, GetNextRequest, walk) | Planned |
+| SNMP v1 agent (GetRequest, GetNextRequest, walk) | Working, tested with net-snmp |
+| SNMP v1 traps (coldStart, authenticationFailure, mainsPowerLost/Restored) | Working; mains traps with real mains pending |
+| SNMP rate limiting and access log | Working |
 
 See [TODO.md](TODO.md) for the detailed plan.
 
@@ -44,15 +46,17 @@ All assignments are in [include/pins.h](include/pins.h).
 Connect to the Pico's USB serial port (`COM16` here) at **115200 baud, 8N1**, with PuTTY or any terminal. The menu appears right after boot, without waiting for the network; a `Network up after ... ms` message follows when the address is obtained. Press `?` and Enter to show the menu again.
 
 ```
-=== RF-UPS-Monitor Network Menu ===
-1. Show network status
+=== RF-UPS-Monitor Menu ===
+1. Show status
 2. Use DHCP
 3. Set static IP
+4. SNMP settings
+5. Access log
 ?. Show this menu
 >
 ```
 
-**1. Show network status** prints the mains power state, the configured mode, the stored static settings, and the live interface: state, MAC, IP, subnet, gateway and DNS. The interface state line is one of:
+**1. Show status** prints the mains power state, the SNMP counters and settings (community, sysName, sysContact, sysLocation), the configured network mode, the stored static settings, and the live interface: state, MAC, IP, subnet, gateway and DNS. The interface state line is one of:
 
 | State | Meaning |
 |---|---|
@@ -85,6 +89,38 @@ Every value is checked before it is accepted, and a rejected value is asked for 
 
 Nothing changes until you answer `y`. Changes are saved to flash and the device reboots to apply them. Answer `n` to cancel.
 
+**4. SNMP settings** asks for the community string, sysName, sysContact, sysLocation and the trap destination in turn. Press Enter to keep the value in brackets, or type `-` to clear a value (for the trap destination: turn traps off).
+
+```
+> 4
+Press Enter to keep the value in brackets, '-' to clear it.
+Community [public]: s3cret
+sysName [rf-ups-monitor]: ups-rack4
+sysContact []: ops@example.com
+sysLocation []: Server room, rack 4
+Trap destination IP []: 10.10.6.65
+
+New SNMP settings: community "s3cret", sysName "ups-rack4", sysContact "ops@example.com", sysLocation "Server room, rack 4", trap destination "10.10.6.65"
+Save? (y/n): y
+SNMP settings saved and active
+```
+
+- Community: 1-31 printable ASCII characters. After saving, requests with the old community get no answer.
+- sysName, sysContact, sysLocation: 0-63 printable ASCII characters.
+- Trap destination: an IPv4 address that receives traps on UDP 162, or empty for no traps.
+- Saved to flash and active immediately, no reboot. A factory reset restores `public`, `rf-ups-monitor`, empty contact and location, and no trap destination.
+
+**5. Access log** lists the most recent rejected SNMP requests, newest first: wrong community, SNMPv2c/v3, malformed packets, rate-limited sources and SetRequests. Repeats from the same source are counted on one line:
+
+```
+Access log: 3 entries, 128 events since boot
+  10.10.6.65      rate limited   x104    last 2 s ago
+  10.10.6.65      bad version    x1      last 40 s ago
+  10.10.6.80      bad community  x23     last 61 s ago
+```
+
+Each new entry is also printed on the serial port when it happens (`SNMP access: bad community from 10.10.6.80`).
+
 If you lock yourself out with a wrong static address, use the serial menu to switch back to DHCP, or do a factory reset.
 
 ## Network
@@ -110,10 +146,12 @@ The input must be a clean DC level from an isolated circuit (optocoupler with fi
 
 ## Factory reset
 
-1. Hold the button on GPIO22 for 10 seconds.
-2. The onboard LED blinks rapidly.
-3. Settings return to defaults: DHCP on, community string `public`.
-4. The device reboots.
+1. Press and hold the button on GPIO22. The onboard LED blinks slowly (2 Hz) while it is held, and the serial log prints `Factory reset button pressed`.
+2. After 10 seconds the LED blinks fast, and the log prints `Factory reset after 10000 ms hold`. You can release the button.
+3. Settings return to defaults: DHCP on, community `public`, sysName `rf-ups-monitor`, empty sysContact and sysLocation, no trap destination.
+4. The device reboots, well within 2 seconds of the trigger.
+
+Releasing the button earlier cancels the reset (`released after ... ms, no reset`). The device keeps working normally while the button is held: SNMP answers, the menu responds and mains monitoring continues. A button held down while the device starts is ignored until it has been released once, so a stuck button cannot cause a reset loop.
 
 ## Settings storage
 
@@ -121,12 +159,14 @@ Settings are stored as JSON on the Pico's internal flash (LittleFS) in two copie
 
 ```json
 {"community":"public","dhcpEnabled":true,"staticIP":"192.168.1.100",
- "subnetMask":"255.255.255.0","gateway":"192.168.1.1","version":1,"sequence":7}
+ "subnetMask":"255.255.255.0","gateway":"192.168.1.1","sysName":"rf-ups-monitor",
+ "sysContact":"","sysLocation":"","version":1,"sequence":7}
 ```
 
 | Field | Meaning |
 |---|---|
 | `community` | SNMP community string, 1-31 printable characters |
+| `sysName`, `sysContact`, `sysLocation` | SNMP system group text, 0-63 printable characters; optional, defaults if missing |
 | `dhcpEnabled` | `true` = DHCP, `false` = use the static fields |
 | `staticIP`, `subnetMask`, `gateway` | Static configuration, validated when DHCP is off |
 | `version` | Layout version, currently 1 |
@@ -169,47 +209,63 @@ Setup, coverage and how to add tests: [docs/TESTING.md](docs/TESTING.md). Rules 
 include/pins.h              GPIO assignments
 src/main.cpp                Boot, Ethernet bring-up, main loop
 src/cli.cpp                 Serial menu
-src/factory_reset.cpp       Reset button handling
+src/factory_reset.cpp       Reset button on core 1, reset on core 0
 lib/netconfig/              IPv4 parsing and validation (pure C++)
 lib/settings_codec/         Settings JSON, validation, A/B selection (pure C++)
 lib/settings/               LittleFS storage on top of settings_codec
-lib/power_monitor/          Mains input debouncer (pure C++)
+lib/power_monitor/          Mains input debouncer, reset button logic (pure C++)
+lib/access_control/         Rate limiter and access log (pure C++)
 lib/mains_input/            GPIO27 sampler on core 1, seqlock hand-over to core 0
+lib/snmp_ber/               ASN.1 BER codec and OIDs for SNMP v1 (pure C++)
+lib/snmp_agent/             SNMP v1 messages, MIB, request handling (pure C++)
+src/snmp_service.cpp        UDP port 161, device state for the MIB
+mibs/                       RF-UPS-MONITOR-MIB
+test/host/                  Host build of the agent for net-snmp checks
 test/native/                Unit tests, run on the PC
 test/embedded/              Unity tests, run on the Pico
 test/hil/                   Python tests over the serial port
 scripts/wait_for_port.py    Waits for the USB port after flashing, for pio test
+scripts/sanitize.sh         Native tests under ASan/UBSan (run in WSL)
+scripts/host_agent_check.sh Agent against real net-snmp tools, no hardware (run in WSL)
 docs/TESTING.md             Test guide
+docs/MIB.md                 SNMP objects, traps, errors, limits
+.github/workflows/tests.yml CI: unit tests, sanitizers, net-snmp check, firmware build
 ```
 
 Pure libraries have no Arduino or hardware dependency so they can be unit tested on the PC. Hardware and file access stay in thin layers on top.
 
-## Planned: SNMP
+## SNMP
 
-SNMP v1 with GetRequest and GetNextRequest (walk), community from settings (default `public`):
+An SNMPv1 agent runs on UDP port 161 with community `public` by default (menu option 4 changes it, along with sysName, sysContact and sysLocation). It supports GetRequest and GetNextRequest, so `snmpwalk` works; everything is read-only.
 
 ```
-.1.3.6.1.2.1.1          system
-  .1.0  sysDescr
-  .3.0  sysUpTime
-  .4.0  sysContact
-  .5.0  sysName
-  .6.0  sysLocation
-.1.3.6.1.4.1.63050      private
-  .1.0  mainsPowerStatus  INTEGER 0 = off, 1 = on
+.1.3.6.1.2.1.1          system group
+  .1.0  sysDescr        .2.0  sysObjectID     .3.0  sysUpTime
+  .4.0  sysContact      .5.0  sysName         .6.0  sysLocation
+  .7.0  sysServices
+.1.3.6.1.4.1.63050      RF-UPS-MONITOR-MIB (enterprise 63050)
+  .1.0  mainsPowerStatus      INTEGER 1 = present, 0 = lost
+  .2.0  mainsPowerChanges     Counter32
+  .3.0  mainsPowerLastChange  TimeTicks
 ```
-
-Once implemented, test it from Linux or WSL:
 
 ```bash
-snmpwalk -v1 -c public <device-ip>
-snmpget  -v1 -c public <device-ip> .1.3.6.1.4.1.63050.1.0
+snmpwalk -v1 -c public 10.10.6.111
+snmpget  -v1 -c public 10.10.6.111 1.3.6.1.4.1.63050.1.0
 ```
+
+**Traps** go to the trap destination set in menu option 4 (UDP 162): `coldStart` at boot, `mainsPowerLost` and `mainsPowerRestored` (enterprise 63050, specific-trap 1 and 2, with the three mains objects), and `authenticationFailure` for a wrong community (at most one per 10 s).
+
+**Security:** each source address may send 50 requests per second on average, with bursts of 100; more is dropped and logged. Rejected requests are kept in the access log (menu option 5).
+
+Object details, traps, error behaviour, limits and the MIB file: [docs/MIB.md](docs/MIB.md). The status screen (menu option 1) shows the SNMP counters, rate-limited requests and traps sent.
 
 ## Troubleshooting
 
 | Problem | What to check |
 |---|---|
+| No traps arrive | Trap destination set (status screen shows it and "N sent"); firewall on the receiving PC must allow inbound UDP 162 |
+| A manager gets no answers after polling hard | Rate limit (50/s per source): check menu option 5 for "rate limited" |
 | No IP address | Menu option 1 shows the state: cable/link, or no DHCP answer (it keeps retrying) |
 | Unreachable after setting static IP | Use the serial menu to check or switch back to DHCP, or factory reset |
 | Upload fails with "Access denied" | Close PuTTY or the serial monitor |

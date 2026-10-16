@@ -6,6 +6,8 @@
 #include "cli.h"
 #include "factory_reset.h"
 #include "pins.h"
+#include "snmp_service.h"
+#include "version.h"
 
 // W5500 on SPI0 (MISO 16, CS 17, SCK 18, MOSI 19) with interrupt on GPIO21
 Wiznet5500lwIP eth(W5500_CS_PIN, SPI, W5500_INT_PIN);
@@ -120,11 +122,10 @@ void setup() {
     // Wait briefly for a terminal, but don't block boot when none is attached
     uint32_t serialWait = millis();
     while (!Serial && millis() - serialWait < 3000) delay(10);
-    Serial.println("\nRF-UPS-Monitor v3 Starting...");
+    Serial.println("\nRF-UPS-Monitor v" FIRMWARE_VERSION " starting...");
 
-    // Initialize pins (POWER_PIN is configured by mainsBegin() on core 1)
+    // Initialize pins (POWER_PIN and FACTORY_RESET_PIN are configured on core 1)
     pinMode(LED_PIN, OUTPUT);
-    pinMode(FACTORY_RESET_PIN, INPUT_PULLUP);
     pinMode(W5500_INT_PIN, INPUT);
     pinMode(W5500_RST_PIN, OUTPUT);
     digitalWrite(W5500_RST_PIN, HIGH);
@@ -157,8 +158,10 @@ void setup() {
     // Load settings
     settingsLoaded = loadSettings();
 
-    // Bring up Ethernet
-    startEthernet();
+    // Bring up Ethernet and the SNMP agent
+    if (startEthernet()) {
+        snmpBegin();
+    }
 
     // Serial configuration menu
     cliBegin();
@@ -173,6 +176,7 @@ void loop() {
         if (ip) {
             Serial.printf("\nNetwork up after %lu ms\n", (unsigned long)millis());
             printNetworkInfo();
+            snmpNetworkUp(eth.localIP());
         } else {
             Serial.println("\nNetwork down, retrying");
         }
@@ -185,23 +189,28 @@ void loop() {
         lastMainsChanges = mains.changes;
         Serial.printf("\nMains power %s at %lu ms\n", mains.present ? "RESTORED" : "LOST",
                       (unsigned long)mains.lastChangeMs);
+        snmpNotifyMainsChange();
     }
+
+    // SNMP requests
+    snmpPoll();
 
     // Serial configuration menu
     cliProcess();
 
-    // Check for factory reset
-    handleFactoryReset();
-
-    // TODO: SNMP handling
+    // Factory reset requested by core 1
+    factoryResetPoll();
 }
 
-// Core 1: mains power monitoring (.clinerules: core 1 handles power monitoring and GPIO)
+// Core 1: mains power monitoring, reset button and LED
+// (.clinerules: core 1 handles power monitoring and GPIO)
 void setup1() {
     mainsBegin();
+    factoryResetBegin();
 }
 
 void loop1() {
     mainsSample();
+    factoryResetSample();
     delay(1);
 }

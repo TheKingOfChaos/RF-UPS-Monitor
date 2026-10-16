@@ -1,0 +1,87 @@
+#pragma once
+
+/**
+ * @file snmp_agent.h
+ * @brief SNMP v1 request handling: GetRequest, GetNextRequest, SetRequest (rejected).
+ *
+ * Pure C++, unit tested on the host. The firmware passes each received UDP
+ * payload to SnmpAgent::handle() and sends back whatever it returns.
+ *
+ * Behaviour (RFC 1157):
+ *   - Not SNMP v1, malformed, wrong community, or not a request: no response
+ *     (counted in SnmpStats)
+ *   - GetRequest: every OID must name an object, else noSuchName with the
+ *     1-based index of the first unknown varbind
+ *   - GetNextRequest: the next object after each OID, noSuchName past the end
+ *   - SetRequest: all objects are read-only, answered with noSuchName
+ *   - Response larger than the buffer: tooBig
+ */
+
+#include "snmp_mib.h"
+
+/// Largest response the agent builds (RFC 1157 requires at least 484)
+constexpr size_t SNMP_MAX_MESSAGE = 1472;
+
+/**
+ * @brief Counters for the status screen
+ */
+struct SnmpStats {
+    uint32_t inPackets;          ///< Every packet passed to handle()
+    uint32_t inBadVersions;      ///< Valid message, not SNMP v1
+    uint32_t inBadCommunity;     ///< Wrong community string
+    uint32_t inParseErrors;      ///< Malformed packets
+    uint32_t inUnsupported;      ///< Response/trap PDUs, too many varbinds
+    uint32_t inGetRequests;
+    uint32_t inGetNextRequests;
+    uint32_t inSetRequests;
+    uint32_t outResponses;       ///< Responses returned for sending
+    uint32_t outNoSuchName;
+    uint32_t outTooBig;
+};
+
+/**
+ * @brief What handle() did with the last request, for access logging and traps
+ */
+enum class SnmpOutcome : uint8_t {
+    Responded,     ///< Get/GetNext answered (including noSuchName / tooBig errors)
+    SetRejected,   ///< SetRequest answered with an error (all objects are read-only)
+    ParseError,    ///< Dropped: malformed
+    BadVersion,    ///< Dropped: not SNMPv1
+    BadCommunity,  ///< Dropped: wrong community
+    Unsupported,   ///< Dropped: trap/response PDU or too many varbinds
+    NoRoom         ///< Dropped: not even an error response fits the buffer
+};
+
+class SnmpAgent {
+public:
+    /**
+     * @param community NUL-terminated community string; the pointer is kept,
+     *                  so it must stay valid (e.g. currentSettings.community)
+     */
+    explicit SnmpAgent(const char* community) : _community(community) {}
+
+    /**
+     * @brief Handle one request
+     * @param request  Received UDP payload
+     * @param response Output buffer
+     * @param capacity Size of the output buffer
+     * @param state    Values for the MIB, captured for this request
+     * @return Length of the response to send, 0 to send nothing
+     */
+    size_t handle(const uint8_t* request, size_t length, uint8_t* response, size_t capacity,
+                  const SnmpDeviceState& state);
+
+    const SnmpStats& stats() const { return _stats; }
+
+    /// Outcome of the most recent handle() call
+    SnmpOutcome lastOutcome() const { return _outcome; }
+
+private:
+    bool communityMatches(const SnmpRequest& req) const;
+    size_t respondError(const SnmpRequest& req, SnmpError error, uint8_t index, uint8_t* out, size_t cap);
+
+    const char* _community;
+    SnmpStats _stats = {};
+    SnmpOutcome _outcome = SnmpOutcome::Responded;
+    SnmpRequest _req;  // ~1 KB, kept out of the stack
+};

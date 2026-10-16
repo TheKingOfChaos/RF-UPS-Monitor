@@ -13,6 +13,13 @@
 2. Memory Utilization
    - Must fit within 2MB of flash memory
    - Must operate within 264KB of RAM
+   - Build with the core's default optimization (-Os); never unflag it.
+     Without optimization stack use more than doubles
+   - Core 0 and core 1 each have a 4 KB stack, and core 0 shares it with
+     USB, lwIP and W5500 interrupts. No buffer or struct larger than ~256
+     bytes on the stack: make it static (single-core use) or allocate it.
+     Paths that run deep in the menu or network code (e.g. settings save)
+     must have an on-device stack measurement test
    - Must implement efficient dual-core synchronization
    - Must use appropriate memory barriers for core communication
 
@@ -131,6 +138,11 @@ See docs/TESTING.md for how to run each layer.
    - Cover edge cases explicitly: empty/null input, maximum lengths,
      boundaries (0, 255, /31, /32), wrap-around, malformed data
    - Native code builds with `-Wall -Wextra -Werror`; do not silence warnings
+   - Code that parses input from the network or flash (BER, SNMP messages,
+     settings) must have tests with truncated and corrupted input, and all
+     native suites must pass `scripts/sanitize.sh` (ASan + UBSan in WSL)
+   - Protocol tests use byte vectors captured from real tools (net-snmp)
+     where possible, not only values the code itself produced
    - Tests that change device state (reboot, static IP) restore it, and
      anything that needs a specific network resource is opt-in via an
      environment variable rather than hard-coded

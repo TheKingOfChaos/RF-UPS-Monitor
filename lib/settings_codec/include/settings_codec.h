@@ -20,21 +20,38 @@
 /// Increment only when the JSON layout changes incompatibly
 constexpr uint32_t SETTINGS_VERSION = 1;
 
-/// Largest serialized settings document, including the terminating NUL
-constexpr size_t SETTINGS_JSON_MAX = 256;
+/// Largest serialized settings document, including the terminating NUL.
+/// Worst case: every text field at maximum length and fully JSON-escaped.
+constexpr size_t SETTINGS_JSON_MAX = 768;
+
+/// Longest SNMP community string
+constexpr size_t COMMUNITY_MAX_LENGTH = 31;
+
+/// Longest sysName / sysContact / sysLocation
+constexpr size_t SYS_TEXT_MAX_LENGTH = 63;
 
 /**
  * @brief Persistent device settings
  */
 struct Settings {
-    char community[32];   ///< SNMP community string, 1-31 printable characters
+    char community[COMMUNITY_MAX_LENGTH + 1];  ///< SNMP community string, 1-31 printable characters
     bool dhcpEnabled;     ///< true = DHCP, false = static configuration below
     char staticIP[16];    ///< Static IP address, dotted quad
     char subnetMask[16];  ///< Static subnet mask, dotted quad
     char gateway[16];     ///< Static gateway, dotted quad
+    char sysName[SYS_TEXT_MAX_LENGTH + 1];      ///< SNMP sysName, 0-63 printable characters
+    char sysContact[SYS_TEXT_MAX_LENGTH + 1];   ///< SNMP sysContact, 0-63 printable characters
+    char sysLocation[SYS_TEXT_MAX_LENGTH + 1];  ///< SNMP sysLocation, 0-63 printable characters
+    char trapTarget[16];  ///< SNMP trap destination (IPv4, UDP 162), empty = traps off
     uint32_t version;     ///< Layout version, must equal SETTINGS_VERSION
     uint32_t sequence;    ///< Save counter, newest valid copy wins on load
 };
+
+/**
+ * @brief Check a text setting: printable ASCII (0x20-0x7E), at most maxLength characters
+ * @param allowEmpty false for the community string, true for sysName/sysContact/sysLocation
+ */
+bool settingsTextIsValid(const char* text, size_t maxLength, bool allowEmpty);
 
 /**
  * @brief Why a settings document was rejected
@@ -47,7 +64,9 @@ enum class SettingsParseError : uint8_t {
     MissingField,     ///< A required field is missing or has the wrong type
     FieldTooLong,     ///< A string does not fit its buffer
     BadCommunity,     ///< Community string empty or contains non-printable characters
-    BadStaticConfig   ///< DHCP disabled but static configuration is invalid
+    BadStaticConfig,  ///< DHCP disabled but static configuration is invalid
+    BadSysText,       ///< sysName/sysContact/sysLocation contains non-printable characters
+    BadTrapTarget     ///< trapTarget is neither empty nor an IPv4 address
 };
 
 /**
@@ -56,7 +75,8 @@ enum class SettingsParseError : uint8_t {
 enum class SettingsSlot : uint8_t { None, A, B };
 
 /**
- * @brief Fill settings with factory defaults (DHCP, community "public")
+ * @brief Fill settings with factory defaults (DHCP, community "public",
+ *        sysName "rf-ups-monitor", empty sysContact and sysLocation)
  */
 void settingsDefaults(Settings& s);
 
@@ -71,8 +91,9 @@ size_t settingsToJson(const Settings& s, char* buf, size_t size);
 /**
  * @brief Parse and validate a settings document
  *
- * Unknown fields are ignored. "sequence" is optional and defaults to 0, so
- * files written before it existed still load.
+ * Unknown fields are ignored. "sequence", "sysName", "sysContact",
+ * "sysLocation" and "trapTarget" are optional and take their defaults, so
+ * files written by older firmware still load.
  *
  * @param json NUL-terminated JSON text
  * @param out  Receives the settings only when the result is None

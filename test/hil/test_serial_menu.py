@@ -48,7 +48,8 @@ class SerialMenuTest(unittest.TestCase):
 
     def test_menu_lists_all_options(self):
         out = self.dev.wait_for_menu()
-        for text in ("1. Show network status", "2. Use DHCP", "3. Set static IP", "?. Show this menu"):
+        for text in ("1. Show status", "2. Use DHCP", "3. Set static IP", "4. SNMP settings",
+                     "5. Access log", "?. Show this menu"):
             self.assertIn(text, out)
 
     def test_status_reports_dhcp_lease(self):
@@ -89,7 +90,7 @@ class SerialMenuTest(unittest.TestCase):
 
     def test_unknown_choice_shows_menu(self):
         out = self.dev.send("x", expect=r"\?\. Show this menu\r?\n> ")
-        self.assertIn("=== RF-UPS-Monitor Network Menu ===", out)
+        self.assertIn("=== RF-UPS-Monitor Menu ===", out)
 
     def test_backspace_edits_input(self):
         # "9<BS>1" must be read as "1"
@@ -134,6 +135,43 @@ class SerialMenuTest(unittest.TestCase):
         d.send("255.255.0.0", expect=r"Gateway")
         d.send("10.10.0.1", expect=r"\(y/n\): $")
         d.send("n", expect=r"Cancelled[\s\S]*> $")
+
+    # ---- SNMP settings entry, always cancelled ----
+
+    def test_status_shows_snmp_settings(self):
+        st = self.dev.status()
+        for key in ("community", "sysName", "sysContact", "sysLocation"):
+            self.assertIsNotNone(st[key], "%s missing from status:\n%s" % (key, st["raw"]))
+        self.assertNotEqual("", st["community"])
+
+    def test_snmp_settings_are_validated_and_cancel_keeps_them(self):
+        d = self.dev
+        before = d.status()
+        d.send("4", expect=r"Community \[.*\]: $")
+
+        out = d.send("-", expect=r"Community \[.*\]: $")
+        self.assertIn("Must not be empty", out)
+        out = d.send("c" * 32, expect=r"Community \[.*\]: $")
+        self.assertIn("Too long, at most 31 characters", out)
+        d.send("c" * 31, expect=r"sysName \[.*\]: $")             # exactly the maximum
+
+        out = d.send("n" * 64, expect=r"sysName \[.*\]: $")
+        self.assertIn("Too long, at most 63 characters", out)
+        out = d.send("x" * 100, expect=r"sysName \[.*\]: $")      # longer than the input line
+        self.assertIn("Input too long", out)
+        d.send("", expect=r"sysContact \[.*\]: $")                  # Enter keeps sysName
+        d.send("-", expect=r"sysLocation \[.*\]: $")                # '-' clears sysContact
+        d.send('Rack "4", \\shelf', expect=r"Trap destination IP \[.*\]: $")
+        out = d.send("10.10.6.300", expect=r"Trap destination IP \[.*\]: $")
+        self.assertIn("is not a valid IPv4 address", out)
+        out = d.send("10.10.6.99", expect=r"Save\? \(y/n\): $")
+        self.assertIn('community "%s", sysName "%s", sysContact "", sysLocation "Rack "4", \\shelf", '
+                      'trap destination "10.10.6.99"' % ("c" * 31, before["sysName"]), out)
+
+        d.send("n", expect=r"Cancelled[\s\S]*> $")
+        after = d.status()
+        for key in ("community", "sysName", "sysContact", "sysLocation", "trapTarget"):
+            self.assertEqual(before[key], after[key], "cancel changed %s" % key)
 
     # ---- changes that reboot the device ----
 

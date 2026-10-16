@@ -10,6 +10,10 @@ static const char* const DEFAULT_COMMUNITY = "public";
 static const char* const DEFAULT_STATIC_IP = "192.168.1.100";
 static const char* const DEFAULT_SUBNET_MASK = "255.255.255.0";
 static const char* const DEFAULT_GATEWAY = "192.168.1.1";
+static const char* const DEFAULT_SYS_NAME = "rf-ups-monitor";
+
+// Room for the parsed document: the object, its members and copies of all strings
+static const size_t JSON_DOC_CAPACITY = SETTINGS_JSON_MAX + JSON_OBJECT_SIZE(13);
 
 /**
  * @brief Copy a string into a fixed buffer, failing instead of truncating
@@ -21,6 +25,16 @@ static bool copyField(char* dest, size_t size, const char* src) {
     return true;
 }
 
+bool settingsTextIsValid(const char* text, size_t maxLength, bool allowEmpty) {
+    if (text == nullptr) return false;
+    size_t len = 0;
+    for (const char* c = text; *c; c++, len++) {
+        if (len >= maxLength) return false;
+        if (*c < 0x20 || *c > 0x7E) return false;
+    }
+    return allowEmpty || len > 0;
+}
+
 void settingsDefaults(Settings& s) {
     memset(&s, 0, sizeof(s));
     copyField(s.community, sizeof(s.community), DEFAULT_COMMUNITY);
@@ -28,28 +42,47 @@ void settingsDefaults(Settings& s) {
     copyField(s.staticIP, sizeof(s.staticIP), DEFAULT_STATIC_IP);
     copyField(s.subnetMask, sizeof(s.subnetMask), DEFAULT_SUBNET_MASK);
     copyField(s.gateway, sizeof(s.gateway), DEFAULT_GATEWAY);
+    copyField(s.sysName, sizeof(s.sysName), DEFAULT_SYS_NAME);
     s.version = SETTINGS_VERSION;
     s.sequence = 0;
 }
 
 size_t settingsToJson(const Settings& s, char* buf, size_t size) {
-    StaticJsonDocument<384> doc;
-    doc["community"] = s.community;
+    // Strings are stored by pointer, so the document only needs the object
+    StaticJsonDocument<JSON_OBJECT_SIZE(13)> doc;
+    doc["community"] = (const char*)s.community;
     doc["dhcpEnabled"] = s.dhcpEnabled;
-    doc["staticIP"] = s.staticIP;
-    doc["subnetMask"] = s.subnetMask;
-    doc["gateway"] = s.gateway;
+    doc["staticIP"] = (const char*)s.staticIP;
+    doc["subnetMask"] = (const char*)s.subnetMask;
+    doc["gateway"] = (const char*)s.gateway;
+    doc["sysName"] = (const char*)s.sysName;
+    doc["sysContact"] = (const char*)s.sysContact;
+    doc["sysLocation"] = (const char*)s.sysLocation;
+    doc["trapTarget"] = (const char*)s.trapTarget;
     doc["version"] = s.version;
     doc["sequence"] = s.sequence;
 
-    if (buf == nullptr || measureJson(doc) + 1 > size) return 0;
+    if (buf == nullptr || doc.overflowed() || measureJson(doc) + 1 > size) return 0;
     return serializeJson(doc, buf, size);
+}
+
+/**
+ * @brief Read an optional text field into dest, keeping dest's current value if absent
+ */
+static SettingsParseError readOptionalText(JsonVariantConst value, char* dest, size_t size) {
+    if (value.isNull()) return SettingsParseError::None;
+    if (!value.is<const char*>()) return SettingsParseError::MissingField;
+    const char* text = value.as<const char*>();
+    if (!copyField(dest, size, text)) return SettingsParseError::FieldTooLong;
+    if (!settingsTextIsValid(dest, size - 1, true)) return SettingsParseError::BadSysText;
+    return SettingsParseError::None;
 }
 
 SettingsParseError settingsFromJson(const char* json, Settings& out) {
     if (json == nullptr || json[0] == '\0') return SettingsParseError::Empty;
 
-    StaticJsonDocument<384> doc;
+    // On the heap: the document holds copies of every string (~1 KB)
+    DynamicJsonDocument doc(JSON_DOC_CAPACITY);
     if (deserializeJson(doc, json) || !doc.is<JsonObject>()) return SettingsParseError::InvalidJson;
 
     if (!doc["version"].is<uint32_t>() || doc["version"].as<uint32_t>() != SETTINGS_VERSION) {
@@ -65,8 +98,9 @@ SettingsParseError settingsFromJson(const char* json, Settings& out) {
         return SettingsParseError::MissingField;
     }
 
+    // Start from defaults so optional fields missing in older files get them
     Settings s;
-    memset(&s, 0, sizeof(s));
+    settingsDefaults(s);
     if (!copyField(s.community, sizeof(s.community), doc["community"]) ||
         !copyField(s.staticIP, sizeof(s.staticIP), doc["staticIP"]) ||
         !copyField(s.subnetMask, sizeof(s.subnetMask), doc["subnetMask"]) ||
@@ -74,10 +108,17 @@ SettingsParseError settingsFromJson(const char* json, Settings& out) {
         return SettingsParseError::FieldTooLong;
     }
 
-    if (s.community[0] == '\0') return SettingsParseError::BadCommunity;
-    for (const char* c = s.community; *c; c++) {
-        if (*c < 0x20 || *c > 0x7E) return SettingsParseError::BadCommunity;
+    if (!settingsTextIsValid(s.community, COMMUNITY_MAX_LENGTH, false)) return SettingsParseError::BadCommunity;
+
+    SettingsParseError err;
+    if ((err = readOptionalText(doc["sysName"], s.sysName, sizeof(s.sysName))) != SettingsParseError::None ||
+        (err = readOptionalText(doc["sysContact"], s.sysContact, sizeof(s.sysContact))) != SettingsParseError::None ||
+        (err = readOptionalText(doc["sysLocation"], s.sysLocation, sizeof(s.sysLocation))) != SettingsParseError::None ||
+        (err = readOptionalText(doc["trapTarget"], s.trapTarget, sizeof(s.trapTarget))) != SettingsParseError::None) {
+        return err;
     }
+    uint8_t trapAddr[4];
+    if (s.trapTarget[0] != '\0' && !parseIPv4(s.trapTarget, trapAddr)) return SettingsParseError::BadTrapTarget;
 
     s.dhcpEnabled = doc["dhcpEnabled"];
     if (!s.dhcpEnabled &&
@@ -102,6 +143,8 @@ const char* settingsParseErrorMessage(SettingsParseError error) {
     case SettingsParseError::FieldTooLong:    return "field too long";
     case SettingsParseError::BadCommunity:    return "invalid community string";
     case SettingsParseError::BadStaticConfig: return "invalid static IP configuration";
+    case SettingsParseError::BadSysText:      return "invalid sysName/sysContact/sysLocation";
+    case SettingsParseError::BadTrapTarget:   return "invalid trap destination";
     }
     return "unknown error";
 }
@@ -109,7 +152,10 @@ const char* settingsParseErrorMessage(SettingsParseError error) {
 bool settingsEqual(const Settings& a, const Settings& b) {
     return strcmp(a.community, b.community) == 0 && a.dhcpEnabled == b.dhcpEnabled &&
            strcmp(a.staticIP, b.staticIP) == 0 && strcmp(a.subnetMask, b.subnetMask) == 0 &&
-           strcmp(a.gateway, b.gateway) == 0 && a.version == b.version && a.sequence == b.sequence;
+           strcmp(a.gateway, b.gateway) == 0 && strcmp(a.sysName, b.sysName) == 0 &&
+           strcmp(a.sysContact, b.sysContact) == 0 && strcmp(a.sysLocation, b.sysLocation) == 0 &&
+           strcmp(a.trapTarget, b.trapTarget) == 0 &&
+           a.version == b.version && a.sequence == b.sequence;
 }
 
 bool sequenceIsNewer(uint32_t a, uint32_t b) {

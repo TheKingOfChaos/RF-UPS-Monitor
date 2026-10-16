@@ -135,10 +135,46 @@ class Device:
         info["state"] = m.group(1) if m else None
         m = re.search(r"Mains power: (\w+)", out)
         info["mains"] = m.group(1) if m else None
+        for key, label in (("community", "SNMP community"), ("sysName", "sysName"),
+                           ("sysContact", "sysContact"), ("sysLocation", "sysLocation")):
+            m = re.search(r'^%s: "(.*)"\r?$' % label, out, re.MULTILINE)
+            info[key] = m.group(1) if m else None
+        m = re.search(r'^Trap destination: "(.*)" \((\d+) sent, (\d+) failed\)', out, re.MULTILINE)
+        info["trapTarget"] = m.group(1) if m else None
+        info["trapsSent"] = int(m.group(2)) if m else None
+        m = re.search(r"^SNMP security: (\d+) rate limited, (\d+) access log events", out, re.MULTILINE)
+        info["rateLimited"] = int(m.group(1)) if m else None
         for key, label in (("ip", "IP"), ("subnet", "Subnet"), ("gateway", "Gateway")):
             m = re.search(r"^%s: ([\d.]+)" % label, out, re.MULTILINE)
             info[key] = m.group(1) if m else None
         return info
+
+
+    def set_snmp(self, community, sys_name, sys_contact, sys_location, trap_target=None):
+        """Set the SNMP settings through menu option 4 and confirm.
+
+        Empty values are cleared with '-'. trap_target=None keeps the current destination.
+        """
+        def entry(value):
+            return value if value else "-"
+        self.send("4", expect=r"Community \[.*\]: $")
+        self.send(entry(community), expect=r"sysName \[.*\]: $")
+        self.send(entry(sys_name), expect=r"sysContact \[.*\]: $")
+        self.send(entry(sys_contact), expect=r"sysLocation \[.*\]: $")
+        self.send(entry(sys_location), expect=r"Trap destination IP \[.*\]: $")
+        self.send("" if trap_target is None else entry(trap_target), expect=r"Save\? \(y/n\): $")
+        return self.send("y", expect=r"(SNMP settings saved and active|Failed to save)[\s\S]*> $")
+
+    def set_trap_target(self, target):
+        """Change only the trap destination ('' turns traps off)."""
+        st = self.status()
+        return self.set_snmp(st["community"], st["sysName"], st["sysContact"], st["sysLocation"], target)
+
+    def access_log(self):
+        """Menu option 5: list of (ip, event, count) tuples, newest first."""
+        out = self.send("5", expect=r"Access log: [\s\S]*> $")
+        return [(m.group(1), m.group(2).strip(), int(m.group(3)))
+                for m in re.finditer(r"^\s+([\d.]+)\s+(.+?)\s+x(\d+)\s+last", out, re.MULTILINE)]
 
 
 def ping(host, count=2):

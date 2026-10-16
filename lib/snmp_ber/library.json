@@ -1,0 +1,20 @@
+{
+    "name": "snmp_ber",
+    "version": "1.0.0",
+    "description": "ASN.1 BER encoding/decoding and OIDs for SNMP v1 (pure C++, host testable)",
+    "keywords": "snmp, asn1, ber, oid",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3.git"
+    },
+    "authors": [
+        {
+            "name": "kenneth Foli Jørgensen",
+            "email": "kenneth@tkoc.dk",
+            "maintainer": true
+        }
+    ],
+    "license": "MIT",
+    "frameworks": "*",
+    "platforms": "*"
+}

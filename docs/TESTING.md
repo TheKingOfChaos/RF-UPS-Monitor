@@ -10,6 +10,10 @@ The project has three test layers. Each one tests what the layer below cannot.
 
 The rules for writing tests are in [.clinerules](../.clinerules), section *Testing Requirements → Test Rules*.
 
+## CI
+
+[.github/workflows/tests.yml](../.github/workflows/tests.yml) runs on every push and pull request on GitHub: the native unit tests, the same tests under AddressSanitizer/UBSan, the SNMP agent against net-snmp (`scripts/host_agent_check.sh`, including MIB validation), and a firmware build that uploads `firmware.uf2` as an artifact. It also compiles the on-device test programs. The on-device and HIL tests need the Pico and are run locally.
+
 ## One-time setup
 
 ### Host compiler (for `native`)
@@ -53,6 +57,27 @@ $pio = "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe"
 & $pio test -e pico   -f embedded/test_settings_store
 ```
 
+### Sanitizers (memory safety)
+
+Code that parses data from the network must be free of out-of-bounds reads and undefined behaviour. MinGW has no sanitizers, so the native suites are also built with gcc in WSL using AddressSanitizer and UndefinedBehaviorSanitizer:
+
+```powershell
+& $pio test -e native     # once, downloads Unity and ArduinoJson
+wsl -d Ubuntu-24.04 -- bash scripts/sanitize.sh
+```
+
+Every native suite must be listed in `scripts/sanitize.sh`; the script fails if one is missing.
+
+### SNMP agent against net-snmp, without hardware
+
+`scripts/host_agent_check.sh` builds the SNMP agent libraries into a small UDP server (`test/host/host_agent.cpp`, with ASan/UBSan), runs it on 127.0.0.1 in WSL and checks the output of the real `snmpget`, `snmpgetnext`, `snmpwalk` and `snmpset`. Use it after changing `lib/snmp_ber` or `lib/snmp_agent`, before flashing:
+
+```powershell
+wsl -d Ubuntu-24.04 -- bash scripts/host_agent_check.sh
+```
+
+It needs the `snmp` package in WSL. If `snmp-mibs-downloader` is installed too (it is on this PC), it also validates `mibs/RF-UPS-MONITOR-MIB.txt`: `snmptranslate -PW` must report no warnings in our file, every object must be in the tree, and `snmpget` must show MIB names (`mainsPowerStatus.0 = INTEGER: present(1)`). Without that package the MIB checks are skipped.
+
 ### HIL tests
 
 These run against the real firmware, so flash it first:
@@ -62,7 +87,11 @@ These run against the real firmware, so flash it first:
 & "$env:USERPROFILE\.platformio\penv\Scripts\python.exe" -m unittest discover -s test/hil -v
 ```
 
-They use the Python and `pyserial` that come with PlatformIO, so there is nothing to install.
+They use the Python and `pyserial` that come with PlatformIO, so there is nothing to install. The SNMP tests (`test_snmp.py`) also call net-snmp in WSL (`wsl -d Ubuntu-24.04 -- snmpget ...`) and send raw UDP from Windows; they read the device IP from the serial status screen. Run one file with `-p`:
+
+```powershell
+& "$env:USERPROFILE\.platformio\penv\Scripts\python.exe" -m unittest discover -s test/hil -p "test_snmp.py" -v
+```
 
 The device must be in DHCP mode when the run starts, and is left in DHCP mode. The menu is available before the network is up, so tests that need the network call `Device.wait_connected()` first. The static IP test is skipped unless you give it a free address:
 
@@ -70,8 +99,11 @@ The device must be in DHCP mode when the run starts, and is left in DHCP mode. T
 $env:RFUPS_STATIC_IP = "10.10.6.250"   # must not be in use on the LAN
 $env:RFUPS_STATIC_MASK = "255.255.0.0" # optional, default 255.255.0.0
 $env:RFUPS_STATIC_GW = "10.10.0.1"     # optional, default: current DHCP gateway
-$env:RFUPS_MANUAL_MAINS = "1"          # optional, interactive mains off/on test
+$env:RFUPS_MANUAL_MAINS = "1"          # optional, interactive mains off/on tests (status, SNMP, traps)
+$env:RFUPS_MANUAL_BUTTON = "1"         # optional, interactive factory reset button test
 ```
+
+The trap tests (`test_snmp_traps.py`) set the device's trap destination to this PC and listen on UDP 162. Windows Firewall asks once whether PlatformIO's Python may receive network traffic; allow it on the network the Pico is on, or no traps arrive. The tests restore the previous trap destination.
 
 Flashing an embedded test replaces the firmware, so always reflash with `pio run -e pico -t upload` before HIL tests or normal use.
 
@@ -88,6 +120,54 @@ Flashing an embedded test replaces the firmware, so always reflash with `pio run
 - Rejection of empty, malformed, wrong-version, mistyped, over-long and unprintable data, with no truncation
 - Static configuration is validated only when DHCP is off
 - Sequence comparison across 32-bit wrap-around, A/B slot selection, and fallback when the newer copy is invalid
+- sysName/sysContact/sysLocation: defaults, round trip with characters JSON escapes, worst-case size fits, older files load with defaults, over-long/non-printable/mistyped values rejected, empty allowed; `settingsTextIsValid` boundaries
+
+### `test/native/test_snmp_ber`: `lib/snmp_ber`
+- OID text parsing and formatting, X.690 rules for the first two arcs, 32-bit arcs, arc limit
+- Lexicographic OID ordering (numeric, prefix first) and prefix matching, for GetNext
+- Minimal encodings of INTEGER (sign boundaries, INT32_MIN/MAX), Counter32/Gauge32/TimeTicks (leading 0x00), OCTET STRING, NULL, OID, IpAddress
+- Short and long form lengths, nested sequences growing past 127 bytes, buffer-full and nesting errors
+- Byte-exact encode and decode of requests captured from net-snmp (`snmpget`, two varbinds)
+- Strict decoding: truncation at every length, lengths beyond the buffer, indefinite/oversized lengths, multi-byte tags, wrong tags, bad INTEGER/unsigned/NULL/OID encodings, child readers confined to their region, sticky errors
+- Every single-byte corruption of a real request (~15 000 packets) decodes safely; run `scripts/sanitize.sh` to check this under AddressSanitizer
+
+### `test/native/test_snmp_message`: `lib/snmp_agent` message layer
+- net-snmp Get, GetNext and two-varbind requests parsed exactly; SetRequest accepted for the agent to reject
+- v2c/v3 → BadVersion, response/trap/unknown PDUs → UnsupportedPdu, trailing bytes, every truncation, varbind without value, garbage → Malformed
+- Varbind limit (16), empty varbind list
+- GetResponse byte-exact; every value type; unknown value type and full buffer fail cleanly
+- Error responses echo the request varbinds byte for byte; community preserved byte for byte
+- Every single-byte corruption of a real request parses safely
+
+### `test/native/test_snmp_agent`: MIB and request handling
+- MIB strictly sorted, expected objects, exact match and next-object lookup (non-leaf and between objects)
+- GetRequest of every object with type and value from the device state; mains lost; empty strings
+- noSuchName with the right error-index for unknown and non-leaf OIDs
+- Full walk from `1.3` visits every object in order and ends with noSuchName; enterprise subtree; several GetNext varbinds
+- SetRequest → noSuchName with the value echoed
+- No response for wrong community (several near-misses), changed community, v2c/v3, response PDUs, malformed packets
+- tooBig when the response does not fit, nothing when even the error does not fit, 16 varbinds fit
+- Statistics, request id echo across the int32 range, every single-byte corruption yields either nothing or a valid response
+
+### `test/native/test_snmp_trap`: trap encoding
+- mainsPowerLost and coldStart byte-for-byte identical to net-snmp's `snmptrap` output for the same fields; authenticationFailure differs only in generic-trap
+- mainsPowerRestored fields, varbinds are the MIB objects with the right types, configured community used
+- Failure on small buffers, missing community, too many varbinds
+- Throttle: one per interval, first event at time 0, millis() wrap-around
+
+### `test/native/test_access_control`: rate limiter and access log
+- Burst then refusal, refill at the configured rate, refill capped at the burst, sustained rate over 10 s within 2 requests of the theory
+- Independent per-source buckets; full table evicts the least recently seen source; wrap-around; time going backwards adds nothing
+- Log newest-first, folding of repeats with first/last time and count, new entry on a different source or event, ring buffer keeps the newest 16, clamped index
+- Event names, IPv4 formatting
+
+### `test/native/test_reset_button`: factory reset button logic
+- Idle button: no events, LED off
+- 10 s hold triggers exactly once, counted from the debounced press, within DEBOUNCE_MS of the physical press
+- Short press and release 1 ms before the hold time do not trigger (raw level is checked, not only the debounced one)
+- Contact bounce filtered; button held at boot must be released before it can trigger
+- LED pattern: slow blink while held, fast after trigger, also after release
+- millis() wrap-around, configurable hold time
 
 ### `test/native/test_power_debouncer`: `lib/power_monitor`
 - Initial state not counted as a change, stable input never changes
@@ -109,6 +189,9 @@ Uses `test/settings_a.json` and `test/settings_b.json`, never the real settings.
 - Both copies corrupt, or a file that is too large: defaults are used
 - A v1 file is loaded and replaced by a newer copy
 - Saving factory defaults (sequence 0) still beats the stored copy
+- A maximum-size file (every text field at 63/31 characters, fully JSON-escaped) saves and reloads
+- Files left by older firmware (`config.bak`, `config.schema.json`, `data/active_file`) are removed and the settings copies kept
+- Stack use of save + load, measured by painting the stack: must stay within 1536 bytes (it was over 3 KB before the buffers were made static and -Os was restored, which crashed the device)
 
 ### `test/embedded/test_ethernet`: W5500 and lwIP
 - W5500 detected over SPI, link up, DHCP lease with a gateway, gateway answers ping
@@ -121,7 +204,33 @@ Uses `test/settings_a.json` and `test/settings_b.json`, never the real settings.
 - DHCP save → reboot → reconnect → ping
 - Static IP applied after reboot, then DHCP restored (opt-in)
 - Mains power line on the status screen
+- SNMP settings on the status screen; option 4 rejects an empty or 32-character community, a 64-character sysName and a line longer than the input buffer; Enter keeps, `-` clears; cancel changes nothing
 - Mains loss and restore reported in the log and status (manual: `RFUPS_MANUAL_MAINS=1`, you switch mains off and on when asked)
+
+### `test/hil/test_snmp.py`: the SNMP agent on the device
+- `snmpget` of sysDescr, sysObjectID, several varbinds in order; sysUpTime advances ~100 ticks per second
+- Mains objects present and consistent with the serial status screen
+- `snmpwalk` of everything (10 objects in order, End of MIB), the system group (7) and the enterprise subtree (3)
+- noSuchName for unknown OIDs and past the end; `snmpset` rejected and nothing changed
+- Wrong community and v2c get no reply and are counted on the status screen
+- SNMP settings set from the menu show up in `snmpget` immediately (no reboot), the old community is refused, and they survive a reboot; the originals are restored afterwards
+- Rate limit: requests as fast as replies come back for 3 s are answered at burst + 50/s (±15 %), the rest dropped, counted and logged; answers resume after a pause
+- Access log lists bad community and bad version from this PC, newest first; SetRequests are logged
+- The device must use community `public` for this suite
+
+### `test/hil/test_snmp_traps.py`: traps on the device
+- coldStart arrives after a reboot (empty ARP table, the trap is the first packet to this PC), exactly once, from the device's address, with a small time-stamp
+- A wrong community sends one authenticationFailure trap; five more within 10 s send none but are counted in the access log
+- No traps when the destination is off; trap counter on the status screen; SNMP keeps answering
+- mainsPowerLost and mainsPowerRestored with correct varbinds, change counter and time-stamps (manual, `RFUPS_MANUAL_MAINS=1`)
+
+### `test/hil/test_factory_reset.py`: the reset button (manual, `RFUPS_MANUAL_BUTTON=1`)
+- A ~3 s press is released without reset, and SNMP keeps answering while it is held
+- A 10 s hold resets after 10000-10100 ms, defaults are saved in under 2 s, the device reboots with DHCP, `public`, default sysName, no trap destination and default stored static IP
+- Your previous SNMP settings and stored static IP are restored afterwards
+- 30 requests: every reply echoes its request id, worst case under 100 ms
+- 300 malformed packets in bursts: agent keeps answering; oversized packet ignored; 5 simultaneous requests all answered
+- Mains loss/restore over SNMP: status, change counter and last-change time (manual, `RFUPS_MANUAL_MAINS=1`)
 
 ## Adding a test
 
@@ -143,3 +252,7 @@ Uses `test/settings_a.json` and `test/settings_b.json`, never the real settings.
 | Embedded test hangs with no output | Board not running the test program. Press reset or replug. `scripts/wait_for_port.py` already waits for the port to come back after flashing. |
 | `test_dhcp_lease_obtained` fails | No cable, no link LED, or no DHCP server on that network. |
 | HIL tests skipped with "device is in Static mode" | Switch to DHCP with menu option 2 first. |
+| Device stops answering on USB right after saving | Stack overflow on core 0 (4 KB). Run `test_settings_store` for the stack measurement, check no large buffer was put on the stack, and that `-Os` is not unflagged. Replug USB to recover. |
+| A HIL run hangs and COM16 stays "Access denied" | The device hung and the test process is stuck in the USB driver; replug the Pico. |
+| Trap tests: "no ... trap" although the status screen counts them as sent | Windows Firewall blocks inbound UDP for PlatformIO's Python; allow it (Public or Private profile, whichever the LAN is). |
+| SNMP tests fail with timeouts right after the flood or rate-limit test | The rate limiter is still refilling; the tests wait 2.5 s, increase if your PC is slow. |

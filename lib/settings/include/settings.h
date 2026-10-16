@@ -79,6 +79,16 @@ extern bool settingsLoaded;
 bool loadSettings();
 
 /**
+ * @brief Delete files left behind by older firmware
+ *
+ * Removes /config.bak, /config.schema.json (pre-v3 firmware) and
+ * data/active_file (v3.0 pointer file). Missing files are ignored.
+ *
+ * @return Number of files removed
+ */
+uint8_t removeLegacyFiles();
+
+/**
  * @brief Save currentSettings to the default store
  * @return true if saved and verified
  */

@@ -1,0 +1,20 @@
+{
+    "name": "access_control",
+    "version": "1.0.0",
+    "description": "Per-source rate limiting and access log (pure C++, host testable)",
+    "keywords": "rate limit, token bucket, log",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3.git"
+    },
+    "authors": [
+        {
+            "name": "kenneth Foli Jørgensen",
+            "email": "kenneth@tkoc.dk",
+            "maintainer": true
+        }
+    ],
+    "license": "MIT",
+    "frameworks": "*",
+    "platforms": "*"
+}

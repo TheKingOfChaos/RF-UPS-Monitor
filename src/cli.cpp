@@ -3,6 +3,7 @@
 #include <mains_input.h>
 #include <netconfig.h>
 #include <settings.h>
+#include "snmp_service.h"
 
 // Menu state machine
 enum CliState {
@@ -10,28 +11,44 @@ enum CliState {
     CLI_STATIC_IP,      // Entering static IP
     CLI_STATIC_SUBNET,  // Entering subnet mask
     CLI_STATIC_GATEWAY, // Entering gateway
-    CLI_CONFIRM         // Confirming save and reboot
+    CLI_CONFIRM,        // Confirming network change, save and reboot
+    CLI_SNMP_COMMUNITY, // Entering SNMP community
+    CLI_SNMP_NAME,      // Entering sysName
+    CLI_SNMP_CONTACT,   // Entering sysContact
+    CLI_SNMP_LOCATION,  // Entering sysLocation
+    CLI_SNMP_TRAP,      // Entering trap destination
+    CLI_SNMP_CONFIRM    // Confirming SNMP change, save without reboot
 };
 
 static CliState state = CLI_MENU;
-static char lineBuf[32];
+static char lineBuf[96];
 static uint8_t lineLen = 0;
+static bool lineOverflow = false;  // More characters were typed than lineBuf holds
 
-// Values being entered, applied only on confirm
+// Network values being entered, applied only on confirm
 static char newIP[16];
 static char newSubnet[16];
 static char newGateway[16];
 static bool newDhcp;
+
+// SNMP values being entered, applied only on confirm
+static char newCommunity[COMMUNITY_MAX_LENGTH + 1];
+static char newSysName[SYS_TEXT_MAX_LENGTH + 1];
+static char newSysContact[SYS_TEXT_MAX_LENGTH + 1];
+static char newSysLocation[SYS_TEXT_MAX_LENGTH + 1];
+static char newTrapTarget[16];
 
 /**
  * @brief Print the main menu
  */
 static void printMenu() {
     Serial.println();
-    Serial.println("=== RF-UPS-Monitor Network Menu ===");
-    Serial.println("1. Show network status");
+    Serial.println("=== RF-UPS-Monitor Menu ===");
+    Serial.println("1. Show status");
     Serial.println("2. Use DHCP");
     Serial.println("3. Set static IP");
+    Serial.println("4. SNMP settings");
+    Serial.println("5. Access log");
     Serial.println("?. Show this menu");
     Serial.print("> ");
 }
@@ -52,6 +69,23 @@ static void printStatus() {
                       mains.present ? "present" : "LOST", (unsigned long)mains.changes,
                       (unsigned long)((millis() - mains.lastChangeMs) / 1000));
     }
+
+    const SnmpStats& snmp = snmpStats();
+    Serial.printf("SNMP: %lu packets, %lu responses (get %lu, getnext %lu, set %lu), "
+                  "bad community %lu, bad version %lu, malformed %lu\n",
+                  (unsigned long)snmp.inPackets, (unsigned long)snmp.outResponses,
+                  (unsigned long)snmp.inGetRequests, (unsigned long)snmp.inGetNextRequests,
+                  (unsigned long)snmp.inSetRequests, (unsigned long)snmp.inBadCommunity,
+                  (unsigned long)snmp.inBadVersions, (unsigned long)snmp.inParseErrors);
+    const SnmpServiceStats& svc = snmpServiceStats();
+    Serial.printf("SNMP security: %lu rate limited, %lu access log events\n",
+                  (unsigned long)svc.rateLimited, (unsigned long)snmpAccessLog().total());
+    Serial.printf("SNMP community: \"%s\"\n", currentSettings.community);
+    Serial.printf("sysName: \"%s\"\n", currentSettings.sysName);
+    Serial.printf("sysContact: \"%s\"\n", currentSettings.sysContact);
+    Serial.printf("sysLocation: \"%s\"\n", currentSettings.sysLocation);
+    Serial.printf("Trap destination: \"%s\" (%lu sent, %lu failed)\n", currentSettings.trapTarget,
+                  (unsigned long)svc.trapsSent, (unsigned long)svc.trapsFailed);
 
     Serial.printf("Mode: %s\n", currentSettings.dhcpEnabled ? "DHCP" : "Static");
     Serial.printf("Stored static IP: %s / %s, gateway %s\n",
@@ -91,6 +125,102 @@ static void startStaticEntry() {
 }
 
 /**
+ * @brief Accept a text line for an SNMP setting
+ *
+ * Empty input keeps the current value; "-" clears it when empty is allowed.
+ * The menu only accepts printable characters, so length is the main check.
+ *
+ * @return true if dest now holds a valid value
+ */
+static bool takeText(const char* input, const char* current, char* dest, size_t maxLength, bool allowEmpty) {
+    const char* value = input;
+    if (input[0] == '\0') {
+        value = current;
+    } else if (strcmp(input, "-") == 0) {
+        value = "";
+    }
+    if (value[0] == '\0' && !allowEmpty) {
+        Serial.println("Must not be empty");
+        return false;
+    }
+    if (strlen(value) > maxLength) {
+        Serial.printf("Too long, at most %u characters\n", (unsigned)maxLength);
+        return false;
+    }
+    if (!settingsTextIsValid(value, maxLength, allowEmpty)) {
+        Serial.println("Only printable ASCII characters are allowed");
+        return false;
+    }
+    strlcpy(dest, value, maxLength + 1);
+    return true;
+}
+
+/**
+ * @brief Prompt for the SNMP setting that belongs to the current state
+ */
+static void promptSnmp() {
+    switch (state) {
+    case CLI_SNMP_COMMUNITY: prompt("Community", currentSettings.community); break;
+    case CLI_SNMP_NAME:      prompt("sysName", currentSettings.sysName); break;
+    case CLI_SNMP_CONTACT:   prompt("sysContact", currentSettings.sysContact); break;
+    case CLI_SNMP_LOCATION:  prompt("sysLocation", currentSettings.sysLocation); break;
+    case CLI_SNMP_TRAP:      prompt("Trap destination IP", currentSettings.trapTarget); break;
+    default: break;
+    }
+}
+
+/**
+ * @brief Accept the trap destination: empty keeps, "-" turns traps off, else an IPv4 address
+ */
+static bool takeTrapTarget(const char* input) {
+    if (input[0] == '\0') {
+        strlcpy(newTrapTarget, currentSettings.trapTarget, sizeof(newTrapTarget));
+        return true;
+    }
+    if (strcmp(input, "-") == 0) {
+        newTrapTarget[0] = '\0';
+        return true;
+    }
+    uint8_t octets[4];
+    if (strlen(input) >= sizeof(newTrapTarget) || !parseIPv4(input, octets)) {
+        Serial.printf("'%s' is not a valid IPv4 address\n", input);
+        return false;
+    }
+    strlcpy(newTrapTarget, input, sizeof(newTrapTarget));
+    return true;
+}
+
+/**
+ * @brief Show the access log, newest first
+ */
+static void printAccessLog() {
+    const AccessLog& log = snmpAccessLog();
+    uint32_t now = millis();
+    Serial.println();
+    Serial.printf("Access log: %u entries, %lu events since boot\n", log.size(), (unsigned long)log.total());
+    for (uint8_t i = 0; i < log.size(); i++) {
+        const AccessLog::Entry& e = log.newest(i);
+        char ip[16];
+        formatIPv4(e.source, ip);
+        Serial.printf("  %-15s %-14s x%-6lu last %lu s ago\n", ip, accessEventName(e.event),
+                      (unsigned long)e.count, (unsigned long)((now - e.lastMs) / 1000));
+    }
+    Serial.print("> ");
+}
+
+/**
+ * @brief Show the pending SNMP change and ask for confirmation
+ */
+static void askSnmpConfirm() {
+    Serial.println();
+    Serial.printf("New SNMP settings: community \"%s\", sysName \"%s\", sysContact \"%s\", sysLocation \"%s\", "
+                  "trap destination \"%s\"\n",
+                  newCommunity, newSysName, newSysContact, newSysLocation, newTrapTarget);
+    Serial.print("Save? (y/n): ");
+    state = CLI_SNMP_CONFIRM;
+}
+
+/**
  * @brief Show the pending change and ask for confirmation
  */
 static void askConfirm() {
@@ -123,6 +253,12 @@ static void handleLine(const char* line) {
             newDhcp = false;
             Serial.println("Press Enter to keep the value in brackets.");
             startStaticEntry();
+        } else if (strcmp(line, "4") == 0) {
+            Serial.println("Press Enter to keep the value in brackets, '-' to clear it.");
+            state = CLI_SNMP_COMMUNITY;
+            promptSnmp();
+        } else if (strcmp(line, "5") == 0) {
+            printAccessLog();
         } else if (line[0] == '\0') {
             Serial.print("> ");
         } else {
@@ -196,6 +332,64 @@ static void handleLine(const char* line) {
         state = CLI_MENU;
         printMenu();
         break;
+
+    case CLI_SNMP_COMMUNITY:
+        if (takeText(line, currentSettings.community, newCommunity, COMMUNITY_MAX_LENGTH, false)) {
+            state = CLI_SNMP_NAME;
+        }
+        promptSnmp();
+        break;
+
+    case CLI_SNMP_NAME:
+        if (takeText(line, currentSettings.sysName, newSysName, SYS_TEXT_MAX_LENGTH, true)) {
+            state = CLI_SNMP_CONTACT;
+        }
+        promptSnmp();
+        break;
+
+    case CLI_SNMP_CONTACT:
+        if (takeText(line, currentSettings.sysContact, newSysContact, SYS_TEXT_MAX_LENGTH, true)) {
+            state = CLI_SNMP_LOCATION;
+        }
+        promptSnmp();
+        break;
+
+    case CLI_SNMP_LOCATION:
+        if (takeText(line, currentSettings.sysLocation, newSysLocation, SYS_TEXT_MAX_LENGTH, true)) {
+            state = CLI_SNMP_TRAP;
+        }
+        promptSnmp();
+        break;
+
+    case CLI_SNMP_TRAP:
+        if (takeTrapTarget(line)) {
+            askSnmpConfirm();
+        } else {
+            promptSnmp();
+        }
+        break;
+
+    case CLI_SNMP_CONFIRM:
+        if (line[0] == 'y' || line[0] == 'Y') {
+            Settings saved = currentSettings;
+            strlcpy(currentSettings.community, newCommunity, sizeof(currentSettings.community));
+            strlcpy(currentSettings.sysName, newSysName, sizeof(currentSettings.sysName));
+            strlcpy(currentSettings.sysContact, newSysContact, sizeof(currentSettings.sysContact));
+            strlcpy(currentSettings.sysLocation, newSysLocation, sizeof(currentSettings.sysLocation));
+            strlcpy(currentSettings.trapTarget, newTrapTarget, sizeof(currentSettings.trapTarget));
+            // The SNMP agent reads these on every request, so no reboot is needed
+            if (saveSettings()) {
+                Serial.println("SNMP settings saved and active");
+            } else {
+                currentSettings = saved;
+                Serial.println("Failed to save settings, nothing changed");
+            }
+        } else {
+            Serial.println("Cancelled");
+        }
+        state = CLI_MENU;
+        printMenu();
+        break;
     }
 }
 
@@ -218,15 +412,33 @@ void cliProcess() {
             Serial.println();
             lineBuf[lineLen] = '\0';
             lineLen = 0;
+            if (lineOverflow) {
+                // Never act on a silently truncated value
+                lineOverflow = false;
+                Serial.printf("Input too long (max %u characters), ignored\n", (unsigned)(sizeof(lineBuf) - 1));
+                if (state == CLI_MENU) {
+                    Serial.print("> ");
+                } else if (state >= CLI_SNMP_COMMUNITY && state <= CLI_SNMP_TRAP) {
+                    promptSnmp();
+                } else {
+                    state = CLI_MENU;
+                    printMenu();
+                }
+                continue;
+            }
             handleLine(lineBuf);
         } else if (c == '\b' || c == 0x7F) {
             if (lineLen > 0) {
                 lineLen--;
                 Serial.print("\b \b");
             }
-        } else if (isprint((unsigned char)c) && lineLen < sizeof(lineBuf) - 1) {
-            lineBuf[lineLen++] = c;
-            Serial.print(c);    // Echo, terminals like PuTTY don't echo locally
+        } else if (isprint((unsigned char)c)) {
+            if (lineLen < sizeof(lineBuf) - 1) {
+                lineBuf[lineLen++] = c;
+                Serial.print(c);    // Echo, terminals like PuTTY don't echo locally
+            } else {
+                lineOverflow = true;
+            }
         }
     }
 }

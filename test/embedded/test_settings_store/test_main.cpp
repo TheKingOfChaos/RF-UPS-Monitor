@@ -120,7 +120,7 @@ static void test_both_copies_corrupt_loads_defaults() {
 
 static void test_oversized_file_is_ignored() {
     String big = "{\"community\":\"";
-    for (int i = 0; i < 400; i++) big += 'x';
+    for (size_t i = 0; i < SETTINGS_JSON_MAX + 100; i++) big += 'x';
     big += "\"}";
     writeRaw(PATH_A, big.c_str());
     SettingsStore store(PATH_A, PATH_B);
@@ -163,6 +163,102 @@ static void test_saving_defaults_is_newer_than_stored_copy() {
     TEST_ASSERT_EQUAL_UINT32(4, loaded.sequence);
 }
 
+static void test_maximum_size_settings_survive_save_and_reload() {
+    // All text fields at maximum length with characters JSON escapes: the largest file possible
+    Settings s = staticSettings("192.168.50.40");
+    memset(s.community, '"', COMMUNITY_MAX_LENGTH);
+    s.community[COMMUNITY_MAX_LENGTH] = '\0';
+    memset(s.sysName, '\\', SYS_TEXT_MAX_LENGTH);
+    s.sysName[SYS_TEXT_MAX_LENGTH] = '\0';
+    memset(s.sysContact, '"', SYS_TEXT_MAX_LENGTH);
+    s.sysContact[SYS_TEXT_MAX_LENGTH] = '\0';
+    memset(s.sysLocation, 'L', SYS_TEXT_MAX_LENGTH);
+    s.sysLocation[SYS_TEXT_MAX_LENGTH] = '\0';
+
+    SettingsStore store(PATH_A, PATH_B);
+    Settings tmp;
+    store.load(tmp);
+    TEST_ASSERT_TRUE(store.save(s));
+
+    File f = LittleFS.open(PATH_A, "r");
+    size_t size = f.size();
+    f.close();
+    TEST_ASSERT_GREATER_THAN(256, size);   // bigger than the old 256-byte limit
+    TEST_ASSERT_LESS_THAN(SETTINGS_JSON_MAX, size);
+
+    SettingsStore fresh(PATH_A, PATH_B);
+    Settings loaded;
+    TEST_ASSERT_EQUAL(SettingsSlot::A, fresh.load(loaded));
+    TEST_ASSERT_TRUE(settingsEqual(s, loaded));
+}
+
+static void test_legacy_files_are_removed_and_settings_kept() {
+    // Files written by older firmware; the real settings copies must survive
+    writeRaw("config.bak", "{}");
+    writeRaw("config.schema.json", "{}");
+    writeRaw("data/active_file", "data/settings_a.json");
+    bool hadA = LittleFS.exists(SETTINGS_FILE_A);
+    bool hadB = LittleFS.exists(SETTINGS_FILE_B);
+
+    TEST_ASSERT_EQUAL_UINT8(3, removeLegacyFiles());
+    TEST_ASSERT_FALSE(LittleFS.exists("config.bak"));
+    TEST_ASSERT_FALSE(LittleFS.exists("config.schema.json"));
+    TEST_ASSERT_FALSE(LittleFS.exists("data/active_file"));
+    TEST_ASSERT_EQUAL(hadA, LittleFS.exists(SETTINGS_FILE_A));
+    TEST_ASSERT_EQUAL(hadB, LittleFS.exists(SETTINGS_FILE_B));
+
+    TEST_ASSERT_EQUAL_UINT8(0, removeLegacyFiles());  // nothing left, nothing to do
+}
+
+// ---- stack usage ----
+// Core 0 has a 4 KB stack shared with USB, lwIP and W5500 interrupts. Saving
+// from the serial menu happens several calls deep, so save/load must stay small.
+
+static const size_t STACK_PROBE_SPAN = 3072;  // bytes below the caller that are painted and checked
+static const size_t SAVE_LOAD_STACK_BUDGET = 1536;
+static const uint8_t STACK_PAINT = 0xA5;
+
+static void saveAndLoadOnce() {
+    static SettingsStore store(PATH_A, PATH_B);
+    static Settings s;
+    store.load(s);
+    s = staticSettings("192.168.50.60");
+    memset(s.sysLocation, 'S', SYS_TEXT_MAX_LENGTH);
+    s.sysLocation[SYS_TEXT_MAX_LENGTH] = '\0';
+    TEST_ASSERT_TRUE(store.save(s));
+    static SettingsStore fresh(PATH_A, PATH_B);
+    static Settings loaded;
+    TEST_ASSERT_EQUAL(SettingsSlot::A, fresh.load(loaded));
+}
+
+/**
+ * @brief Bytes of stack fn() uses below this function's frame (high-water mark)
+ *
+ * Paints the free stack with a pattern, runs fn, and finds the lowest byte
+ * that was overwritten.
+ */
+static size_t __attribute__((noinline)) measureStackUse(void (*fn)()) {
+    volatile uint8_t* top = (volatile uint8_t*)__builtin_frame_address(0) - 64;  // margin for this frame
+    volatile uint8_t* bottom = top - STACK_PROBE_SPAN;
+    for (volatile uint8_t* p = bottom; p < top; p++) *p = STACK_PAINT;
+    fn();
+    volatile uint8_t* p = bottom;
+    while (p < top && *p == STACK_PAINT) p++;
+    return (size_t)(top - p);
+}
+
+static void test_save_and_load_use_little_stack() {
+    if ((size_t)rp2040.getFreeStack() < STACK_PROBE_SPAN + 512) {
+        TEST_IGNORE_MESSAGE("not enough free stack to probe");
+    }
+    size_t used = measureStackUse(saveAndLoadOnce);
+    char msg[64];
+    snprintf(msg, sizeof(msg), "save+load used %u bytes of stack", (unsigned)used);
+    Serial.println(msg);
+    TEST_ASSERT_LESS_THAN_MESSAGE(STACK_PROBE_SPAN, used, "probe span exhausted, usage unknown");
+    TEST_ASSERT_LESS_OR_EQUAL_MESSAGE(SAVE_LOAD_STACK_BUDGET, used, msg);
+}
+
 void setup() {
     Serial.begin(115200);
     uint32_t start = millis();
@@ -183,6 +279,9 @@ void setup() {
     RUN_TEST(test_oversized_file_is_ignored);
     RUN_TEST(test_legacy_file_without_sequence_is_loaded_and_superseded);
     RUN_TEST(test_saving_defaults_is_newer_than_stored_copy);
+    RUN_TEST(test_maximum_size_settings_survive_save_and_reload);
+    RUN_TEST(test_save_and_load_use_little_stack);
+    RUN_TEST(test_legacy_files_are_removed_and_settings_kept);
 
     LittleFS.rmdir("test");
     UNITY_END();

@@ -17,6 +17,9 @@ The project rules are in `.clinerules` and apply to all work here, including its
 | Unit tests (PC) | `pio test -e native` |
 | On-device tests | `pio test -e pico` (replaces the firmware, reflash afterwards) |
 | HIL tests | `%USERPROFILE%\.platformio\penv\Scripts\python.exe -m unittest discover -s test/hil -v` |
+| Sanitizers | `wsl -d Ubuntu-24.04 -- bash scripts/sanitize.sh` (after `pio test -e native`) |
+| SNMP vs net-snmp, no hardware | `wsl -d Ubuntu-24.04 -- bash scripts/host_agent_check.sh` |
+| SNMP HIL only | `... python.exe -m unittest discover -s test/hil -p "test_snmp.py" -v` |
 
 Details and setup are in `docs/TESTING.md`.
 
@@ -32,5 +35,9 @@ Details and setup are in `docs/TESTING.md`.
 - `include/pins.h`: all GPIO assignments
 - `lib/netconfig`, `lib/settings_codec`: pure C++, host tested
 - `lib/settings`: LittleFS A/B storage on top of `settings_codec`
-- `lib/power_monitor` (pure, host tested) and `lib/mains_input` (GPIO27 on core 1, `setup1()`/`loop1()` in `main.cpp`)
+- `lib/snmp_ber`: BER codec and OIDs (pure, host tested, sanitizer checked)
+- `lib/snmp_agent`: SNMP v1 messages, MIB table, request handling (pure); `src/snmp_service.cpp` runs it on UDP 161. MIB docs in `docs/MIB.md`
+- `lib/power_monitor` (pure: mains debouncer, reset button) and `lib/mains_input` (GPIO27 on core 1, `setup1()`/`loop1()` in `main.cpp`); `src/factory_reset.cpp` samples GPIO22 on core 1
+- `lib/access_control` (pure): SNMP rate limiter and access log
+- CI: `.github/workflows/tests.yml` runs native tests, sanitizers, net-snmp check and the firmware build
 - `test/native`, `test/embedded`, `test/hil`: the three test layers

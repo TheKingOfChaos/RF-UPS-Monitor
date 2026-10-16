@@ -1,0 +1,79 @@
+# Runs everything that does not need the hardware. The on-device and HIL
+# tests (test/embedded, test/hil) must still be run locally with the Pico
+# attached; see docs/TESTING.md.
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  host:
+    name: Unit tests, sanitizers, net-snmp check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-native-${{ hashFiles('platformio.ini') }}
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Unit tests (native)
+        run: pio test -e native
+
+      - name: Unit tests under AddressSanitizer + UBSan
+        run: bash scripts/sanitize.sh
+
+      - name: Install net-snmp tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y snmp
+          # Standard IETF MIBs for validating mibs/RF-UPS-MONITOR-MIB.txt; the
+          # check skips those tests if this package is unavailable
+          sudo apt-get install -y snmp-mibs-downloader || echo "snmp-mibs-downloader not available"
+
+      - name: SNMP agent against net-snmp
+        run: bash scripts/host_agent_check.sh
+
+  firmware:
+    name: Firmware build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-pico-${{ hashFiles('platformio.ini') }}
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Build firmware
+        run: pio run -e pico
+
+      - name: Build on-device test programs
+        run: pio test -e pico --without-uploading --without-testing
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware
+          path: .pio/build/pico/firmware.uf2

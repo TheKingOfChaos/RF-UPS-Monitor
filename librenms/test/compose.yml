@@ -1,0 +1,61 @@
+# Throw-away LibreNMS to check the RF-UPS-Monitor definitions (based on librenms/docker examples/compose)
+name: lnms-test
+
+x-env: &env
+  TZ: Europe/Copenhagen
+  PUID: "1000"
+  PGID: "1000"
+  DB_HOST: db
+  DB_NAME: librenms
+  DB_USER: librenms
+  DB_PASSWORD: librenms-test
+  DB_TIMEOUT: "60"
+  REDIS_HOST: redis
+  CACHE_DRIVER: redis
+  SESSION_DRIVER: redis
+  LIBRENMS_SNMP_COMMUNITY: public
+
+services:
+  db:
+    image: mariadb:10.11
+    command: [mysqld, --innodb-file-per-table=1, --lower-case-table-names=0,
+              --character-set-server=utf8mb4, --collation-server=utf8mb4_unicode_ci]
+    environment:
+      MARIADB_RANDOM_ROOT_PASSWORD: "yes"
+      MYSQL_DATABASE: librenms
+      MYSQL_USER: librenms
+      MYSQL_PASSWORD: librenms-test
+    volumes: [db:/var/lib/mysql]
+
+  redis:
+    image: redis:7.2-alpine
+
+  librenms:
+    image: librenms/librenms:latest
+    cap_add: [NET_ADMIN, NET_RAW]
+    depends_on: [db, redis]
+    ports: ["8070:8000"]
+    environment: *env
+    volumes:
+      - data:/data
+      - ${REPO:-../..}/librenms/os_detection/rfupsmonitor.yaml:/opt/librenms/resources/definitions/os_detection/rfupsmonitor.yaml:ro
+      - ${REPO:-../..}/librenms/os_discovery/rfupsmonitor.yaml:/opt/librenms/resources/definitions/os_discovery/rfupsmonitor.yaml:ro
+      - ${REPO:-../..}/mibs/RF-UPS-MONITOR-MIB.txt:/opt/librenms/mibs/rfupsmonitor/RF-UPS-MONITOR-MIB:ro
+
+  dispatcher:
+    image: librenms/librenms:latest
+    cap_add: [NET_ADMIN, NET_RAW]
+    depends_on: [librenms]
+    environment:
+      <<: *env
+      DISPATCHER_NODE_ID: dispatcher1
+      SIDECAR_DISPATCHER: "1"
+    volumes:
+      - data:/data
+      - ${REPO:-../..}/librenms/os_detection/rfupsmonitor.yaml:/opt/librenms/resources/definitions/os_detection/rfupsmonitor.yaml:ro
+      - ${REPO:-../..}/librenms/os_discovery/rfupsmonitor.yaml:/opt/librenms/resources/definitions/os_discovery/rfupsmonitor.yaml:ro
+      - ${REPO:-../..}/mibs/RF-UPS-MONITOR-MIB.txt:/opt/librenms/mibs/rfupsmonitor/RF-UPS-MONITOR-MIB:ro
+
+volumes:
+  db:
+  data:

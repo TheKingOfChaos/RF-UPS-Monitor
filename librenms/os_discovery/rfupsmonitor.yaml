@@ -21,6 +21,9 @@ modules:
                     descr: 'Board (RP2040 die)'
                     index: 'boardTemperature.{{ $index }}'
                     divisor: 10
+                    # Without low_limit LibreNMS sets one 10 degrees below the first reading,
+                    # which alarms when the room cools; -20 C is the RP2040's minimum rating
+                    low_limit: -20
                     warn_limit: 60
                     high_limit: 70
         count:

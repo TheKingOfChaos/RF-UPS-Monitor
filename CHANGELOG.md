@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Fixed
+- LibreNMS temperature sensor: low limit set to -20 C. Without it LibreNMS put the low limit 10 C below the first reading, which alarmed when the room cooled down.
+
+### Added
+- `librenms/test/compose.yml`: a throw-away LibreNMS in Docker for checking the definitions. Tested with LibreNMS 26.9.1 against the device (see docs/LIBRENMS.md).
+
 ## [1.0.1] - 2026-10-17
 
 ### Added
@@ -43,7 +49,7 @@ First release.
 
 ### Known limits
 - The network stack queues 5 UDP packets; larger bursts are dropped (SNMP managers retry).
-- Not yet tested with the real hardware: mains traps with real mains, the factory reset button, the "no link" and "no DHCP server" states. The LibreNMS definitions are validated against the schema but not yet tried in a running LibreNMS.
+- Not yet tested with the real hardware: mains traps with real mains, the factory reset button, the "no link" and "no DHCP server" states. The LibreNMS definitions are validated against the schema but not yet tried in a running LibreNMS (done after 1.0.1).
 
 [Unreleased]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v1.0.1...HEAD
 [1.0.1]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v1.0.0...v1.0.1

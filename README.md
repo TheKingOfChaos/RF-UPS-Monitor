@@ -18,7 +18,7 @@ Current version: **1.0.1** (see [CHANGELOG.md](CHANGELOG.md)).
 | SNMP rate limiting and access log | Working |
 | Interface statistics (IF-MIB ifTable/ifXTable, 64-bit counters) | Working, counted by the firmware |
 | Board temperature (RP2040 internal sensor) | Working |
-| LibreNMS OS definition | Validated against the LibreNMS schema; not yet tried in a running LibreNMS |
+| LibreNMS OS definition (mains state, temperature, change counter) | Working, tested with LibreNMS 26.9.1 |
 
 See [TODO.md](TODO.md) for the detailed plan.
 
@@ -230,7 +230,7 @@ src/snmp_service.cpp        UDP port 161, device state for the MIB
 src/net_stats.cpp           Counts frames at the lwIP driver, reads the W5500 PHY register
 src/board_temp.cpp          RP2040 die temperature, averaged
 mibs/                       RF-UPS-MONITOR-MIB
-librenms/                   LibreNMS OS detection and discovery definitions
+librenms/                   LibreNMS OS detection and discovery definitions, Docker test setup
 test/host/                  Host build of the agent for net-snmp checks
 test/native/                Unit tests, run on the PC
 test/embedded/              Unity tests, run on the Pico

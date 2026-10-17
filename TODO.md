@@ -66,7 +66,9 @@ An item is only ticked when it is implemented **and** its tests exist and pass (
 - [x] boardTemperature (63050.4, 0.1 °C, RP2040 sensor averaged) in the agent and the MIB file — native, net-snmp, HIL
 - [x] Status screen: board temperature, Ethernet link and traffic — HIL
 - [x] LibreNMS OS detection/discovery definitions (`librenms/`), validated against the LibreNMS schemas — `docs/LIBRENMS.md`
-- [ ] Try the LibreNMS definitions in a running LibreNMS
+- [x] Tried in LibreNMS 26.9.1 (Docker, `librenms/test/compose.yml`) against the device: OS/version/hardware, three sensors, port and rates, unhandled trap in the event log
+- [x] Temperature low limit set to -20 C (LibreNMS's automatic one was 10 C below the first reading)
+- [ ] Optional: LibreNMS trap handler for mainsPowerLost/Restored (PHP, would have to go upstream)
 - [x] ifInDiscards (driver drops for lack of a buffer, via `CountingW5500`), ifInErrors (impossible lengths), ifInUnknownProtos (EtherType) — native `test_if_stats`, `test_if_receive_discards_errors_and_unknown_protocols`, net-snmp, HIL `test_receive_drop_counters_match_the_status_screen`
 - [ ] Not possible with the W5500: CRC errors and W5500 receive-buffer overflows (no counters in the chip); ifOutDiscards (lwIP drops before the driver)
 ### 2.6 Traps — `lib/snmp_agent/snmp_trap`, `test/native/test_snmp_trap`, `test/hil/test_snmp_traps.py`

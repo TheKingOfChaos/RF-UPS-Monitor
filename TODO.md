@@ -13,7 +13,7 @@ An item is only ticked when it is implemented **and** its tests exist and pass (
 - [ ] Test the "no link" and "no DHCP server" states (needs a switchable port or isolated network)
 - [x] Delete the obsolete custom stack (`lib/w5500`, `lib/network`) and its tests
 
-## 2. SNMP v1 agent
+## 2. SNMP v1/v2c agent
 ### 2.1 BER codec (pure library, native tests) — `lib/snmp_ber`, `test/native/test_snmp_ber`
 - [x] Length encoding/decoding (short and long form, minimal on encode)
 - [x] INTEGER, OCTET STRING, NULL, OBJECT IDENTIFIER, SEQUENCE, IpAddress
@@ -51,12 +51,23 @@ An item is only ticked when it is implemented **and** its tests exist and pass (
 ### 2.7 SNMPv2c (decided 2026-10-17: v1 and v2c, no v3; traps in v1 or v2c)
 - [x] Parse and answer v2c (version 1), each request in its own version; v3 dropped and counted — native + HIL
 - [x] v2c exceptions: noSuchObject / noSuchInstance (Get), endOfMibView (GetNext) — native, net-snmp, HIL
-- [x] GetBulkRequest: non-repeaters, max-repetitions, early stop at endOfMibView, truncation to fit (max 64 varbinds), tooBig only if nothing fits — native, net-snmp `snmpbulkget`/`snmpbulkwalk`, HIL
+- [x] GetBulkRequest: non-repeaters, max-repetitions, early stop at endOfMibView, truncation to fit (max 16 varbinds, see 8), tooBig only if nothing fits — native, net-snmp `snmpbulkget`/`snmpbulkwalk`, HIL
 - [x] v2c Set: notWritable / noCreation; v2c tooBig with empty varbind list — native, net-snmp
 - [x] v1 behaviour unchanged — native `test_v1_behaviour_is_unchanged_for_the_same_requests`, all v1 tests still pass
 - [x] SNMPv2-Trap (sysUpTime.0, snmpTrapOID.0, objects), byte-exact against `snmptrap -v2c` — native
 - [x] Trap version setting (default v2c), menu option 4, status screen — native + HIL; trap tests run in both versions
 - [x] v2c and GetBulk counters on the status screen
+### 2.8 IF-MIB and board temperature (for LibreNMS)
+- [x] Counter64 in the BER codec — native
+- [x] Frame counting (octets, unicast, multicast, broadcast, 64-bit) and W5500 PHYCFGR decoding, `lib/if_stats` — native `test_if_stats`
+- [x] Counting hooked into the lwIP netif input/linkoutput, PHY read every 500 ms, link changes logged, `src/net_stats.cpp` — HIL `test_traffic_counters_count_real_packets`, `test_if_speed_and_mac_match_the_device`
+- [x] ifNumber, ifTable (22 columns), ifXTable (19 columns) for interface 1 — native, net-snmp `host_agent_check.sh`, HIL
+- [x] Counter64 hidden from v1 requests (RFC 3584) — native, net-snmp, HIL
+- [x] boardTemperature (63050.4, 0.1 °C, RP2040 sensor averaged) in the agent and the MIB file — native, net-snmp, HIL
+- [x] Status screen: board temperature, Ethernet link and traffic — HIL
+- [x] LibreNMS OS detection/discovery definitions (`librenms/`), validated against the LibreNMS schemas — `docs/LIBRENMS.md`
+- [ ] Try the LibreNMS definitions in a running LibreNMS
+- [ ] ifInErrors / ifInDiscards from the W5500 (not visible in MAC-raw mode; reported as 0)
 ### 2.6 Traps — `lib/snmp_agent/snmp_trap`, `test/native/test_snmp_trap`, `test/hil/test_snmp_traps.py`
 - [x] SNMPv1 Trap-PDU encoding, byte-exact against net-snmp `snmptrap`
 - [x] coldStart once per boot when the network comes up — HIL (after reboot, empty ARP table)
@@ -123,6 +134,7 @@ An item is only ticked when it is implemented **and** its tests exist and pass (
 - [x] Rate limiter no longer freezes after an idle gap of more than 2^31 ms — native `test_idle_gap_longer_than_24_days_refills_instead_of_freezing`
 - [x] Access logging: rejected requests with source, folded repeats, menu option 5 and serial log — native + HIL
 - [x] authenticationFailure trap for wrong communities, throttled (see 2.6)
+- [x] GetBulk replies capped at 16 varbinds against reflection/amplification with faked sources, and GetBulk does not grant trust — native `test_getbulk_response_is_capped_against_amplification`, `test_getbulk_outcome_does_not_count_as_trust`, net-snmp, HIL
 - [x] Malformed packet tests for the BER layer (truncation, every single-byte corruption, sanitizers)
 - [x] Same for the message and agent layers, plus malformed floods against the device (HIL)
 
@@ -130,9 +142,11 @@ An item is only ticked when it is implemented **and** its tests exist and pass (
 - [x] README: hardware, menu, storage, build, test
 - [x] docs/TESTING.md
 - [x] MIB document (docs/MIB.md) and MIB file
-- [ ] CHANGELOG and version tags
+- [x] CHANGELOG.md (Keep a Changelog) and version tags (`v1.0.0`)
+- [x] docs/LIBRENMS.md
 
 ## Notes
 - SNMP must be v1 and v2c (no v3) and our own code; networking may use libraries
-- Memory limits: 70 % flash, 50 % RAM (now 8 % / 29 %, built with -Os)
+- Memory limits: 70 % flash, 50 % RAM (1.0.0: 8.5 % / 30 %, built with -Os)
+- Version: `include/version.h`; every user-visible change goes into CHANGELOG.md under [Unreleased]
 - Core 0 has a 4 KB stack shared with USB/lwIP/W5500 interrupts: keep big buffers static

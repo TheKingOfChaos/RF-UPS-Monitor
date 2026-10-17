@@ -51,6 +51,11 @@ static SnmpValue getIfInNUcastPkts(const SnmpDeviceState& s) {
     return counter32(s.iface.counters.inMulticastPkts + s.iface.counters.inBroadcastPkts);
 }
 static SnmpValue getZeroCounter(const SnmpDeviceState&) { return counter32(0); }  // not measurable
+static SnmpValue getIfInDiscards(const SnmpDeviceState& s) { return counter32(s.iface.counters.inDiscards); }
+static SnmpValue getIfInErrors(const SnmpDeviceState& s) { return counter32(s.iface.counters.inErrors); }
+static SnmpValue getIfInUnknownProtos(const SnmpDeviceState& s) {
+    return counter32(s.iface.counters.inUnknownProtos);
+}
 static SnmpValue getIfOutOctets(const SnmpDeviceState& s) { return counter32(s.iface.counters.outOctets); }
 static SnmpValue getIfOutUcastPkts(const SnmpDeviceState& s) { return counter32(s.iface.counters.outUcastPkts); }
 static SnmpValue getIfOutNUcastPkts(const SnmpDeviceState& s) {
@@ -135,13 +140,13 @@ static const MibEntry MIB[] = {
     {IF(10), getIfInOctets},
     {IF(11), getIfInUcastPkts},
     {IF(12), getIfInNUcastPkts},
-    {IF(13), getZeroCounter},      // ifInDiscards
-    {IF(14), getZeroCounter},      // ifInErrors: the W5500 drops bad frames before software sees them
-    {IF(15), getZeroCounter},      // ifInUnknownProtos
+    {IF(13), getIfInDiscards},     // no receive buffer free in lwIP
+    {IF(14), getIfInErrors},       // impossible length; the W5500 drops CRC errors itself
+    {IF(15), getIfInUnknownProtos},
     {IF(16), getIfOutOctets},
     {IF(17), getIfOutUcastPkts},
     {IF(18), getIfOutNUcastPkts},
-    {IF(19), getZeroCounter},      // ifOutDiscards
+    {IF(19), getZeroCounter},      // ifOutDiscards: lwIP drops before the driver, not visible
     {IF(20), getIfOutErrors},
     {IF(21), getIfOutQLen},
     {IF(22), getIfSpecific},

@@ -157,8 +157,8 @@ Flashing an embedded test replaces the firmware, so always reflash with `pio run
 - `test_settings_codec`: trap version default v2c, round trip, invalid values rejected
 
 ### IF-MIB and board temperature in the native suites
-- `test_if_stats` (`lib/if_stats`): frame classification (unicast, multicast, broadcast, runt frames), octet and packet counting, 64-bit counters past 2^32, W5500 PHYCFGR decoding (link, 10/100, duplex) and speed in bit/s
-- `test_snmp_agent`: ifTable and ifXTable values from the device state, ifPhysAddress is the MAC, Counter64 values, link down shows `down` and speed 0, no such instance for interface 2, Counter64 objects do not exist for v1 (Get and walk, RFC 3584), a v1 walk returns every other object, board temperature
+- `test_if_stats` (`lib/if_stats`): frame classification (unicast, multicast, broadcast, runt frames), receive verdicts (IPv4/ARP delivered, IPv6 only when enabled, other EtherTypes unknown, length boundaries 13/14/1514/1515), each received frame in exactly one counter, discards, octet and packet counting, 64-bit counters past 2^32, W5500 PHYCFGR decoding (link, 10/100, duplex) and speed in bit/s
+- `test_snmp_agent`: ifTable and ifXTable values from the device state, ifInDiscards/ifInErrors/ifInUnknownProtos, ifPhysAddress is the MAC, Counter64 values, link down shows `down` and speed 0, no such instance for interface 2, Counter64 objects do not exist for v1 (Get and walk, RFC 3584), a v1 walk returns every other object, board temperature
 - `test_snmp_agent` GetBulk: a walk returns the whole MIB then endOfMibView, replies are capped at 16 varbinds (no amplification), a GetBulk does not make its source trusted
 
 ### `test/native/test_snmp_trap`: trap encoding
@@ -226,7 +226,7 @@ Uses `test/settings_a.json` and `test/settings_b.json`, never the real settings.
 - `snmpget` of sysDescr, sysObjectID, several varbinds in order; sysUpTime advances ~100 ticks per second
 - Mains objects present and consistent with the serial status screen
 - `snmpwalk` of everything (45 objects in v1 in order, End of MIB; v1 does not see the eight Counter64 columns), the system group (7) and the enterprise subtree (4)
-- IF-MIB: ifDescr, ifType, ifMtu, admin/oper status, ifName; ifSpeed, ifHighSpeed and ifPhysAddress match the status screen; 20 requests raise the 64-bit packet and octet counters; ifInOctets is the low half of ifHCInOctets; Counter64 is noSuchName in v1
+- IF-MIB: ifDescr, ifType, ifMtu, admin/oper status, ifName; ifSpeed, ifHighSpeed and ifPhysAddress match the status screen; 20 requests raise the 64-bit packet and octet counters; ifInOctets is the low half of ifHCInOctets; the receive drop counters match the status screen; Counter64 is noSuchName in v1
 - boardTemperature between 10 and 85 °C and within 2 °C of the status screen
 - noSuchName for unknown OIDs and past the end; `snmpset` rejected and nothing changed
 - Wrong community and v2c get no reply and are counted on the status screen

@@ -11,8 +11,9 @@
 #include "snmp_service.h"
 #include "version.h"
 
-// W5500 on SPI0 (MISO 16, CS 17, SCK 18, MOSI 19) with interrupt on GPIO21
-Wiznet5500lwIP eth(W5500_CS_PIN, SPI, W5500_INT_PIN);
+// W5500 on SPI0 (MISO 16, CS 17, SCK 18, MOSI 19) with interrupt on GPIO21;
+// the core's Wiznet5500lwIP driver, counting dropped frames for IF-MIB
+CountingW5500lwIP eth(W5500_CS_PIN, SPI, W5500_INT_PIN);
 
 // false if the W5500 did not respond at boot
 static bool ethPresent = false;

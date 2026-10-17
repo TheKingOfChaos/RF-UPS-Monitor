@@ -98,6 +98,8 @@ check "ifOperStatus up, 100M"   'ifOperStatus\.1 = INTEGER: up\(1\).*ifSpeed\.1 
       snmpget $IFMIB $TARGET IF-MIB::ifOperStatus.1 IF-MIB::ifSpeed.1 IF-MIB::ifHighSpeed.1
 check "ifInOctets wraps, ifHC not" 'ifInOctets\.1 = Counter32: 705032704.*ifHCInOctets\.1 = Counter64: 5000000000' \
       snmpget $IFMIB $TARGET IF-MIB::ifInOctets.1 IF-MIB::ifHCInOctets.1
+check "receive drops and errors" 'ifInDiscards\.1 = Counter32: 3.*ifInErrors\.1 = Counter32: 2.*ifInUnknownProtos\.1 = Counter32: 17' \
+      snmpget $IFMIB $TARGET IF-MIB::ifInDiscards.1 IF-MIB::ifInErrors.1 IF-MIB::ifInUnknownProtos.1
 check "v1: Counter64 absent"    'noSuchName' snmpget $SNMP_OPTS $TARGET 1.3.6.1.2.1.31.1.1.1.6.1
 check "v1 ifX walk, no Counter64" '^0 11$' bash -c "o=\$(snmpwalk $SNMP_OPTS $TARGET 1.3.6.1.2.1.31); echo \$(echo \"\$o\" | grep -c Counter64) \$(echo \"\$o\" | grep -c ' = ')"
 check "v2c ifX walk, 19 columns" '^19$' bash -c "snmpwalk $V2 $TARGET 1.3.6.1.2.1.31 | grep ' = ' | grep -vc 'No more'"

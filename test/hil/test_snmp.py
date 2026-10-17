@@ -230,7 +230,9 @@ class SnmpAgentTest(unittest.TestCase):
 
     IF_OIDS = {"ifDescr": "2.2.1.2", "ifType": "2.2.1.3", "ifMtu": "2.2.1.4", "ifSpeed": "2.2.1.5",
                "ifPhysAddress": "2.2.1.6", "ifAdminStatus": "2.2.1.7", "ifOperStatus": "2.2.1.8",
-               "ifInOctets": "2.2.1.10", "ifName": "31.1.1.1.1", "ifHCInOctets": "31.1.1.1.6",
+               "ifInOctets": "2.2.1.10", "ifInDiscards": "2.2.1.13", "ifInErrors": "2.2.1.14",
+               "ifInUnknownProtos": "2.2.1.15", "ifOutDiscards": "2.2.1.19", "ifOutErrors": "2.2.1.20",
+               "ifName": "31.1.1.1.1", "ifHCInOctets": "31.1.1.1.6",
                "ifHCInUcastPkts": "31.1.1.1.7", "ifHCOutOctets": "31.1.1.1.10",
                "ifHCOutUcastPkts": "31.1.1.1.11", "ifHighSpeed": "31.1.1.1.15"}
 
@@ -286,6 +288,21 @@ class SnmpAgentTest(unittest.TestCase):
         c64 = int(re.search(r"Counter64: (\d+)", v["ifHCInOctets"]).group(1))
         # Read in one request: the 32-bit value is the low half of the 64-bit one
         self.assertEqual(c64 & 0xFFFFFFFF, c32, out)
+
+    def test_receive_drop_counters_match_the_status_screen(self):
+        # The values depend on the LAN (e.g. LLDP or IPv6 frames are unknown protocols), so compare
+        # SNMP with the status screen read just before: never lower, and only a little higher
+        st = self.dev.status()
+        for key in ("inDiscards", "inErrors", "inUnknownProtos", "outErrors"):
+            self.assertIsNotNone(st[key], "status screen has no 'Ethernet drops' line:\n" + st["raw"])
+        v, out = self.ifmib("ifInDiscards", "ifInErrors", "ifInUnknownProtos", "ifOutDiscards", "ifOutErrors")
+        for name, key in (("ifInDiscards", "inDiscards"), ("ifInErrors", "inErrors"),
+                          ("ifInUnknownProtos", "inUnknownProtos"), ("ifOutErrors", "outErrors")):
+            m = re.match(r"Counter32: (\d+)$", v.get(name, ""))
+            self.assertIsNotNone(m, out)
+            self.assertGreaterEqual(int(m.group(1)), st[key], name)
+            self.assertLessEqual(int(m.group(1)), st[key] + 20, name)
+        self.assertEqual("Counter32: 0", v.get("ifOutDiscards"))
 
     def test_counter64_not_available_in_v1(self):
         rc, out = self.snmp("snmpget", "1.3.6.1.2.1.31.1.1.1.6.1")

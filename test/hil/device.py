@@ -152,6 +152,10 @@ class Device:
         m = re.search(r"^Ethernet: link (up|down), (\d+) Mbit/s", out, re.MULTILINE)
         info["linkUp"] = (m.group(1) == "up") if m else None
         info["linkMbps"] = int(m.group(2)) if m else None
+        m = re.search(r"^Ethernet drops: (\d+) discarded \(no buffer\), (\d+) errors, (\d+) unknown protocol, "
+                      r"(\d+) send errors", out, re.MULTILINE)
+        for i, key in enumerate(("inDiscards", "inErrors", "inUnknownProtos", "outErrors")):
+            info[key] = int(m.group(i + 1)) if m else None
         m = re.search(r"^MAC: ([0-9A-F:]+)", out, re.MULTILINE)
         info["mac"] = m.group(1) if m else None
         m = re.search(r"^SNMP v2c: (\d+) requests, (\d+) getbulk", out, re.MULTILINE)

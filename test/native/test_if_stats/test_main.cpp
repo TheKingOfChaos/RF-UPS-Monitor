@@ -56,6 +56,70 @@ static void test_octets_go_past_32_bits() {
     TEST_ASSERT_TRUE(c.inOctets > 0xFFFFFFFFull);
 }
 
+// A full-size buffer so every length up to the maximum can be passed
+static void frameWith(uint16_t etherType, uint8_t* buf) {
+    memset(buf, 0, ETH_MAX_FRAME_LEN + 1);
+    memcpy(buf, UNICAST, 12);
+    buf[12] = (uint8_t)(etherType >> 8);
+    buf[13] = (uint8_t)etherType;
+}
+
+static void test_ipv4_and_arp_are_delivered() {
+    static uint8_t f[ETH_MAX_FRAME_LEN + 1];
+    frameWith(0x0800, f);
+    TEST_ASSERT_EQUAL(RxVerdict::Deliver, classifyReceived(f, 60, false));
+    frameWith(0x0806, f);
+    TEST_ASSERT_EQUAL(RxVerdict::Deliver, classifyReceived(f, 60, false));
+}
+
+static void test_ipv6_is_delivered_only_with_ipv6_enabled() {
+    TEST_ASSERT_EQUAL(RxVerdict::UnknownProto, classifyReceived(MULTICAST_V6, sizeof(MULTICAST_V6), false));
+    TEST_ASSERT_EQUAL(RxVerdict::Deliver, classifyReceived(MULTICAST_V6, sizeof(MULTICAST_V6), true));
+}
+
+static void test_other_ethertypes_are_unknown_protocols() {
+    static uint8_t f[ETH_MAX_FRAME_LEN + 1];
+    // 802.3 length field (spanning tree), the boundary, VLAN tag, LLDP, almost IPv4
+    const uint16_t types[] = {0x0026, 0x05FF, 0x0600, 0x8100, 0x88CC, 0x0801, 0x0000, 0xFFFF};
+    for (uint16_t t : types) {
+        frameWith(t, f);
+        TEST_ASSERT_EQUAL_MESSAGE(RxVerdict::UnknownProto, classifyReceived(f, 60, true), "ethertype");
+    }
+}
+
+static void test_frame_length_boundaries() {
+    static uint8_t f[ETH_MAX_FRAME_LEN + 1];
+    frameWith(0x0800, f);
+    TEST_ASSERT_EQUAL(RxVerdict::Error, classifyReceived(f, 0, false));
+    TEST_ASSERT_EQUAL(RxVerdict::Error, classifyReceived(f, ETH_HEADER_LEN - 1, false));
+    TEST_ASSERT_EQUAL(RxVerdict::Deliver, classifyReceived(f, ETH_HEADER_LEN, false));
+    TEST_ASSERT_EQUAL(RxVerdict::Deliver, classifyReceived(f, ETH_MAX_FRAME_LEN, false));
+    TEST_ASSERT_EQUAL(RxVerdict::Error, classifyReceived(f, ETH_MAX_FRAME_LEN + 1, false));
+    TEST_ASSERT_EQUAL(RxVerdict::Error, classifyReceived(nullptr, 60, false));
+}
+
+static void test_received_frames_land_in_the_right_counter() {
+    static uint8_t ip[ETH_MAX_FRAME_LEN + 1], lldp[ETH_MAX_FRAME_LEN + 1];
+    frameWith(0x0800, ip);
+    frameWith(0x88CC, lldp);
+    IfCounters c;
+    memset(&c, 0, sizeof(c));
+    ifCountReceived(c, ip, 100, false);
+    ifCountReceived(c, lldp, 60, false);
+    ifCountReceived(c, MULTICAST_V6, 86, false);
+    ifCountReceived(c, ip, 10, false);
+    ifCountDiscard(c, 1514);
+    ifCountDiscard(c, 64);
+    // Only the deliverable frame counts as a packet
+    TEST_ASSERT_TRUE(c.inUcastPkts == 1 && c.inMulticastPkts == 0 && c.inBroadcastPkts == 0);
+    TEST_ASSERT_EQUAL_UINT32(2, c.inUnknownProtos);
+    TEST_ASSERT_EQUAL_UINT32(1, c.inErrors);
+    TEST_ASSERT_EQUAL_UINT32(2, c.inDiscards);
+    // Every received octet counts, delivered or not
+    TEST_ASSERT_TRUE(c.inOctets == 100 + 60 + 86 + 10 + 1514 + 64);
+    TEST_ASSERT_TRUE(c.outOctets == 0 && c.outUcastPkts == 0);
+}
+
 static void test_decode_phycfgr() {
     // RST and OPMD bits (7..3) are ignored
     PhyStatus p = decodePhyCfgr(0xBF);   // 1011 1111: link, 100M, full
@@ -84,6 +148,11 @@ int main() {
     RUN_TEST(test_short_or_null_frame_counts_as_unicast);
     RUN_TEST(test_counts_inbound_and_outbound_separately);
     RUN_TEST(test_octets_go_past_32_bits);
+    RUN_TEST(test_ipv4_and_arp_are_delivered);
+    RUN_TEST(test_ipv6_is_delivered_only_with_ipv6_enabled);
+    RUN_TEST(test_other_ethertypes_are_unknown_protocols);
+    RUN_TEST(test_frame_length_boundaries);
+    RUN_TEST(test_received_frames_land_in_the_right_counter);
     RUN_TEST(test_decode_phycfgr);
     RUN_TEST(test_no_link_means_speed_zero);
     return UNITY_END();

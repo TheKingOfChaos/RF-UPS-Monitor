@@ -50,8 +50,10 @@ The device has one interface, index 1: the W5500 Ethernet port. `ifNumber.0` (`1
 | 10, 16 | ifInOctets, ifOutOctets | Counter32 | Low 32 bits of the 64-bit counters |
 | 11, 17 | ifInUcastPkts, ifOutUcastPkts | Counter32 | Unicast frames |
 | 12, 18 | ifInNUcastPkts, ifOutNUcastPkts | Counter32 | Multicast + broadcast frames |
-| 13, 14, 15 | ifInDiscards, ifInErrors, ifInUnknownProtos | Counter32 | 0 (not visible to the firmware) |
-| 19 | ifOutDiscards | Counter32 | 0 |
+| 13 | ifInDiscards | Counter32 | Frames the driver read from the W5500 but dropped because lwIP had no free buffer |
+| 14 | ifInErrors | Counter32 | Frames shorter than the 14-byte Ethernet header or longer than 1514 bytes |
+| 15 | ifInUnknownProtos | Counter32 | Frames with an EtherType other than IPv4 or ARP, e.g. IPv6, LLDP, spanning tree, VLAN-tagged |
+| 19 | ifOutDiscards | Counter32 | 0 (lwIP drops before the driver are not visible) |
 | 20 | ifOutErrors | Counter32 | Frames the driver failed to send |
 | 21 | ifOutQLen | Gauge32 | 0 |
 | 22 | ifSpecific | OBJECT IDENTIFIER | `0.0` |
@@ -70,7 +72,11 @@ The device has one interface, index 1: the W5500 Ethernet port. `ifNumber.0` (`1
 | 18 | ifAlias | OCTET STRING | empty |
 | 19 | ifCounterDiscontinuityTime | TimeTicks | 0 (counters start at boot) |
 
-The W5500 runs in MAC-raw mode for lwIP and has no traffic counters of its own, so the firmware counts every frame passed between the W5500 and lwIP: octets are whole Ethernet frames without the FCS, and frames are sorted into unicast, multicast and broadcast by their destination MAC. The counters are 64-bit internally and start at 0 at boot. Link state and speed are read from the W5500 PHY register (`PHYCFGR`) every 500 ms; a link change is logged on the serial port.
+The W5500 runs in MAC-raw mode for lwIP and has no traffic counters of its own, so the firmware counts every frame passed between the W5500 and lwIP: octets are whole Ethernet frames without the FCS, and frames are sorted into unicast, multicast and broadcast by their destination MAC. Only frames lwIP can use count as packets; the others count in ifInErrors or ifInUnknownProtos (all received octets count in ifInOctets).
+
+What the counters cannot see: the W5500 itself silently drops frames with a bad checksum and frames that arrive while its 16 KB receive buffer is full, and has no counters for either. ifInDiscards therefore only counts drops in the firmware. ifInUnknownProtos is normally non-zero and rising on a LAN with IPv6 or LLDP traffic; that is not a fault.
+
+The counters are 64-bit internally and start at 0 at boot. Link state and speed are read from the W5500 PHY register (`PHYCFGR`) every 500 ms; a link change is logged on the serial port.
 
 SNMPv1 has no Counter64 type, so a v1 request does not see the eight `ifHC*` columns at all (RFC 3584): a v1 Get of one is `noSuchName` and a v1 walk skips them. A v1 walk returns 45 objects, a v2c walk 53.
 

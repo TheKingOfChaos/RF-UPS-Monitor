@@ -100,6 +100,9 @@ static void printStatus() {
                   (unsigned long long)ifs.counters.outOctets,
                   (unsigned long long)(ifs.counters.outUcastPkts + ifs.counters.outMulticastPkts +
                                        ifs.counters.outBroadcastPkts));
+    Serial.printf("Ethernet drops: %lu discarded (no buffer), %lu errors, %lu unknown protocol, %lu send errors\n",
+                  (unsigned long)ifs.counters.inDiscards, (unsigned long)ifs.counters.inErrors,
+                  (unsigned long)ifs.counters.inUnknownProtos, (unsigned long)ifs.counters.outErrors);
     const SnmpServiceStats& svc = snmpServiceStats();
     Serial.printf("SNMP security: %lu rate limited, %lu access log events\n",
                   (unsigned long)svc.rateLimited, (unsigned long)snmpAccessLog().total());

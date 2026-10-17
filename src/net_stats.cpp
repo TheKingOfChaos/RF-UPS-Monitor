@@ -38,10 +38,15 @@ struct DriverLock {
     }
 };
 
-/// Received frame: count, then hand to lwIP as before
+/// Received frame: count, then hand to lwIP as before (it drops what it cannot use)
 static err_t countingInput(struct pbuf* p, struct netif* nif) {
-    if (p != nullptr) ifCountFrame(counters, (const uint8_t*)p->payload, p->tot_len, false);
+    // The driver allocates one contiguous pbuf per frame (PBUF_RAM), so payload holds the header
+    if (p != nullptr) ifCountReceived(counters, (const uint8_t*)p->payload, p->len, LWIP_IPV6 != 0);
     return originalInput(p, nif);
+}
+
+void netStatsCountDiscard(uint16_t length) {
+    ifCountDiscard(counters, length);
 }
 
 /// Frame to send: hand to the driver, count the result

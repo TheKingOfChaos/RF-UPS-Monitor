@@ -26,6 +26,34 @@ void ifCountFrame(IfCounters& c, const uint8_t* frame, size_t length, bool outbo
     }
 }
 
+RxVerdict classifyReceived(const uint8_t* frame, size_t length, bool ipv6) {
+    if (frame == nullptr || length < ETH_HEADER_LEN || length > ETH_MAX_FRAME_LEN) return RxVerdict::Error;
+    uint16_t etherType = (uint16_t)((frame[12] << 8) | frame[13]);
+    if (etherType == 0x0800 || etherType == 0x0806) return RxVerdict::Deliver;
+    if (ipv6 && etherType == 0x86DD) return RxVerdict::Deliver;
+    return RxVerdict::UnknownProto;
+}
+
+void ifCountReceived(IfCounters& c, const uint8_t* frame, size_t length, bool ipv6) {
+    switch (classifyReceived(frame, length, ipv6)) {
+    case RxVerdict::Deliver:
+        ifCountFrame(c, frame, length, false);
+        return;
+    case RxVerdict::Error:
+        c.inErrors++;
+        break;
+    case RxVerdict::UnknownProto:
+        c.inUnknownProtos++;
+        break;
+    }
+    c.inOctets += length;
+}
+
+void ifCountDiscard(IfCounters& c, size_t length) {
+    c.inOctets += length;
+    c.inDiscards++;
+}
+
 PhyStatus decodePhyCfgr(uint8_t reg) {
     PhyStatus p;
     p.linkUp = (reg & 0x01) != 0;

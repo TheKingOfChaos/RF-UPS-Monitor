@@ -34,6 +34,9 @@ void setUp() {
     state.iface.counters.outMulticastPkts = 2;
     state.iface.counters.outBroadcastPkts = 3;
     state.iface.counters.outErrors = 4;
+    state.iface.counters.inDiscards = 5;
+    state.iface.counters.inErrors = 6;
+    state.iface.counters.inUnknownProtos = 7;
     state.boardTempDeciC = 287;
 }
 
@@ -243,6 +246,20 @@ static void test_if_table_values() {
     TEST_ASSERT_EQUAL_UINT32(50, r.uints[11]);                   // non-unicast = multicast + broadcast
     TEST_ASSERT_EQUAL_UINT32(500000, r.uints[12]);
     TEST_ASSERT_EQUAL_UINT32(4, r.uints[13]);                    // ifOutErrors
+}
+
+static void test_if_receive_discards_errors_and_unknown_protocols() {
+    SnmpAgent agent("public");
+    // ifInDiscards, ifInErrors, ifInUnknownProtos, ifOutDiscards
+    const char* oids[] = {"1.3.6.1.2.1.2.2.1.13.1", "1.3.6.1.2.1.2.2.1.14.1", "1.3.6.1.2.1.2.2.1.15.1",
+                          "1.3.6.1.2.1.2.2.1.19.1"};
+    Reply r = requestV2c(agent, BerTag::GetRequest, oids, 4);
+    TEST_ASSERT_EQUAL_INT32(0, r.errorStatus);
+    for (int i = 0; i < 4; i++) TEST_ASSERT_EQUAL_HEX8(BerTag::Counter32, r.tags[i]);
+    TEST_ASSERT_EQUAL_UINT32(5, r.uints[0]);
+    TEST_ASSERT_EQUAL_UINT32(6, r.uints[1]);
+    TEST_ASSERT_EQUAL_UINT32(7, r.uints[2]);
+    TEST_ASSERT_EQUAL_UINT32(0, r.uints[3]);                     // not visible to the firmware
 }
 
 static void test_if_phys_address_is_the_mac() {
@@ -958,6 +975,7 @@ int main() {
     RUN_TEST(test_mib_contains_expected_objects);
     RUN_TEST(test_mib_find_and_next);
     RUN_TEST(test_if_table_values);
+    RUN_TEST(test_if_receive_discards_errors_and_unknown_protocols);
     RUN_TEST(test_if_phys_address_is_the_mac);
     RUN_TEST(test_if_x_table_counter64_values);
     RUN_TEST(test_link_down_shows_down_and_speed_zero);

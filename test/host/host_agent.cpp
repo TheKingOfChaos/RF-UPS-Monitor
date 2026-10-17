@@ -67,6 +67,9 @@ int main(int argc, char** argv) {
         memcpy(state.iface.mac, mac, 6);
         state.iface.counters.inOctets = 5000000000ull;   // past 32 bits: ifInOctets wraps, ifHCInOctets not
         state.iface.counters.inUcastPkts = 1234;
+        state.iface.counters.inDiscards = 3;
+        state.iface.counters.inErrors = 2;
+        state.iface.counters.inUnknownProtos = 17;
         state.boardTempDeciC = 250;
 
         size_t len = agent.handle(in, (size_t)n, out, sizeof(out), state);

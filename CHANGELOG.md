@@ -6,6 +6,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-10-17
+
+### Added
+- IF-MIB `ifInDiscards`: received frames the driver dropped because lwIP had no free buffer. Counted by a small subclass of the core's W5500 driver (`CountingW5500` in `src/net_stats.h`).
+- IF-MIB `ifInErrors`: received frames shorter than the Ethernet header or longer than 1514 bytes.
+- IF-MIB `ifInUnknownProtos`: received frames with an EtherType lwIP does not handle (IPv6 while IPv6 is off, LLDP, spanning tree, VLAN-tagged).
+- Status screen line `Ethernet drops` with these counters and the send errors.
+
+### Changed
+- Received frames that lwIP drops no longer count as unicast/multicast/broadcast packets (IF-MIB counts only delivered packets there); their octets still count in ifInOctets.
+
+### Known limits
+- The W5500 has no counters for CRC errors or frames lost when its own receive buffer is full, so those are not visible. ifOutDiscards stays 0.
+
 ## [1.0.0] - 2026-10-17
 
 First release.
@@ -31,5 +45,6 @@ First release.
 - The network stack queues 5 UDP packets; larger bursts are dropped (SNMP managers retry).
 - Not yet tested with the real hardware: mains traps with real mains, the factory reset button, the "no link" and "no DHCP server" states. The LibreNMS definitions are validated against the schema but not yet tried in a running LibreNMS.
 
-[Unreleased]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/releases/tag/v1.0.0

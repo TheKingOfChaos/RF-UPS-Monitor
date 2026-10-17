@@ -1,0 +1,371 @@
+"""Generate the project's Excalidraw diagrams (docs/diagrams/*.excalidraw).
+
+The .excalidraw files can be opened and edited at https://excalidraw.com or
+with the VS Code Excalidraw extension. Running this script again overwrites
+them, so edit either here or in Excalidraw, not both. render_svg.sh exports
+the SVGs used in the README and docs.
+
+    python docs/diagrams/make_diagrams.py
+"""
+
+import hashlib
+import json
+import math
+import os
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+# Excalidraw palette
+BLUE, GREEN, YELLOW, RED, VIOLET = "#a5d8ff", "#b2f2bb", "#ffec99", "#ffc9c9", "#d0bfff"
+ORANGE, CYAN, GRAY, WHITE = "#ffd8a8", "#99e9f2", "#e9ecef", "#ffffff"
+INK, MUTED = "#1e1e1e", "#868e96"
+ZONE_BLUE, ZONE_GREEN, ZONE_YELLOW, ZONE_RED = "#e7f5ff", "#ebfbee", "#fff9db", "#fff5f5"
+ZONE_ORANGE, ZONE_GRAY = "#fff4e6", "#f8f9fa"
+
+
+def _num(key):
+    return int(hashlib.sha1(key.encode()).hexdigest()[:8], 16)
+
+
+class Diagram:
+    def __init__(self, name, title):
+        self.name = name
+        self.elements = []
+        self.by_id = {}
+        self.text(40, 20, title, size=32)
+
+    # ---- element basics ----
+
+    def _base(self, eid, etype, x, y, w, h, **kw):
+        e = {
+            "id": eid, "type": etype, "x": x, "y": y, "width": w, "height": h, "angle": 0,
+            "strokeColor": kw.get("stroke", INK), "backgroundColor": kw.get("bg", "transparent"),
+            "fillStyle": "solid", "strokeWidth": kw.get("stroke_width", 2),
+            "strokeStyle": "dashed" if kw.get("dashed") else "solid", "roughness": 1, "opacity": 100,
+            "groupIds": [], "frameId": None, "roundness": kw.get("roundness"),
+            "seed": _num(self.name + eid), "version": 1, "versionNonce": _num(eid + self.name),
+            "isDeleted": False, "boundElements": [], "updated": 1, "link": None, "locked": False,
+        }
+        self.elements.append(e)
+        self.by_id[eid] = e
+        return e
+
+    def _text_el(self, eid, x, y, text, size, align, valign, container=None, color=INK):
+        lines = text.split("\n")
+        w = max(len(l) for l in lines) * size * 0.58
+        h = len(lines) * size * 1.25
+        if container is not None:
+            cx, cy = container
+            x, y = cx - w / 2, cy - h / 2
+        e = self._base(eid, "text", x, y, w, h, stroke=color)
+        e.update({"text": text, "originalText": text, "fontSize": size, "fontFamily": 1,
+                  "textAlign": align, "verticalAlign": valign, "containerId": None,
+                  "lineHeight": 1.25, "autoResize": True, "boundElements": None})
+        return e
+
+    def text(self, x, y, text, size=20, color=INK):
+        return self._text_el("t%d" % len(self.elements), x, y, text, size, "left", "top", color=color)
+
+    # ---- shapes ----
+
+    def box(self, eid, x, y, w, h, text, bg=BLUE, size=20, shape="rectangle", dashed=False):
+        e = self._base(eid, shape, x, y, w, h, bg=bg, dashed=dashed,
+                       roundness={"type": 3} if shape == "rectangle" else {"type": 2})
+        t = self._text_el(eid + "-text", 0, 0, text, size, "center", "middle", container=(x + w / 2, y + h / 2))
+        t["containerId"] = eid
+        e["boundElements"].append({"type": "text", "id": t["id"]})
+        return e
+
+    def zone(self, eid, x, y, w, h, title, bg=ZONE_GRAY, title_at="top", title_x=16):
+        """Dashed group box; title_at "bottom" and title_x keep the title clear of arrows."""
+        self._base(eid, "rectangle", x, y, w, h, bg=bg, stroke=MUTED, dashed=True, roundness={"type": 3})
+        ty = y + 10 if title_at == "top" else y + h - 36
+        self.text(x + title_x, ty, title, size=20, color="#495057")
+
+    # ---- arrows ----
+
+    def _anchor(self, eid, side, frac=0.5):
+        e = self.by_id[eid]
+        x, y, w, h = e["x"], e["y"], e["width"], e["height"]
+        return {"top": (x + w * frac, y), "bottom": (x + w * frac, y + h),
+                "left": (x, y + h * frac), "right": (x + w, y + h * frac)}[side]
+
+    def arrow(self, a, a_side, b, b_side, label=None, via=(), a_frac=0.5, b_frac=0.5, both=False,
+              dashed=False, size=16, color=INK):
+        eid = "a-%s-%s-%d" % (a, b, len(self.elements))
+        start = self._anchor(a, a_side, a_frac)
+        end = self._anchor(b, b_side, b_frac)
+        pts = [start] + list(via) + [end]
+        xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+        e = self._base(eid, "arrow", start[0], start[1], max(xs) - min(xs), max(ys) - min(ys),
+                       stroke=color, dashed=dashed, roundness=None if via else {"type": 2})
+        e.update({"points": [[px - start[0], py - start[1]] for px, py in pts],
+                  "lastCommittedPoint": None,
+                  "startBinding": {"elementId": a, "focus": 0, "gap": 4},
+                  "endBinding": {"elementId": b, "focus": 0, "gap": 4},
+                  "startArrowhead": "arrow" if both else None, "endArrowhead": "arrow", "elbowed": False})
+        for target in (a, b):
+            self.by_id[target]["boundElements"].append({"type": "arrow", "id": eid})
+        if label:
+            # Label at the middle of the path length
+            segs = list(zip(pts, pts[1:]))
+            lengths = [math.dist(p, q) for p, q in segs]
+            half = sum(lengths) / 2
+            for (p, q), length in zip(segs, lengths):
+                if half <= length:
+                    t = half / length if length else 0
+                    mid = (p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t)
+                    break
+                half -= length
+            t = self._text_el(eid + "-label", 0, 0, label, size, "center", "middle", container=mid, color=color)
+            t["containerId"] = eid
+            e["boundElements"].append({"type": "text", "id": t["id"]})
+        return e
+
+    def line_arrow(self, start, end, color=MUTED):
+        """An arrow not attached to any shape."""
+        eid = "free-%d" % len(self.elements)
+        e = self._base(eid, "arrow", start[0], start[1], abs(end[0] - start[0]), abs(end[1] - start[1]),
+                       stroke=color, roundness={"type": 2})
+        e.update({"points": [[0, 0], [end[0] - start[0], end[1] - start[1]]], "lastCommittedPoint": None,
+                  "startBinding": None, "endBinding": None, "startArrowhead": None,
+                  "endArrowhead": "arrow", "elbowed": False})
+        return e
+
+    def save(self):
+        doc = {"type": "excalidraw", "version": 2, "source": "https://excalidraw.com",
+               "elements": self.elements,
+               "appState": {"gridSize": None, "viewBackgroundColor": "#ffffff"}, "files": {}}
+        path = os.path.join(HERE, self.name + ".excalidraw")
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            json.dump(doc, f, indent=1, ensure_ascii=False)
+            f.write("\n")
+        print("wrote", path)
+
+
+def system_overview():
+    d = Diagram("system-overview", "RF-UPS-Monitor: system overview")
+    d.zone("z-mains", 40, 80, 330, 470, "Mains side (galvanically isolated)", ZONE_RED)
+    d.box("mains", 75, 140, 260, 70, "Mains 230 V AC", RED)
+    d.box("plug", 75, 260, 260, 90, "IKEA TRETAKT smart plug\n(Dirigera hub, tests only)", GRAY, 16, dashed=True)
+    d.box("det", 75, 400, 260, 110, "Mains detector\noptocoupler + filter\nclean 3.3 V DC level", ORANGE, 18)
+    d.arrow("mains", "bottom", "plug", "top")
+    d.arrow("plug", "bottom", "det", "top")
+
+    d.zone("z-board", 420, 80, 650, 640, "RF-UPS-Monitor board", ZONE_BLUE)
+    d.box("flash", 470, 140, 300, 90, "Internal flash (LittleFS)\nsettings_a / settings_b.json", GREEN, 16)
+    d.box("pico", 470, 290, 300, 220,
+          "Raspberry Pi Pico\n(RP2040)\n\nCore 0: network, SNMP, menu\nCore 1: GPIO27 + GPIO22, 1 kHz\ndie temperature sensor",
+          BLUE, 17)
+    d.box("w5500", 880, 330, 170, 150, "W5500\nEthernet\nSPI0: GPIO16-19\nRST 20, INT 21", CYAN, 16)
+    d.box("button", 470, 590, 140, 90, "Reset button\nGPIO22 to GND", GRAY, 16)
+    d.box("led", 640, 590, 130, 90, "Onboard LED\nstatus, reset", YELLOW, 16)
+    d.arrow("pico", "top", "flash", "bottom", both=True)
+    d.arrow("pico", "right", "w5500", "left", "SPI", both=True)
+    d.arrow("button", "top", "pico", "bottom", a_frac=0.5, b_frac=0.23)
+    d.arrow("pico", "bottom", "led", "top", a_frac=0.77)
+    d.arrow("det", "right", "pico", "left", "GPIO27\nHIGH = mains", a_frac=0.4, b_frac=0.4)
+
+    d.box("pc", 40, 610, 330, 100, "PC: PuTTY or HIL tests\nUSB serial, 115200 8N1", GRAY, 16)
+    d.arrow("pc", "right", "pico", "left", "USB", b_frac=0.85, both=True)
+
+    d.zone("z-net", 1150, 80, 380, 700, "Network", ZONE_GRAY)
+    d.box("dhcp", 1190, 140, 300, 80, "DHCP server\n(or static IP)", GRAY, 16)
+    d.box("switch", 1190, 360, 300, 90, "LAN switch", GRAY)
+    d.box("lnms", 1190, 520, 300, 110, "SNMP manager\nLibreNMS / net-snmp\npolls UDP 161 (v1 / v2c)", VIOLET, 16)
+    d.box("traps", 1190, 670, 300, 80, "Trap receiver\nUDP 162 (v1 or v2c)", VIOLET, 16)
+    d.arrow("w5500", "right", "switch", "left", "100 Mbit/s", b_frac=0.5, both=True)
+    d.arrow("switch", "top", "dhcp", "bottom", both=True)
+    d.arrow("switch", "bottom", "lnms", "top", both=True)
+    d.arrow("switch", "right", "traps", "right", "traps", via=[(1515, 405), (1515, 710)])
+    d.save()
+
+
+def firmware_architecture():
+    d = Diagram("firmware-architecture", "RF-UPS-Monitor: firmware architecture")
+    d.text(40, 64, "Arrows show the main dependencies. Everything in lib/ (green) is plain C++ and unit tested on the PC.",
+           size=16, color="#495057")
+    d.zone("z-src", 40, 100, 1420, 200, "src/  firmware on the Pico (Arduino)", ZONE_BLUE)
+    cols = [70, 300, 530, 760, 990, 1220]
+    src = [("main", "main.cpp\nboot, Ethernet,\nloop, starts core 1"), ("cli", "cli.cpp\nserial menu"),
+           ("svc", "snmp_service.cpp\nUDP 161, traps,\ndevice state"), ("temp", "board_temp.cpp\nRP2040 die\ntemperature"),
+           ("net", "net_stats.cpp\nframe counters,\nW5500 PHY"), ("reset", "factory_reset.cpp\nGPIO22 on core 1")]
+    for x, (eid, text) in zip(cols, src):
+        d.box(eid, x, 160, 210, 110, text, BLUE, 16)
+
+    d.zone("z-pure", 40, 340, 1420, 330, "lib/  pure C++, host tested", ZONE_GREEN, title_at="bottom",
+           title_x=760)
+    pure = [("codec", "settings_codec\nJSON, validation,\nA/B selection"), ("netcfg", "netconfig\nIPv4 parse +\nvalidate"),
+            ("agent", "snmp_agent\nMIB, Get / GetNext /\nGetBulk, traps"), ("acl", "access_control\nrate limiter,\naccess log"),
+            ("ifst", "if_stats\nframe classes,\nPHYCFGR decode"), ("power", "power_monitor\ndebouncer,\nreset button")]
+    for x, (eid, text) in zip(cols, pure):
+        d.box(eid, x, 400, 210, 110, text, GREEN, 16)
+    d.box("ber", 530, 560, 210, 90, "snmp_ber\nBER codec, OIDs,\nCounter64", GREEN, 16)
+
+    d.zone("z-hw", 40, 710, 1420, 170, "lib/  hardware layers", ZONE_YELLOW, title_at="bottom")
+    d.box("settings", 70, 740, 210, 90, "settings\nLittleFS A/B slots", YELLOW, 16)
+    d.box("mains", 1220, 735, 210, 100, "mains_input\nGPIO27 on core 1,\nseqlock", YELLOW, 16)
+
+    d.zone("z-core", 40, 920, 1420, 150, "Arduino-Pico core (earlephilhower)", ZONE_GRAY)
+    core = [(70, 330, "lwip", "lwIP + Wiznet5500lwIP\n(CountingW5500)"), (430, 200, "lfs", "LittleFS"),
+            (660, 200, "spi", "SPI"), (890, 250, "usb", "USB serial"), (1170, 260, "mc", "multicore\nsetup1 / loop1")]
+    for x, w, eid, text in core:
+        d.box(eid, x, 980, w, 70, text, GRAY, 16)
+
+    d.arrow("cli", "bottom", "netcfg", "top")
+    d.arrow("svc", "bottom", "agent", "top")
+    d.arrow("svc", "bottom", "acl", "top", a_frac=0.8, b_frac=0.3)
+    d.arrow("agent", "bottom", "ber", "top")
+    d.arrow("net", "bottom", "ifst", "top")
+    d.arrow("reset", "bottom", "power", "top")
+    d.arrow("settings", "top", "codec", "bottom")
+    d.arrow("mains", "top", "power", "bottom")
+    d.save()
+
+
+def snmp_request_flow():
+    d = Diagram("snmp-request-flow", "RF-UPS-Monitor: how an SNMP request is handled")
+    d.box("drop", 290, 80, 1080, 70,
+          "Dropped without a reply: counted on the status screen, logged in the access log (menu 5)", RED, 18)
+    d.box("udp", 40, 220, 200, 90, "UDP datagram\non port 161", CYAN, 18)
+    d.box("size", 290, 205, 200, 120, "at most\n1472 bytes?", YELLOW, 18, shape="diamond")
+    d.box("rate", 580, 200, 230, 130, "Rate limiter\nper source 50/s\nuntrusted total 100/s\ntrusted total 200/s",
+          ORANGE, 16)
+    d.box("parse", 910, 210, 230, 110, "Parse BER message\nversion, community,\nPDU, max 16 varbinds", BLUE, 16)
+    d.box("ver", 1190, 205, 180, 120, "version?", YELLOW, 18, shape="diamond")
+    d.arrow("udp", "right", "size", "left")
+    d.arrow("size", "right", "rate", "left", "yes")
+    d.arrow("rate", "right", "parse", "left", "allowed")
+    d.arrow("parse", "right", "ver", "left")
+    d.arrow("size", "top", "drop", "bottom", "no", b_frac=0.1)
+    d.arrow("rate", "top", "drop", "bottom", "over limit", b_frac=0.36)
+    d.arrow("parse", "top", "drop", "bottom", "malformed", b_frac=0.66)
+    d.arrow("ver", "top", "drop", "bottom", "v3", b_frac=0.92)
+
+    d.box("comm", 1190, 470, 180, 130, "community\ncorrect?", YELLOW, 18, shape="diamond")
+    d.box("pdu", 840, 480, 260, 110, "Handle the PDU\nGet, GetNext, GetBulk (v2c)\nSet is rejected", BLUE, 16)
+    d.box("mib", 520, 480, 260, 110, "MIB table\nsystem, IF-MIB, 63050\n53 objects (45 in v1)", GREEN, 16)
+    d.box("build", 180, 480, 280, 110, "Build GetResponse\nv1 errors / v2c exceptions\nGetBulk at most 16 varbinds",
+          BLUE, 16)
+    d.box("sent", 180, 680, 280, 90, "Reply sent\nsource now trusted\n(not for GetBulk)", GREEN, 16)
+    d.box("auth", 1165, 680, 230, 100, "authenticationFailure\ntrap (max 1 per 10 s)\n+ access log", RED, 16)
+    d.arrow("ver", "bottom", "comm", "top", "v1 / v2c")
+    d.arrow("comm", "left", "pdu", "right", "yes")
+    d.arrow("comm", "bottom", "auth", "top", "no")
+    d.arrow("pdu", "left", "mib", "right")
+    d.arrow("mib", "left", "build", "right")
+    d.arrow("build", "bottom", "sent", "top")
+    d.save()
+
+
+def mains_flow():
+    d = Diagram("mains-flow", "RF-UPS-Monitor: from the mains input to an alert")
+    d.zone("z-c1", 40, 80, 930, 570, "Core 1: setup1() / loop1(), every millisecond", ZONE_ORANGE)
+    d.box("gpio", 70, 170, 190, 90, "GPIO27\nmains detector", ORANGE, 18)
+    d.box("sample", 300, 170, 190, 90, "Sample the pin\nevery 1 ms", ORANGE, 16)
+    d.box("deb", 530, 170, 190, 90, "Debouncer\nlevel must hold\n5 ms", ORANGE, 16)
+    d.box("seq", 760, 160, 190, 110, "Seqlock snapshot\npresent, changes,\nlast change", GREEN, 16)
+    d.arrow("gpio", "right", "sample", "left")
+    d.arrow("sample", "right", "deb", "left")
+    d.arrow("deb", "right", "seq", "left")
+    d.text(300, 290, "a real change is seen within 6 ms; glitches shorter than 5 ms are ignored", size=16,
+           color="#495057")
+
+    d.box("btn", 70, 400, 190, 90, "GPIO22\nreset button", GRAY, 18)
+    d.box("rb", 300, 390, 190, 110, "ResetButton\n10 s hold, release\nbefore cancels", GRAY, 16)
+    d.box("flag", 530, 400, 190, 90, "Reset requested\n(atomic flag)", GRAY, 16)
+    d.box("led", 300, 545, 190, 80, "LED\nslow / fast blink", YELLOW, 16)
+    d.arrow("btn", "right", "rb", "left")
+    d.arrow("rb", "right", "flag", "left")
+    d.arrow("rb", "bottom", "led", "top")
+
+    d.zone("z-c0", 1010, 80, 480, 570, "Core 0: loop()", ZONE_BLUE)
+    d.box("read", 1040, 160, 200, 110, "Read snapshot\n(retries while\ncore 1 writes)", BLUE, 16)
+    d.box("log", 1280, 130, 190, 80, "Serial log +\nstatus screen", BLUE, 16)
+    d.box("obj", 1280, 240, 190, 90, "SNMP objects\n63050.1 / .2 / .3", BLUE, 16)
+    d.box("trap", 1280, 360, 190, 100, "Trap\nmainsPowerLost /\nRestored", VIOLET, 16)
+    d.box("fr", 1040, 400, 200, 110, "Factory reset\nsave defaults,\nreboot within 2 s", RED, 16)
+    d.arrow("seq", "right", "read", "left")
+    d.arrow("read", "right", "log", "left", a_frac=0.3)
+    d.arrow("read", "right", "obj", "left", a_frac=0.6)
+    d.arrow("read", "right", "trap", "left", a_frac=0.9, b_frac=0.3)
+    d.arrow("flag", "right", "fr", "left")
+
+    d.zone("z-net", 1580, 80, 360, 570, "Network", ZONE_GRAY)
+    d.box("lnms", 1610, 200, 300, 130, "LibreNMS\npolls every 5 min\nstate sensor critical\n\"State Sensor Critical\" alert",
+          VIOLET, 16)
+    d.box("rx", 1610, 380, 300, 90, "Trap receiver /\nLibreNMS event log", VIOLET, 16)
+    d.arrow("obj", "right", "lnms", "left", "UDP 161")
+    d.arrow("trap", "right", "rx", "left", "UDP 162")
+    d.text(1010, 680, "A short outage between two polls still shows: mainsPowerChanges goes up by 2.", size=16,
+           color="#495057")
+    d.save()
+
+
+def test_layers():
+    d = Diagram("test-layers", "RF-UPS-Monitor: test layers")
+    layers = [
+        ("lnms", "LibreNMS in Docker: definitions, sensors, alert on a real mains cut", VIOLET),
+        ("mains", "Mains HIL: a Dirigera smart plug switches real mains", RED),
+        ("hil", "HIL tests (Python): serial menu, SNMP via net-snmp, traps, reboot", ORANGE),
+        ("emb", "On-device Unity tests: LittleFS, W5500, GPIO27 sampler", YELLOW),
+        ("host", "Host agent vs real net-snmp (WSL): 52 checks, MIB validation", CYAN),
+        ("san", "Sanitizers (WSL): every native suite under ASan + UBSan", CYAN),
+        ("native", "Native unit tests (pio test -e native): 261 tests of lib/", GREEN),
+    ]
+    for i, (eid, text, bg) in enumerate(layers):
+        d.box(eid, 120, 110 + i * 100, 820, 80, text, bg, 18)
+    d.line_arrow((65, 790), (65, 110))
+    d.text(10, 800, "fast, runs everywhere", size=16, color="#495057")
+    d.text(10, 84, "slower, real hardware", size=16, color="#495057")
+
+    d.box("pc", 1010, 110, 330, 380, "Your PC\nPico on COM16\nWSL: net-snmp, Docker\nDirigera hub\n\nrun locally", GRAY, 18)
+    d.box("ci", 1010, 510, 330, 280, "GitHub Actions CI\non every push\n\nnative tests\nsanitizers\nnet-snmp check\nfirmware build (.uf2)",
+          GREEN, 18)
+    for eid in ("lnms", "mains", "hil", "emb"):
+        d.arrow(eid, "right", "pc", "left", b_frac={"lnms": 0.12, "mains": 0.38, "hil": 0.64, "emb": 0.9}[eid])
+    for eid in ("host", "san", "native"):
+        d.arrow(eid, "right", "ci", "left", b_frac={"host": 0.18, "san": 0.5, "native": 0.82}[eid])
+    d.save()
+
+
+def settings_storage():
+    d = Diagram("settings-storage", "RF-UPS-Monitor: power-cut safe settings (A/B slots)")
+    d.text(40, 90, "Saving", size=24)
+    d.box("new", 40, 140, 220, 90, "New settings\n(menu option 2, 3, 4)", BLUE, 16)
+    d.box("codec", 310, 140, 220, 90, "settings_codec\nvalidate, to JSON", GREEN, 16)
+    d.box("write", 580, 135, 230, 100, "Write the slot\nnot in use,\nsequence + 1", YELLOW, 16)
+    d.box("verify", 860, 140, 220, 90, "Read back\nand validate", YELLOW, 16)
+    d.box("active", 1130, 140, 220, 90, "New copy is\nthe active one", GREEN, 16)
+    d.arrow("new", "right", "codec", "left")
+    d.arrow("codec", "right", "write", "left")
+    d.arrow("write", "right", "verify", "left")
+    d.arrow("verify", "right", "active", "left")
+
+    d.zone("z-flash", 380, 290, 660, 170, "Internal flash, LittleFS", ZONE_YELLOW)
+    d.box("a", 420, 340, 260, 90, "settings_a.json\nsequence 7", GREEN, 18)
+    d.box("b", 740, 340, 260, 90, "settings_b.json\nsequence 8 (newest)", GREEN, 18)
+    d.arrow("write", "bottom", "b", "top", "writes", b_frac=0.3)
+
+    d.text(40, 490, "Booting", size=24)
+    d.box("boot", 600, 540, 220, 90, "Read both slots", BLUE, 16)
+    d.box("valid", 900, 525, 200, 120, "valid\ncopies?", YELLOW, 18, shape="diamond")
+    d.box("use", 1200, 540, 300, 90, "Use the valid copy with\nthe highest sequence", GREEN, 16)
+    d.box("defaults", 890, 720, 220, 90, "None valid:\nsave factory defaults", RED, 16)
+    d.arrow("a", "bottom", "boot", "top", b_frac=0.25)
+    d.arrow("b", "bottom", "boot", "top", b_frac=0.75)
+    d.arrow("boot", "right", "valid", "left")
+    d.arrow("valid", "right", "use", "left", "one or two")
+    d.arrow("valid", "bottom", "defaults", "top", "none")
+    d.text(40, 560, "Power cut during a save:\nthe half-written slot fails\nvalidation, so the other slot,\n"
+                     "the previous settings, is used.", size=16, color="#495057")
+    d.save()
+
+
+if __name__ == "__main__":
+    system_overview()
+    firmware_architecture()
+    snmp_request_flow()
+    mains_flow()
+    test_layers()
+    settings_storage()

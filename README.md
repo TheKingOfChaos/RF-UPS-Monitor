@@ -4,6 +4,8 @@ A mains power monitor built on a Raspberry Pi Pico with a W5500 Ethernet module.
 
 Current version: **1.0.2** (see [CHANGELOG.md](CHANGELOG.md)).
 
+![System overview: mains detector, Pico with W5500, PC and network](docs/diagrams/system-overview.svg)
+
 ## Status
 
 | Feature | State |
@@ -31,6 +33,7 @@ See [TODO.md](TODO.md) for the detailed plan.
 | [docs/LIBRENMS.md](docs/LIBRENMS.md) | Monitoring the device with LibreNMS: install, sensors, alerts, traps, Docker test setup |
 | [docs/TESTING.md](docs/TESTING.md) | Test layers, how to run them, automated mains tests with a smart plug, what each suite covers |
 | [CHANGELOG.md](CHANGELOG.md) | What changed in each version |
+| [docs/diagrams/](docs/diagrams/README.md) | Excalidraw diagrams (editable) of the system, firmware, SNMP, mains flow, settings and tests |
 | [.clinerules](.clinerules) | Project and test rules |
 
 ## Hardware
@@ -181,6 +184,8 @@ If you lock yourself out with a wrong static address, use the serial menu to swi
 
 ## Mains power monitoring
 
+![Mains flow: GPIO27 sampled and debounced on core 1, handed to core 0 for the log, SNMP objects and traps](docs/diagrams/mains-flow.svg)
+
 GPIO27 reads the mains detection circuit: HIGH = mains present, LOW = mains lost. The internal pull-down is enabled, so a disconnected input reads as "lost" rather than floating.
 
 - Core 1 samples the pin every millisecond and only accepts a new level once it has held for 5 ms, so short glitches and contact bounce are ignored. A real change is detected within 6 ms (requirement: 10 ms).
@@ -203,6 +208,8 @@ The input must be a clean DC level from an isolated circuit (optocoupler with fi
 Releasing the button earlier cancels the reset (`released after ... ms, no reset`). The device keeps working normally while the button is held: SNMP answers, the menu responds and mains monitoring continues. A button held down while the device starts is ignored until it has been released once, so a stuck button cannot cause a reset loop.
 
 ## Settings storage
+
+![Settings: saves go to the slot not in use, boot picks the valid copy with the highest sequence](docs/diagrams/settings-storage.svg)
 
 Settings are stored as JSON on the Pico's internal flash (LittleFS) in two copies, `data/settings_a.json` and `data/settings_b.json`:
 
@@ -290,6 +297,8 @@ CHANGELOG.md                Release history
 .github/workflows/tests.yml CI: unit tests, sanitizers, net-snmp check, firmware build
 ```
 
+![Firmware architecture: src/ on top of pure and hardware libraries and the Arduino-Pico core](docs/diagrams/firmware-architecture.svg)
+
 Pure libraries have no Arduino or hardware dependency so they can be unit tested on the PC. Hardware and file access stay in thin layers on top.
 
 ## SNMP
@@ -321,6 +330,8 @@ snmpget      -v2c -c public 10.10.6.111 1.3.6.1.4.1.63050.1.0
 ```
 
 **Traps** go to the trap destination set in menu option 4 (UDP 162), as v2c (default) or v1: `coldStart` at boot, `mainsPowerLost` and `mainsPowerRestored` (with the three mains objects), and `authenticationFailure` for a wrong community (at most one per 10 s).
+
+![SNMP request handling: size check, rate limiter, parsing, version and community, MIB, response](docs/diagrams/snmp-request-flow.svg)
 
 GetBulk replies hold at most 16 objects, so a small request cannot be used to reflect a large reply at a faked source address.
 

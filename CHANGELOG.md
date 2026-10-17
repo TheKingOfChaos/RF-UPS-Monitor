@@ -6,6 +6,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+- Excalidraw diagrams in `docs/diagrams/` (system overview, firmware architecture, SNMP request flow, mains flow, settings storage, test layers), editable `.excalidraw` files with SVG exports shown in the README and docs/TESTING.md.
+
 ## [1.0.2] - 2026-10-17
 
 LibreNMS support tested in a real LibreNMS, and the mains tests automated. The firmware itself is unchanged apart from the version number.

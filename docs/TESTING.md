@@ -10,6 +10,8 @@ The project has three test layers. Each one tests what the layer below cannot.
 
 The rules for writing tests are in [.clinerules](../.clinerules), section *Testing Requirements → Test Rules*.
 
+![Test layers: from native unit tests to LibreNMS with real mains, and what CI runs](diagrams/test-layers.svg)
+
 ## CI
 
 [.github/workflows/tests.yml](../.github/workflows/tests.yml) runs on every push and pull request on GitHub: the native unit tests, the same tests under AddressSanitizer/UBSan, the SNMP agent against net-snmp (`scripts/host_agent_check.sh`, including MIB validation), and a firmware build that uploads `firmware.uf2` as an artifact. It also compiles the on-device test programs. The on-device and HIL tests need the Pico and are run locally.

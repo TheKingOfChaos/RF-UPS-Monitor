@@ -128,21 +128,40 @@ public:
 static DeviceBackend backend;
 
 /// Read the stored default password, or create and store a new one
-static void loadDefaultPassword() {
+/// Read the stored default password into out; false if missing or invalid
+static bool readDefaultPassword(char* out) {
     File f = LittleFS.open(DEFAULT_PASSWORD_FILE, "r");
-    if (f) {
-        size_t n = f.readBytes(defaultPassword, WEB_DEFAULT_PASSWORD_LEN);
-        f.close();
-        defaultPassword[n] = '\0';
-        if (n == WEB_DEFAULT_PASSWORD_LEN && webPasswordIsValid(defaultPassword)) return;
-    }
+    if (!f) return false;
+    size_t n = f.readBytes(out, WEB_DEFAULT_PASSWORD_LEN);
+    bool extra = f.available() > 0;
+    f.close();
+    out[n] = '\0';
+    return n == WEB_DEFAULT_PASSWORD_LEN && !extra && webPasswordIsValid(out);
+}
+
+/// Generate a new random default password, store it and read it back
+static bool generateDefaultPassword() {
     uint8_t random[WEB_DEFAULT_PASSWORD_LEN + 2];
     backend.random(random, sizeof(random));
     webMakeDefaultPassword(random, defaultPassword);
-    f = LittleFS.open(DEFAULT_PASSWORD_FILE, "w");
+    File f = LittleFS.open(DEFAULT_PASSWORD_FILE, "w");
     bool ok = f && f.write((const uint8_t*)defaultPassword, WEB_DEFAULT_PASSWORD_LEN) == WEB_DEFAULT_PASSWORD_LEN;
     if (f) f.close();
+    char check[WEB_DEFAULT_PASSWORD_LEN + 1];
+    return ok && readDefaultPassword(check) && strcmp(check, defaultPassword) == 0;
+}
+
+static void loadDefaultPassword() {
+    if (readDefaultPassword(defaultPassword)) return;
+    bool ok = generateDefaultPassword();
     Serial.printf("Web: new default password generated%s\n", ok ? "" : " (NOT saved, will change at reboot)");
+}
+
+bool webRegenerateDefaultPassword() {
+    bool ok = generateDefaultPassword();
+    // Browsers logged in with the old default must log in again
+    if (webUsesDefaultPassword()) app.logoutAll();
+    return ok;
 }
 
 void webBegin() {

@@ -25,7 +25,8 @@ enum CliState {
     CLI_SNMP_TRAP_VER,  // Entering trap version
     CLI_SNMP_CONFIRM,   // Confirming SNMP change, save without reboot
     CLI_WEB_PASSWORD,   // Entering a new web password (echoed as *)
-    CLI_WEB_REPEAT      // Repeating it
+    CLI_WEB_REPEAT,     // Repeating it
+    CLI_WEB_REGENERATE  // Confirming a new default web password
 };
 
 static CliState state = CLI_MENU;
@@ -67,6 +68,7 @@ static void printMenu() {
     Serial.println("4. SNMP settings");
     Serial.println("5. Access log");
     Serial.println("6. Web password");
+    Serial.println("7. New default web password");
     Serial.println("?. Show this menu");
     Serial.print("> ");
 }
@@ -323,6 +325,10 @@ static void handleLine(const char* line) {
             Serial.printf("Web page login: user admin, %s.\n",
                           webUsesDefaultPassword() ? "currently the device default password" : "own password set");
             promptWebPassword();
+        } else if (strcmp(line, "7") == 0) {
+            Serial.printf("Replace the device default web password \"%s\" with a new random one? (y/n): ",
+                          webDefaultPassword());
+            state = CLI_WEB_REGENERATE;
         } else if (line[0] == '\0') {
             Serial.print("> ");
         } else {
@@ -492,6 +498,21 @@ static void handleLine(const char* line) {
             endWebPassword(webSetPassword(newWebPassword) ? "Web password saved; web sessions logged out"
                                                           : "Failed to save settings, nothing changed");
         }
+        break;
+
+    case CLI_WEB_REGENERATE:
+        if (line[0] == 'y' || line[0] == 'Y') {
+            bool saved = webRegenerateDefaultPassword();
+            Serial.printf("New default web password: \"%s\"%s\n", webDefaultPassword(),
+                          saved ? "" : " (NOT saved, a new one is generated at the next boot)");
+            if (!webUsesDefaultPassword()) {
+                Serial.println("Your own password stays in use; option 6 with '-' switches to the new default");
+            }
+        } else {
+            Serial.println("Cancelled");
+        }
+        state = CLI_MENU;
+        printMenu();
         break;
     }
 }

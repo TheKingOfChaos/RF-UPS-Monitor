@@ -30,6 +30,16 @@ void webPoll();
 /// The device default password (shown on the serial status screen)
 const char* webDefaultPassword();
 
+/**
+ * @brief Replace the device default password with a new random one (serial menu option 7)
+ *
+ * For when the default password became known. Logs browsers out if the
+ * default is in use. The new password is active even if saving it failed,
+ * but then a new one is generated at the next boot.
+ * @return true if the new password was saved and read back
+ */
+bool webRegenerateDefaultPassword();
+
 /// true while no own password has been set
 bool webUsesDefaultPassword();
 

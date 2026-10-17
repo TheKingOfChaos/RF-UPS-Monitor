@@ -2,7 +2,7 @@
 
 A mains power monitor built on a Raspberry Pi Pico with a W5500 Ethernet module. It reports whether mains power is present over SNMP v1 and v2c, including traps, together with standard interface statistics (IF-MIB) and the board temperature, so it can be monitored by LibreNMS or any other SNMP manager. It is configured through a menu on the USB serial port.
 
-Current version: **2.0.0** (see [CHANGELOG.md](CHANGELOG.md)).
+Current version: **2.0.1** (see [CHANGELOG.md](CHANGELOG.md)).
 
 ## Overview
 
@@ -82,6 +82,7 @@ Connect to the Pico's USB serial port (`COM16` here) at **115200 baud, 8N1**, wi
 4. SNMP settings
 5. Access log
 6. Web password
+7. New default web password
 ?. Show this menu
 >
 ```
@@ -188,13 +189,15 @@ Each new entry is also printed on the serial port when it happens (`SNMP access:
 
 **6. Web password** sets the password for the web page (see [Web page](#web-page)), or `-` returns to the device default password. The password is asked twice and shown as `*` while typing.
 
+**7. New default web password** replaces the device default password with a new random one after you confirm with `y`, and shows it. Use it if the default password became known to someone else: the old one stops working at once (browsers logged in with it are logged out), and the new one is kept across restarts. An own password set with option 6 stays in use.
+
 If you lock yourself out with a wrong static address, use the serial menu to switch back to DHCP, or do a factory reset.
 
 ## Web page
 
 The device serves a small configuration page on **http://&lt;device IP&gt;/** (port 80): log in, see the status, change the network settings and the SNMP community, and restart the device.
 
-- **Login:** user `admin`. Until you set your own password, the password is the device's **default password**: 10 random characters generated on first boot, different for every device, and shown only on the serial status screen (menu option 1): `Web login: user admin, default password "k7wqz3mtd9"`. A factory reset does not change it.
+- **Login:** user `admin`. Until you set your own password, the password is the device's **default password**: 10 random characters generated on first boot, different for every device, and shown only on the serial status screen (menu option 1): `Web login: user admin, default password "k7wqz3mtd9"`. A factory reset does not change it; menu option 7 replaces it with a new random one.
 - **Own password:** serial menu option 6 sets one (8-32 characters, no spaces; typed characters are shown as `*`), or `-` goes back to the device default. Changing it logs every browser out. The password is stored as a salted SHA-256 hash (2000 rounds), never as text; checking it takes about half a second, done in small steps so SNMP keeps answering meanwhile. It can only be changed from the serial menu, so someone who learns it cannot lock you out.
 - **Status:** mains power and change count, uptime, board temperature, Ethernet link, IP and MAC address, network mode, firmware version.
 - **Network:** DHCP or static IP (address, mask and gateway are checked as in the serial menu). Saving restarts the device; the page tells you the new address.
@@ -380,6 +383,7 @@ Object details, traps, error behaviour, limits and the MIB file: [docs/MIB.md](d
 
 | Problem | What to check |
 |---|---|
+| Someone else knows the default web password | Serial menu option 7 makes a new one; or set your own with option 6 |
 | Forgot the web password | Serial menu option 6, enter `-` to go back to the device default password shown on the status screen |
 | Web page does not load | Use `http://` (not https); the status screen shows the device IP |
 | No traps arrive | Trap destination set (status screen shows it and "N sent"); firewall on the receiving PC must allow inbound UDP 162 |

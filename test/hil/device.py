@@ -206,6 +206,11 @@ class Device:
         return out + self.send(password if repeat is None else repeat,
                                expect=r"(Web password saved|passwords differ|Failed)[\s\S]*> $")
 
+    def regenerate_web_default_password(self, confirm=True):
+        """Menu option 7; returns the menu output (with the new password when confirmed)."""
+        self.send("7", expect=r"\(y/n\): $")
+        return self.send("y" if confirm else "n", expect=r"(New default web password|Cancelled)[\s\S]*> $")
+
     def access_log(self):
         """Menu option 5: list of (ip, event, count) tuples, newest first."""
         out = self.send("5", expect=r"Access log: [\s\S]*> $")

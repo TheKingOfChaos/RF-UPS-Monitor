@@ -268,6 +268,7 @@ Uses `test/settings_a.json` and `test/settings_b.json`, never the real settings.
 - 5 failed logins lock out even the right password for 30 s, logged as `web locked out`
 - Actions need session and CSRF token; community change applies to SNMP at once (old community refused) and is restored; invalid community and invalid static address rejected without restart
 - Restart button and DHCP save restart the device (sysUpTime restarts, default password kept); static IP from the web page and back (opt-in `RFUPS_STATIC_IP`)
+- New default password via serial option 7: `n` changes nothing; `y` gives a new 10-character password, logs browsers out, refuses the old one and keeps the new one across a restart; an own password stays in use
 - Own password via serial option 6: masked echo, old sessions logged out, default refused, hashed check under 2 s, mismatch and short passwords change nothing, `-` restores the default
 - With an own password set, SNMP stays under 100 ms while a login (right or wrong) hashes the password
 - A client that never finishes its request does not slow SNMP and is dropped after 5 s; 30 page loads keep SNMP under 100 ms and leave > 1 KB of core 0 stack never used; oversized request gets 413

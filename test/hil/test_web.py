@@ -293,6 +293,48 @@ class WebPageTest(unittest.TestCase):
         self.assertEqual(self.password, st["webDefaultPassword"])
         self.assertEqual(303, Web(self.ip).login(self.password)[0])
 
+    def test_new_default_password_from_serial_menu(self):
+        # For when the default password became known: the old one must stop working for good
+        self.wait_lockout_over()
+        old = self.password
+        web = self.logged_in()
+        self.assertIn("Cancelled", self.dev.regenerate_web_default_password(confirm=False))
+        self.assertEqual(old, self.dev.status()["webDefaultPassword"])
+
+        out = self.dev.regenerate_web_default_password()
+        new = re.search(r'New default web password: "(\w+)"', out).group(1)
+        self.assertNotIn("NOT saved", out)
+        type(self).password = new  # later tests in this process log in with the new one
+        self.assertNotEqual(old, new)
+        self.assertEqual(10, len(new))
+        self.assertEqual(new, self.dev.status()["webDefaultPassword"])
+        # Logged-in browsers are logged out, the old password is refused, the new one works
+        _, _, page = web.request("GET", "/")
+        self.assertIn('action="/login"', page)
+        self.assertEqual(401, Web(self.ip).login(old)[0])
+        self.assertEqual(303, Web(self.ip).login(new)[0])
+        # It is stored: still the same after a restart
+        self.dev.send("2", expect=r"\(y/n\): $")
+        self.dev.send("y", expect=r"Rebooting", timeout=10)
+        st = self.dev.reconnect_after_reboot()
+        self.assertEqual(new, st["webDefaultPassword"])
+        self.assertEqual(303, Web(self.ip).login(new)[0])
+
+    def test_new_default_keeps_an_own_password_in_use(self):
+        self.wait_lockout_over()
+        own = "Pico-pass-44"
+        self.assertIn("Web password saved", self.dev.set_web_password(own))
+        try:
+            out = self.dev.regenerate_web_default_password()
+            new = re.search(r'New default web password: "(\w+)"', out).group(1)
+            type(self).password = new
+            self.assertIn("Your own password stays in use", out)
+            self.assertEqual(303, Web(self.ip).login(own)[0])
+            self.assertEqual(401, Web(self.ip).login(new)[0])
+        finally:
+            self.assertIn("reset to the device default", self.dev.set_web_password("-"))
+        self.assertEqual(303, Web(self.ip).login(self.password)[0])
+
     def test_login_with_own_password_keeps_snmp_fast(self):
         # The own password is a slow salted hash (~0.45 s of SHA-256); it must not block SNMP
         self.wait_lockout_over()

@@ -51,7 +51,7 @@ class SerialMenuTest(unittest.TestCase):
     def test_menu_lists_all_options(self):
         out = self.dev.wait_for_menu()
         for text in ("1. Show status", "2. Use DHCP", "3. Set static IP", "4. SNMP settings",
-                     "5. Access log", "6. Web password", "?. Show this menu"):
+                     "5. Access log", "6. Web password", "7. New default web password", "?. Show this menu"):
             self.assertIn(text, out)
 
     def test_status_reports_dhcp_lease(self):

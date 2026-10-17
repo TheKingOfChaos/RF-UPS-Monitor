@@ -6,6 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-10-17
+
+### Security
+- Serial menu option 7 replaces the device default web password with a new random one, for when the default password became known (the README of 2.0.0 showed the development device's real default password as an example). The old password stops working at once and browsers logged in with it are logged out.
+
+### Fixed
+- README: the example default password is made up.
+
 ## [2.0.0] - 2026-10-17
 
 A new major version for the second management interface: the configuration web page with login. SNMP, the MIB, the serial menu and the settings files stay compatible: files from 1.x load unchanged, and older firmware ignores the new `webPassword` field (a downgrade only loses the own web password).
@@ -72,7 +80,8 @@ First release.
 - The network stack queues 5 UDP packets; larger bursts are dropped (SNMP managers retry).
 - Not yet tested with the real hardware: mains traps with real mains, the factory reset button, the "no link" and "no DHCP server" states. The LibreNMS definitions are validated against the schema but not yet tried in a running LibreNMS (done after 1.0.1).
 
-[Unreleased]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.0.1...HEAD
+[2.0.1]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v1.0.2...v2.0.0
 [1.0.2]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v1.0.0...v1.0.1

@@ -141,7 +141,9 @@ option rfups-trap-target 10.10.6.65;
 dhcp-option=224,10.10.6.65
 ```
 
-How it works: the core's lwIP is precompiled and cannot be told to ask for or keep extra options, so the firmware edits the device's own outgoing DHCP DISCOVER/REQUEST at the driver: it appends 224 to the Parameter Request List (option 55), using one of the padding bytes lwIP always leaves after the END option, and fixes the UDP checksum. Incoming DHCPACKs for the device's MAC are read for option 224 (IP and UDP checksums must verify). With the trap destination fixed or off, DHCP messages are not changed. DHCP has no authentication, so anyone who can answer DHCP on the network can choose the trap destination; the same holds for the address, gateway and DNS it hands out.
+How it works: the core's lwIP is precompiled and cannot be told to ask for or keep extra options, so the firmware edits the device's own outgoing DHCP DISCOVER/REQUEST at the driver: it appends 224 to the Parameter Request List (option 55), using one of the padding bytes lwIP always leaves after the END option, and fixes the UDP checksum. Option 224 is taken only from a DHCPACK that the device's DHCP client (lwIP) actually accepted: lwIP must be waiting for an ACK, the frame must carry lwIP's current transaction id and the server id of the server lwIP talks to, and lwIP must become bound while processing that frame. A forged "ACK" sent by another host on the LAN is ignored (and counted on the status screen: `DHCP: N ACK-like frames ignored`). With the trap destination fixed or off, DHCP messages are not changed.
+
+Remaining risk: DHCP has no authentication. A host that sees the device's DHCP request (they are broadcast) and answers faster than the real server can hand out the address, gateway and DNS, and so also option 224. Traps carry the SNMP community in clear text, so such a host would learn it. Use `dhcp` only on a network where you trust the DHCP server and its neighbours; otherwise set a fixed trap destination.
 
 ## Rate limiting and access log
 

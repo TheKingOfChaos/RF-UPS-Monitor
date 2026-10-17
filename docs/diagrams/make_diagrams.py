@@ -318,7 +318,7 @@ def test_layers():
         ("emb", "On-device Unity tests: LittleFS, W5500, GPIO27 sampler", YELLOW),
         ("host", "Host agent vs real net-snmp (WSL): 52 checks, MIB validation", CYAN),
         ("san", "Sanitizers (WSL): every native suite under ASan + UBSan", CYAN),
-        ("native", "Native unit tests: 351 tests of lib/, frames from the device and Kea", GREEN),
+        ("native", "Native unit tests: 352 tests of lib/, frames from the device and Kea", GREEN),
     ]
     for i, (eid, text, bg) in enumerate(layers):
         d.box(eid, 120, 110 + i * 100, 820, 80, text, bg, 18)

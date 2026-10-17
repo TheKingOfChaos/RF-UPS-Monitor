@@ -140,7 +140,7 @@ Flashing an embedded test replaces the firmware, so always reflash with `pio run
 ### `test/native/test_dhcp_option`: DHCP option 224 (`lib/dhcp_option`)
 - Real frames: the device's own DISCOVER and REQUESTs (dumped at the driver), the LAN server's OFFER/ACK, and Kea 2.2.0's replies to the device's frames replayed in Docker with and without option 224 added (`frames.h`). Kea sent 224 only to the edited frames, which proves the request works
 - Editing: 224 appended to option 55 in every device request, length unchanged, nothing else changed, UDP checksum recomputed (not dropped), idempotent, zero checksum kept, no padding = no change, server messages / ARP / corrupt frames untouched, every truncation and every single-byte corruption safe
-- Reading: Kea ACK gives 10.10.6.65 and the lease, ACKs without 224, OFFERs and requests are not ACKs, another MAC, wrong option length, bad IP/UDP checksums, fragments, every truncation and corruption
+- Reading: Kea ACK gives 10.10.6.65, the lease, the transaction id of the device's request and the server id, ACKs without 224, OFFERs and requests are not ACKs, another MAC, wrong option length, bad IP/UDP checksums, fragments, every truncation and corruption
 
 ### `test/native/test_settings_codec`: `lib/settings_codec`
 - Defaults and JSON round trip, maximum-length fields fit the buffer
@@ -290,6 +290,7 @@ Uses `test/settings_a.json` and `test/settings_b.json`, never the real settings.
 
 ### `test/hil/test_dhcp_trap.py`: trap destination from DHCP
 - Choosing `dhcp` asks for option 224 in the renewal, the LAN's server still answers (same lease and IP, SNMP answers), the status screen reports the ACK; back to fixed
+- A forged DHCPACK with option 224 (Kea's capture re-addressed to the device, wrong transaction id) sent from this PC is ignored and counted
 - Opt-in `RFUPS_DHCP_TRAP_TARGET=<address>`: with a server that sends option 224, the destination in use is that address; if it is this PC, an authenticationFailure trap arrives there
 
 ### `test/hil/test_snmp_traps.py`: traps on the device (every test runs with v1 and with v2c traps)

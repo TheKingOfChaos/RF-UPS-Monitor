@@ -71,8 +71,15 @@ static Frame optionsExcept55(const Frame& f) {
 
 static DhcpEdit edit(Frame& f) { return dhcpRequestOption(f.data(), f.size(), DHCP_OPTION_TRAP_TARGET); }
 
+static DhcpAckInfo lastInfo;
+
 static DhcpAck read(const Frame& f, const uint8_t* mac, uint8_t out[4], uint8_t yi[4]) {
-    return dhcpReadAck(f.data(), f.size(), mac, DHCP_OPTION_TRAP_TARGET, out, yi);
+    lastInfo = DhcpAckInfo();
+    memcpy(lastInfo.value, out, 4);  // untouched unless the option is found
+    DhcpAck r = dhcpReadAck(f.data(), f.size(), mac, DHCP_OPTION_TRAP_TARGET, lastInfo);
+    memcpy(out, lastInfo.value, 4);
+    memcpy(yi, lastInfo.yiaddr, 4);
+    return r;
 }
 
 // ---- request editing ----
@@ -216,9 +223,25 @@ static void test_every_single_byte_corruption_of_a_request_is_safe() {
 static void test_kea_ack_with_option_224_gives_the_trap_target() {
     uint8_t out[4], yi[4];
     TEST_ASSERT_EQUAL(DhcpAck::Option, read(frame(KEA_ACK_WITH_224), DEVICE_MAC, out, yi));
-    const uint8_t target[] = {10, 10, 6, 65}, lease[] = {192, 168, 77, 101};
+    const uint8_t target[] = {10, 10, 6, 65}, lease[] = {192, 168, 77, 101}, server[] = {192, 168, 77, 2};
     TEST_ASSERT_EQUAL_HEX8_ARRAY(target, out, 4);
     TEST_ASSERT_EQUAL_HEX8_ARRAY(lease, yi, 4);
+    // Transaction id and server: the firmware only trusts an ACK lwIP accepted (same xid and server)
+    TEST_ASSERT_EQUAL_HEX32(0x3a559c83, lastInfo.xid);  // the device's request it answers
+    TEST_ASSERT_TRUE(lastInfo.hasServerId);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(server, lastInfo.serverId, 4);
+}
+
+static void test_lan_ack_xid_matches_the_device_request() {
+    uint8_t out[4], yi[4];
+    TEST_ASSERT_EQUAL(DhcpAck::NoOption, read(frame(LAN_ACK), DEVICE_MAC, out, yi));
+    Frame req = frame(DEVICE_REQUEST_SELECTING);
+    size_t b = udpOffset(req) + 8;
+    uint32_t reqXid = (uint32_t)req[b + 4] << 24 | (uint32_t)req[b + 5] << 16 | (uint32_t)req[b + 6] << 8 | req[b + 7];
+    TEST_ASSERT_EQUAL_HEX32(reqXid, lastInfo.xid);
+    const uint8_t server[] = {10, 10, 0, 2};
+    TEST_ASSERT_TRUE(lastInfo.hasServerId);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(server, lastInfo.serverId, 4);
 }
 
 static void test_acks_without_option_224() {
@@ -323,6 +346,7 @@ int main() {
     RUN_TEST(test_every_single_byte_corruption_of_a_request_is_safe);
     RUN_TEST(test_kea_ack_with_option_224_gives_the_trap_target);
     RUN_TEST(test_acks_without_option_224);
+    RUN_TEST(test_lan_ack_xid_matches_the_device_request);
     RUN_TEST(test_offers_and_requests_are_not_acks);
     RUN_TEST(test_ack_for_another_device_is_ignored);
     RUN_TEST(test_option_224_with_wrong_length_is_ignored);

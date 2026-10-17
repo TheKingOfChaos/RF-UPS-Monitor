@@ -16,6 +16,7 @@ Run:
 
 import os
 import re
+import socket
 import time
 import unittest
 
@@ -87,7 +88,35 @@ class DhcpTrapTargetTest(unittest.TestCase):
         st = d.status()
         self.assertTrue(st["trapSource"].startswith("fixed"), st["trapSource"])
 
-    @unittest.skipUnless(EXPECTED, "set RFUPS_DHCP_TRAP_TARGET to the address your DHCP server sends in option 224")
+    def test_forged_dhcp_ack_with_option_224_is_ignored(self):
+        """Any LAN host can send an "ACK"; only one the DHCP client accepted may set the destination."""
+        d = self.dev
+        d.set_trap_target("dhcp")
+        before = self.wait_for_ack()
+        self.assertNotIn("10.10.6.65", before["trapSource"])
+        # Kea's captured ACK with option 224 = 10.10.6.65, re-addressed to the device, wrong transaction id
+        with open(os.path.join(os.path.dirname(__file__), "..", "native", "test_dhcp_option", "frames.h")) as f:
+            frames = f.read()
+        block = frames[frames.index("KEA_ACK_WITH_224[]"):]
+        block = block[:block.index("};")]
+        eth = bytes(int(x, 16) for x in re.findall(r"0x([0-9a-f]{2})", block))
+        bootp = bytearray(eth[14 + 20 + 8:])
+        bootp[4:8] = b"\x12\x34\x56\x78"                                  # xid lwIP never used
+        bootp[16:20] = bytes(int(x) for x in self.ip.split("."))          # yiaddr = the device's address
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.bind(("", 67))
+            for _ in range(3):
+                s.sendto(bytes(bootp), (self.ip, 68))
+                time.sleep(0.2)
+        time.sleep(1)
+        st = d.status()
+        self.assertNotIn("10.10.6.65", st["trapSource"], "a forged ACK changed the trap destination")
+        self.assertNotEqual("10.10.6.65", st["trapTarget"])
+        self.assertRegex(st["raw"], r"DHCP: [1-9]\d* ACK-like frames ignored")
+        self.assertEqual(before["ip"], st["ip"])
+        d.set_trap_target("-")
+
+    @unittest.skipUnless(EXPECTED,"set RFUPS_DHCP_TRAP_TARGET to the address your DHCP server sends in option 224")
     def test_trap_destination_comes_from_option_224(self):
         d = self.dev
         d.set_trap_target("dhcp", "2c")

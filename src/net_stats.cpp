@@ -6,6 +6,7 @@
 #include <lwip/pbuf.h>
 #include <string.h>
 #include <lwip/dhcp.h>
+#include <lwip/prot/dhcp.h>
 #include "pins.h"
 
 // W5500 common register with link, speed and duplex
@@ -28,27 +29,50 @@ static bool started = false;
 static volatile bool dhcpRequestOn = false;
 static DhcpTrapInfo dhcpTrap = {};
 
-/// A DHCPACK for this device: remember whether it carried option 224
-static void readDhcpAck(const uint8_t* frame, size_t len) {
-    uint8_t target[4], yiaddr[4];
-    DhcpAck r = dhcpReadAck(frame, len, mac, DHCP_OPTION_TRAP_TARGET, target, yiaddr);
-    if (r != DhcpAck::Option && r != DhcpAck::NoOption) return;
+static bool isWaitingForAck(uint8_t state) {
+    return state == DHCP_STATE_REQUESTING || state == DHCP_STATE_REBOOTING || state == DHCP_STATE_RENEWING ||
+           state == DHCP_STATE_REBINDING;
+}
+
+/**
+ * @brief Use a DHCPACK's option 224 only if lwIP accepted that ACK
+ *
+ * Anyone on the LAN can send a frame that looks like an ACK for this MAC, and
+ * traps carry the SNMP community, so a forged option 224 would leak it. The
+ * value is taken only when lwIP was waiting for an ACK, the frame has lwIP's
+ * current transaction id and, if lwIP already knows the server, its server id,
+ * and lwIP went to BOUND while processing this very frame.
+ */
+static err_t inputWithDhcpAck(struct pbuf* p, struct netif* nif) {
+    DhcpAckInfo info;
+    DhcpAck r = dhcpReadAck((const uint8_t*)p->payload, p->len, mac, DHCP_OPTION_TRAP_TARGET, info);
+    struct dhcp* dhcp = netif_dhcp_data(nif);
+    if ((r != DhcpAck::Option && r != DhcpAck::NoOption) || dhcp == nullptr) return originalInput(p, nif);
+
+    bool candidate = isWaitingForAck(dhcp->state) && info.xid == dhcp->xid;
+    if (candidate && info.hasServerId && !ip_addr_isany_val(dhcp->server_ip_addr)) {
+        candidate = memcmp(info.serverId, &ip_2_ip4(&dhcp->server_ip_addr)->addr, 4) == 0;
+    }
+    err_t err = originalInput(p, nif);  // lwIP handles the ACK now (p belongs to lwIP afterwards)
+    if (!candidate || dhcp->state != DHCP_STATE_BOUND) {
+        dhcpTrap.ignored++;
+        return err;
+    }
     dhcpTrap.acks++;
     dhcpTrap.seen = true;
     dhcpTrap.hasOption = r == DhcpAck::Option;
-    if (dhcpTrap.hasOption) memcpy(dhcpTrap.target, target, 4);
-    memcpy(dhcpTrap.yiaddr, yiaddr, 4);
+    if (dhcpTrap.hasOption) memcpy(dhcpTrap.target, info.value, 4);
+    memcpy(dhcpTrap.yiaddr, info.yiaddr, 4);
     dhcpTrap.ackMs = millis();
+    return err;
 }
 
 /// Received frame: count, then hand to lwIP as before (it drops what it cannot use)
 static err_t countingInput(struct pbuf* p, struct netif* nif) {
     // The driver allocates one contiguous pbuf per frame (PBUF_RAM), so payload holds the header
-    if (p != nullptr) {
-        ifCountReceived(counters, (const uint8_t*)p->payload, p->len, LWIP_IPV6 != 0);
-        readDhcpAck((const uint8_t*)p->payload, p->len);
-    }
-    return originalInput(p, nif);
+    if (p == nullptr) return originalInput(p, nif);
+    ifCountReceived(counters, (const uint8_t*)p->payload, p->len, LWIP_IPV6 != 0);
+    return inputWithDhcpAck(p, nif);
 }
 
 void netStatsCountDiscard(uint16_t length) {

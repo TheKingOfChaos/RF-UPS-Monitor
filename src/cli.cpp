@@ -149,6 +149,10 @@ static void printStatus() {
             Serial.printf("last ACK %lu s ago: %u.%u.%u.%u)\n", (unsigned long)((millis() - d.ackMs) / 1000),
                           d.target[0], d.target[1], d.target[2], d.target[3]);
         }
+        if (d.ignored) {
+            Serial.printf("DHCP: %lu ACK-like frames ignored (not accepted by the DHCP client, possibly forged)\n",
+                          (unsigned long)d.ignored);
+        }
     }
     Serial.printf("Trap version: %s\n", currentSettings.trapVersion == TRAP_VERSION_V1 ? "v1" : "v2c");
     Serial.printf("Hostname: %s (DHCP, mDNS %s.local)\n", hostnameCurrent(), hostnameCurrent());

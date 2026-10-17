@@ -86,7 +86,8 @@ PhyStatus netStatsPhy();
  */
 struct DhcpTrapInfo {
     uint32_t requests;   ///< Outgoing DHCP messages that had option 224 added
-    uint32_t acks;       ///< DHCPACKs for this device read
+    uint32_t acks;       ///< DHCPACKs lwIP accepted (only these count)
+    uint32_t ignored;    ///< ACK-like frames for this MAC lwIP did not accept (possibly forged)
     bool seen;           ///< At least one ACK read
     bool hasOption;      ///< The latest ACK carried option 224
     uint8_t target[4];   ///< Its value (when hasOption)

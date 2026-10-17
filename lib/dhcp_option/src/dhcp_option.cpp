@@ -74,7 +74,7 @@ static bool findOptions(const Udp& u, uint8_t op, size_t& start, size_t& end) {
 
 /// Walk the options: positions of message type, a code, and END. false if malformed.
 struct Walk {
-    size_t msgType = 0, param = 0, wanted = 0, end = 0;
+    size_t msgType = 0, param = 0, wanted = 0, serverId = 0, end = 0;
 };
 
 static bool walkOptions(const uint8_t* d, size_t start, size_t stop, uint8_t wantedCode, Walk& w) {
@@ -93,6 +93,7 @@ static bool walkOptions(const uint8_t* d, size_t start, size_t stop, uint8_t wan
         if (code == OPT_MSG_TYPE && w.msgType == 0 && d[i + 1] == 1) w.msgType = i;
         if (code == OPT_PARAM_LIST && w.param == 0) w.param = i;
         if (code == wantedCode && w.wanted == 0) w.wanted = i;
+        if (code == 54 && w.serverId == 0) w.serverId = i;
         i += 2 + d[i + 1];
     }
     return false;  // no END
@@ -133,8 +134,7 @@ DhcpEdit dhcpRequestOption(uint8_t* frame, size_t len, uint8_t code) {
     return DhcpEdit::Added;
 }
 
-DhcpAck dhcpReadAck(const uint8_t* frame, size_t len, const uint8_t mac[6], uint8_t code, uint8_t out[4],
-                    uint8_t yiaddr[4]) {
+DhcpAck dhcpReadAck(const uint8_t* frame, size_t len, const uint8_t mac[6], uint8_t code, DhcpAckInfo& info) {
     Udp u;
     if (frame == nullptr || !findUdp(frame, len, u) || u.src != 67 || u.dst != 68) return DhcpAck::NotDhcpReply;
     if (be16(u.payload + 6) != 0 && udpChecksum(u) != 0) return DhcpAck::NotDhcpReply;
@@ -146,8 +146,11 @@ DhcpAck dhcpReadAck(const uint8_t* frame, size_t len, const uint8_t mac[6], uint
     Walk w;
     if (!walkOptions(d, start, stop, code, w) || w.msgType == 0) return DhcpAck::NotDhcpReply;
     if (d[w.msgType + 2] != ACK) return DhcpAck::NotAck;
-    memcpy(yiaddr, bootp + 16, 4);
+    memcpy(info.yiaddr, bootp + 16, 4);
+    info.xid = (uint32_t)bootp[4] << 24 | (uint32_t)bootp[5] << 16 | (uint32_t)bootp[6] << 8 | bootp[7];
+    info.hasServerId = w.serverId != 0 && d[w.serverId + 1] == 4;
+    if (info.hasServerId) memcpy(info.serverId, d + w.serverId + 2, 4);
     if (w.wanted == 0 || d[w.wanted + 1] != 4) return DhcpAck::NoOption;
-    memcpy(out, d + w.wanted + 2, 4);
+    memcpy(info.value, d + w.wanted + 2, 4);
     return DhcpAck::Option;
 }

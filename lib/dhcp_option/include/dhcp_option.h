@@ -44,11 +44,21 @@ enum class DhcpAck : uint8_t {
     Option         ///< DHCPACK with a 4-byte option: value in out
 };
 
+/// What a DHCPACK said (filled for the NoOption and Option results)
+struct DhcpAckInfo {
+    uint8_t value[4];     ///< The option value (Option only)
+    uint8_t yiaddr[4];    ///< The address the ACK assigns
+    uint32_t xid;         ///< Transaction id: must be the client's current one to be genuine
+    bool hasServerId;     ///< Option 54 present
+    uint8_t serverId[4];  ///< Option 54: the server that sent it
+};
+
 /**
  * @brief Read a 4-byte option (an IPv4 address) from a DHCPACK for this device
- * @param mac    This device's MAC; the ACK's chaddr must match
- * @param out    The option value when the result is Option
- * @param yiaddr The address assigned by the ACK (for every NoOption/Option result)
+ *
+ * Anyone on the LAN can send a frame like this. The caller must only use the
+ * value if the DHCP client accepted this ACK (same xid and server, and it moved
+ * to BOUND because of it); see src/net_stats.cpp.
+ * @param mac This device's MAC; the ACK's chaddr must match
  */
-DhcpAck dhcpReadAck(const uint8_t* frame, size_t len, const uint8_t mac[6], uint8_t code, uint8_t out[4],
-                    uint8_t yiaddr[4]);
+DhcpAck dhcpReadAck(const uint8_t* frame, size_t len, const uint8_t mac[6], uint8_t code, DhcpAckInfo& info);

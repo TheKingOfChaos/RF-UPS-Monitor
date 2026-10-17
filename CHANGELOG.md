@@ -10,7 +10,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - LibreNMS temperature sensor: low limit set to -20 C. Without it LibreNMS put the low limit 10 C below the first reading, which alarmed when the room cooled down.
 
 ### Added
-- `librenms/test/compose.yml`: a throw-away LibreNMS in Docker for checking the definitions. Tested with LibreNMS 26.9.1 against the device (see docs/LIBRENMS.md).
+- `librenms/test/compose.yml`: a throw-away LibreNMS in Docker for checking the definitions. Tested with LibreNMS 26.9.1 against the device (see docs/LIBRENMS.md), including a real mains cut raising and clearing the "State Sensor Critical" alert.
+- Automated mains HIL tests: with `RFUPS_MAINS_SWITCH=dirigera` the tests switch an IKEA Dirigera smart plug feeding the mains detector (`test/hil/mains_switch.py`, `dirigera_outlet.py`). Mains loss/restore over serial and SNMP and the mains traps in v1 and v2c now pass with real mains, plus a new test that a ~1 s outage shows in mainsPowerChanges.
 
 ## [1.0.1] - 2026-10-17
 

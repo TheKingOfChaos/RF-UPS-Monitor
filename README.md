@@ -12,9 +12,9 @@ Current version: **1.0.1** (see [CHANGELOG.md](CHANGELOG.md)).
 | Serial menu for network configuration | Working |
 | Settings stored in flash, power-cut safe | Working |
 | Factory reset button (GPIO22, 10 s hold, non-blocking, LED feedback) | Implemented; manual test with the real button pending |
-| Mains power monitoring on GPIO27 (core 1, debounced) | Working, verified with real mains loss/restore |
+| Mains power monitoring on GPIO27 (core 1, debounced) | Working, verified with real mains loss/restore (automated with a smart plug) |
 | SNMP v1 and v2c agent (Get, GetNext, GetBulk, walk, bulkwalk) | Working, tested with net-snmp |
-| SNMP traps in v1 or v2c (coldStart, authenticationFailure, mainsPowerLost/Restored) | Working; mains traps with real mains pending |
+| SNMP traps in v1 or v2c (coldStart, authenticationFailure, mainsPowerLost/Restored) | Working, mains traps verified with real mains |
 | SNMP rate limiting and access log | Working |
 | Interface statistics (IF-MIB ifTable/ifXTable, 64-bit counters) | Working, counted by the firmware |
 | Board temperature (RP2040 internal sensor) | Working |

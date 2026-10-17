@@ -11,6 +11,7 @@ Environment variables:
     RFUPS_STATIC_IP   Free address for the static IP test, e.g. 10.10.6.250
     RFUPS_STATIC_MASK Subnet mask for that test (default 255.255.0.0)
     RFUPS_STATIC_GW   Gateway for that test (default: the current DHCP gateway)
+    RFUPS_MAINS_SWITCH / RFUPS_MANUAL_MAINS  Mains tests, see mains_switch.py
 
 The device must be in DHCP mode before the run, and is left in DHCP mode.
 """
@@ -21,6 +22,7 @@ import time
 import unittest
 
 from device import Device, ping
+from mains_switch import get_switch, skip_without_switch
 
 
 class SerialMenuTest(unittest.TestCase):
@@ -68,17 +70,20 @@ class SerialMenuTest(unittest.TestCase):
         self.assertRegex(st["raw"],
                          r"Mains power: \w+ \((no changes since boot|\d+ changes, last change \d+ s ago)\)")
 
-    @unittest.skipUnless(os.environ.get("RFUPS_MANUAL_MAINS"),
-                         "manual: set RFUPS_MANUAL_MAINS=1 and switch mains off and on when asked")
+    @skip_without_switch
     def test_mains_loss_and_restore_are_reported(self):
         d = self.dev
+        switch = get_switch()
         self.assertEqual("present", d.status()["mains"], "mains must be on when the test starts")
-        print("\n>>> Switch mains power OFF now (60 s)...", flush=True)
-        d.read_until(r"Mains power LOST at \d+ ms", timeout=60)
-        d.wait_for_menu(timeout=5)
-        self.assertEqual("LOST", d.status()["mains"])
-        print(">>> Switch mains power ON again (60 s)...", flush=True)
-        d.read_until(r"Mains power RESTORED at \d+ ms", timeout=60)
+        try:
+            switch.off()
+            d.read_until(r"Mains power LOST at \d+ ms", timeout=60)
+            d.wait_for_menu(timeout=5)
+            self.assertEqual("LOST", d.status()["mains"])
+            switch.on()
+            d.read_until(r"Mains power RESTORED at \d+ ms", timeout=60)
+        finally:
+            switch.restore()
         d.wait_for_menu(timeout=5)
         st = d.status()
         self.assertEqual("present", st["mains"])

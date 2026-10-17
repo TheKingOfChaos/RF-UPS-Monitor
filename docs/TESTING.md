@@ -99,9 +99,26 @@ The device must be in DHCP mode when the run starts, and is left in DHCP mode. T
 $env:RFUPS_STATIC_IP = "10.10.6.250"   # must not be in use on the LAN
 $env:RFUPS_STATIC_MASK = "255.255.0.0" # optional, default 255.255.0.0
 $env:RFUPS_STATIC_GW = "10.10.0.1"     # optional, default: current DHCP gateway
-$env:RFUPS_MANUAL_MAINS = "1"          # optional, interactive mains off/on tests (status, SNMP, traps)
+$env:RFUPS_MANUAL_MAINS = "1"          # optional, mains off/on tests where you switch mains when asked
 $env:RFUPS_MANUAL_BUTTON = "1"         # optional, interactive factory reset button test
 ```
+
+### Mains tests with a smart plug
+
+The mains tests switch the device's mains input off and on. They run automatically when the mains detection circuit is fed from an outlet on an IKEA Dirigera hub ([test/hil/mains_switch.py](../test/hil/mains_switch.py)):
+
+```powershell
+$env:RFUPS_MAINS_SWITCH = "dirigera"
+$env:RFUPS_DIRIGERA_IP = "10.10.6.124"        # the hub
+$env:RFUPS_DIRIGERA_OUTLET = "Stikprop 1"     # outlet name in the IKEA app
+# optional, paths on the WSL side, these are the defaults:
+$env:RFUPS_DIRIGERA_TOKEN = "~/dirigera/token"
+$env:RFUPS_DIRIGERA_PYTHON = "~/dirigera/.venv/bin/python"
+```
+
+One-time setup in WSL: `python3 -m venv ~/dirigera/.venv && ~/dirigera/.venv/bin/pip install dirigera`, then `~/dirigera/.venv/bin/generate-token <hub ip>` (press the button on the hub) and save the token in `~/dirigera/token` with `chmod 600`. Never commit the token. The tests call [test/hil/dirigera_outlet.py](../test/hil/dirigera_outlet.py) with that Python and always switch the outlet back on, also when a test fails. One switch takes about a second; the device sees the change about 0.1 s after the hub confirms it.
+
+Without `RFUPS_MAINS_SWITCH`, `RFUPS_MANUAL_MAINS=1` runs the same tests with prompts for you to switch mains by hand (except the short-outage test). With neither, they are skipped.
 
 The trap tests (`test_snmp_traps.py`) set the device's trap destination to this PC and listen on UDP 162. Windows Firewall asks once whether PlatformIO's Python may receive network traffic; allow it on the network the Pico is on, or no traps arrive. The tests restore the previous trap destination.
 
@@ -220,7 +237,7 @@ Uses `test/settings_a.json` and `test/settings_b.json`, never the real settings.
 - Static IP applied after reboot, then DHCP restored (opt-in)
 - Mains power line on the status screen
 - SNMP settings on the status screen; option 4 rejects an empty or 32-character community, a 64-character sysName and a line longer than the input buffer; Enter keeps, `-` clears; cancel changes nothing
-- Mains loss and restore reported in the log and status (manual: `RFUPS_MANUAL_MAINS=1`, you switch mains off and on when asked)
+- Mains loss and restore reported in the log and status (needs a mains switch, see above)
 
 ### `test/hil/test_snmp.py`: the SNMP agent on the device
 - `snmpget` of sysDescr, sysObjectID, several varbinds in order; sysUpTime advances ~100 ticks per second
@@ -241,7 +258,7 @@ Uses `test/settings_a.json` and `test/settings_b.json`, never the real settings.
 - coldStart arrives after a reboot (empty ARP table, the trap is the first packet to this PC), exactly once, from the device's address, with a small time-stamp
 - A wrong community sends one authenticationFailure trap; five more within 10 s send none but are counted in the access log
 - No traps when the destination is off; trap counter on the status screen; SNMP keeps answering
-- mainsPowerLost and mainsPowerRestored with correct varbinds, change counter and time-stamps (manual, `RFUPS_MANUAL_MAINS=1`)
+- mainsPowerLost and mainsPowerRestored with real mains: correct version, source, varbinds, change counter and time-stamps (needs a mains switch)
 
 ### `test/hil/test_factory_reset.py`: the reset button (manual, `RFUPS_MANUAL_BUTTON=1`)
 - A ~3 s press is released without reset, and SNMP keeps answering while it is held
@@ -249,7 +266,7 @@ Uses `test/settings_a.json` and `test/settings_b.json`, never the real settings.
 - Your previous SNMP settings and stored static IP are restored afterwards
 - 30 requests: every reply echoes its request id, worst case under 100 ms
 - 300 malformed packets in bursts: agent keeps answering; oversized packet ignored; 5 simultaneous requests all answered
-- Mains loss/restore over SNMP: status, change counter and last-change time (manual, `RFUPS_MANUAL_MAINS=1`)
+- Mains loss/restore over SNMP: status, change counter and last-change time; a ~1 s outage between two reads still shows as two changes in mainsPowerChanges (needs a mains switch)
 
 ## Adding a test
 

@@ -11,7 +11,7 @@ Run (from the project root, firmware flashed):
 Environment variables:
     RFUPS_PORT          Serial port, default COM16
     RFUPS_WSL_DISTRO    WSL distribution with net-snmp, default Ubuntu-24.04
-    RFUPS_MANUAL_MAINS  Set to 1 for the interactive mains off/on test
+    RFUPS_MAINS_SWITCH / RFUPS_MANUAL_MAINS  Mains tests, see mains_switch.py
 
 The device must use community "public"; tests that change the SNMP
 settings restore them afterwards.
@@ -26,6 +26,7 @@ import time
 import unittest
 
 from device import Device
+from mains_switch import get_switch, skip_without_switch, wait_until
 from snmp_tools import (GET_SYSDESCR, REQUEST_ID_OFFSET, garbage_packets, local_ip_towards, net_snmp,
                         raw_get, response_request_id, send_raw)
 
@@ -480,10 +481,9 @@ class SnmpAgentTest(unittest.TestCase):
         resp, _ = raw_get(self.ip, 78)
         self.assertIsNotNone(resp)
 
-    # ---- manual ----
+    # ---- mains (needs a mains switch, see mains_switch.py) ----
 
-    @unittest.skipUnless(os.environ.get("RFUPS_MANUAL_MAINS"),
-                         "manual: set RFUPS_MANUAL_MAINS=1 and switch mains off and on when asked")
+    @skip_without_switch
     def test_mains_loss_and_restore_visible_over_snmp(self):
         def mains():
             rc, out = self.snmp("snmpget", ENTERPRISE + ".1.0", ENTERPRISE + ".2.0", ENTERPRISE + ".3.0")
@@ -504,14 +504,45 @@ class SnmpAgentTest(unittest.TestCase):
                 time.sleep(0.5)
             self.fail("mainsPowerStatus never became %d" % expected)
 
-        print("\n>>> Switch mains power OFF now (60 s)...", flush=True)
-        off = wait_for(0)
+        switch = get_switch()
+        try:
+            switch.off()
+            off = wait_for(0)
+            switch.on()
+            on = wait_for(1)
+        finally:
+            switch.restore()
         self.assertEqual(changes + 1, off[1])
         self.assertGreater(off[2], last)
-        print(">>> Switch mains power ON again (60 s)...", flush=True)
-        on = wait_for(1)
         self.assertEqual(changes + 2, on[1])
         self.assertGreater(on[2], off[2])
+
+    @skip_without_switch
+    def test_short_outage_between_polls_is_seen_in_the_change_counter(self):
+        # A manager polling every few minutes misses a short outage in mainsPowerStatus;
+        # mainsPowerChanges must still show it
+        switch = get_switch()
+        if not switch.automatic:
+            self.skipTest("needs the automatic switch for a short outage")
+
+        def changes():
+            rc, out = self.snmp("snmpget", ENTERPRISE + ".1.0", ENTERPRISE + ".2.0")
+            return (int(re.search(r"63050\.1\.0 = INTEGER: (\d)", out).group(1)),
+                    int(re.search(r"Counter32: (\d+)", out).group(1)))
+
+        status, before = changes()
+        self.assertEqual(1, status, "mains must be on when the test starts")
+        try:
+            switch.off()
+            switch.on()        # each switch takes about a second: an outage of ~1 s
+        finally:
+            switch.restore()
+        def counted_twice():
+            s = changes()
+            return s if s[1] >= before + 2 else None
+        status, after = wait_until(counted_twice, 10) or changes()
+        self.assertEqual(1, status)
+        self.assertEqual(before + 2, after, "the outage must count as one loss and one restore")
 
 
 if __name__ == "__main__":

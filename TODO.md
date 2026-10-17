@@ -46,7 +46,7 @@ An item is only ticked when it is implemented **and** its tests exist and pass (
 - [x] Response time < 100 ms (measured median ~6 ms, max ~20 ms over 30 requests)
 - [x] Survives malformed packet floods; 5 simultaneous requests all answered
 - [x] SNMP counters on the status screen
-- [ ] Mains loss/restore over SNMP with real mains — HIL `test_mains_loss_and_restore_visible_over_snmp` (manual, needs you at the switch)
+- [x] Mains loss/restore over SNMP with real mains — HIL `test_mains_loss_and_restore_visible_over_snmp`, `test_short_outage_between_polls_is_seen_in_the_change_counter` (Dirigera outlet, passed 2026-10-17)
 - [x] Known limit, accepted and documented in docs/MIB.md: the core queues 5 UDP packets (`UdpContext::rxBufMaxDepth`, hard-coded), larger bursts are dropped; one reply is held during an ARP lookup. Managers poll one request at a time and retry
 ### 2.7 SNMPv2c (decided 2026-10-17: v1 and v2c, no v3; traps in v1 or v2c)
 - [x] Parse and answer v2c (version 1), each request in its own version; v3 dropped and counted — native + HIL
@@ -67,6 +67,7 @@ An item is only ticked when it is implemented **and** its tests exist and pass (
 - [x] Status screen: board temperature, Ethernet link and traffic — HIL
 - [x] LibreNMS OS detection/discovery definitions (`librenms/`), validated against the LibreNMS schemas — `docs/LIBRENMS.md`
 - [x] Tried in LibreNMS 26.9.1 (Docker, `librenms/test/compose.yml`) against the device: OS/version/hardware, three sensors, port and rates, unhandled trap in the event log
+- [x] Real mains cut (Dirigera outlet) raises LibreNMS's "State Sensor Critical" alert on the next poll, recovers after mains returns
 - [x] Temperature low limit set to -20 C (LibreNMS's automatic one was 10 C below the first reading)
 - [ ] Optional: LibreNMS trap handler for mainsPowerLost/Restored (PHP, would have to go upstream)
 - [x] ifInDiscards (driver drops for lack of a buffer, via `CountingW5500`), ifInErrors (impossible lengths), ifInUnknownProtos (EtherType) — native `test_if_stats`, `test_if_receive_discards_errors_and_unknown_protocols`, net-snmp, HIL `test_receive_drop_counters_match_the_status_screen`
@@ -86,7 +87,8 @@ An item is only ticked when it is implemented **and** its tests exist and pass (
 - [x] Verify loss/restore with real mains — HIL `test_mains_loss_and_restore_are_reported` (manual, `RFUPS_MANUAL_MAINS=1`, passed 2026-10-16)
 - [x] Expose in MIB: mainsPowerStatus, mainsPowerChanges, mainsPowerLastChange
 - [x] SNMP trap on change: mainsPowerLost / mainsPowerRestored with the three mains objects — native byte-exact test
-- [ ] Mains traps with real mains — HIL `test_mains_traps_with_real_mains` (manual, `RFUPS_MANUAL_MAINS=1`)
+- [x] Mains traps with real mains, v1 and v2c — HIL `test_mains_traps_with_real_mains` (Dirigera outlet, passed 2026-10-17)
+- [x] Mains tests automated with an IKEA Dirigera smart plug (`RFUPS_MAINS_SWITCH=dirigera`, `test/hil/mains_switch.py`); manual mode kept
 
 ## 4. Configuration storage
 - [x] LittleFS mount

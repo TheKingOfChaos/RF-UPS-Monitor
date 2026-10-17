@@ -10,14 +10,14 @@ Run:
     %USERPROFILE%\\.platformio\\penv\\Scripts\\python.exe -m unittest discover -s test/hil -p "test_snmp_traps.py" -v
 
 Environment variables:
-    RFUPS_MANUAL_MAINS  Set to 1 for the interactive mains off/on trap test
+    RFUPS_MAINS_SWITCH / RFUPS_MANUAL_MAINS  Mains trap test, see mains_switch.py
 """
 
-import os
 import time
 import unittest
 
 from device import Device
+from mains_switch import get_switch, skip_without_switch
 from snmp_tools import GET_SYSDESCR, TrapListener, local_ip_towards, raw_get, send_raw
 
 ENTERPRISE = "1.3.6.1.4.1.63050"
@@ -154,13 +154,19 @@ class TrapTests:
         self.assertIsNotNone(resp)
         self.assertLess(secs, 1.0)
 
-    # ---- mains (manual) ----
+    # ---- mains (needs a mains switch, see mains_switch.py) ----
 
-    @unittest.skipUnless(os.environ.get("RFUPS_MANUAL_MAINS"),
-                         "manual: set RFUPS_MANUAL_MAINS=1 and switch mains off and on when asked")
+    @skip_without_switch
     def test_mains_traps_with_real_mains(self):
-        print("\n>>> [%s traps] Switch mains power OFF now (60 s)..." % self.TRAP_VERSION, flush=True)
-        lost = self.wait_kind("mainsPowerLost", timeout=60)
+        switch = get_switch()
+        try:
+            print("\n[%s traps]" % self.TRAP_VERSION, end="", flush=True)
+            switch.off()
+            lost = self.wait_kind("mainsPowerLost", timeout=60)
+            switch.on()
+            restored = self.wait_kind("mainsPowerRestored", timeout=60)
+        finally:
+            switch.restore()
         self.assertIsNotNone(lost, "no mainsPowerLost trap")
         self.assertFromDevice(lost)
         vb = lost["varbinds"]
@@ -168,9 +174,8 @@ class TrapTests:
         changes = vb[ENTERPRISE + ".2.0"][1]
         self.assertEqual(lost["timestamp"], vb[ENTERPRISE + ".3.0"][1])
 
-        print(">>> Switch mains power ON again (60 s)...", flush=True)
-        restored = self.wait_kind("mainsPowerRestored", timeout=60)
         self.assertIsNotNone(restored, "no mainsPowerRestored trap")
+        self.assertFromDevice(restored)
         vb = restored["varbinds"]
         self.assertEqual((0x02, 1), vb[ENTERPRISE + ".1.0"])
         self.assertEqual(changes + 1, vb[ENTERPRISE + ".2.0"][1])

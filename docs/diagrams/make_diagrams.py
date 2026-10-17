@@ -172,8 +172,8 @@ def system_overview():
     d.zone("z-net", 1150, 80, 380, 700, "Network", ZONE_GRAY)
     d.box("dhcp", 1190, 130, 140, 100, "DHCP server\nopt. 224 = trap\ndestination", GRAY, 16)
     d.box("browser", 1350, 140, 140, 80, "Browser\nweb page\nTCP 80", VIOLET, 16)
-    d.box("switch", 1190, 360, 300, 90, "LAN switch", GRAY)
-    d.box("lnms", 1190, 520, 300, 110, "SNMP manager\nLibreNMS / net-snmp\npolls UDP 161 (v1 / v2c)", VIOLET, 16)
+    d.box("switch", 1190, 360, 300, 90, "LAN switch\nIPv4 + IPv6", GRAY, 18)
+    d.box("lnms", 1190, 520, 300, 110, "SNMP manager\nLibreNMS / net-snmp\nUDP 161, v1/v2c, IPv4/IPv6", VIOLET, 16)
     d.box("traps", 1190, 660, 300, 100, "Trap receiver\nUDP 162 (v1 or v2c)\nfixed IP or from DHCP", VIOLET, 16)
     d.arrow("w5500", "right", "switch", "left", "100 Mbit/s", b_frac=0.5, both=True)
     d.arrow("switch", "top", "dhcp", "bottom", a_frac=0.23, both=True)
@@ -314,11 +314,11 @@ def test_layers():
     layers = [
         ("lnms", "LibreNMS in Docker: definitions, sensors, alert on a real mains cut", VIOLET),
         ("mains", "Mains HIL: a Dirigera smart plug switches real mains", RED),
-        ("hil", "HIL (Python): menu, SNMP, traps, web page, DHCP option 224, reboot", ORANGE),
+        ("hil", "HIL (Python): menu, SNMP, traps, web, DHCP option 224, IPv6, reboot", ORANGE),
         ("emb", "On-device Unity tests: LittleFS, W5500, GPIO27 sampler", YELLOW),
         ("host", "Host agent vs real net-snmp (WSL): 52 checks, MIB validation", CYAN),
         ("san", "Sanitizers (WSL): every native suite under ASan + UBSan", CYAN),
-        ("native", "Native unit tests: 352 tests of lib/, frames from the device and Kea", GREEN),
+        ("native", "Native unit tests: 363 tests of lib/, frames from the device and Kea", GREEN),
     ]
     for i, (eid, text, bg) in enumerate(layers):
         d.box(eid, 120, 110 + i * 100, 820, 80, text, bg, 18)

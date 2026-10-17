@@ -98,7 +98,7 @@ An item is only ticked when it is implemented **and** its tests exist and pass (
 - [x] Load v1 files without `sequence`, remove old `active_file`
 - [x] Factory defaults when no copy is valid
 - [x] Store sysName / sysLocation / sysContact (optional fields, older files load with defaults)
-- [x] Save/load stack use measured on the device (≤ 1.5 KB of core 0's 4 KB) — `test_save_and_load_use_little_stack`
+- [x] Save/load stack use measured on the device (≤ 1.5 KB; core 0 has 8 KB since 2.3.0) — `test_save_and_load_use_little_stack`
 - [x] Remove leftover `config.bak` / `config.schema.json` from older firmware at boot — `test_legacy_files_are_removed_and_settings_kept`
 - [x] Trap destination setting (optional field, IPv4 or empty) — native
 
@@ -164,6 +164,18 @@ An item is only ticked when it is implemented **and** its tests exist and pass (
 - [x] Bootstrap 5.3.3 styling, CSS embedded in flash (gzip, cached), works without internet — native, HIL `test_bootstrap_stylesheet_is_served_from_flash`, checked in Chromium (desktop and phone)
 - [ ] HTTPS (decided 2026-10-17: plain HTTP on the management LAN)
 
+## 13. IPv6 (2.3.0)
+- [x] Dual stack (`PIO_FRAMEWORK_ARDUINO_ENABLE_IPV6`): link-local + SLAAC, SNMP/web/mDNS over IPv6, addresses on the status screen and web page — HIL `test_ipv6.py`
+- [x] lwIP timer pool +12 (`MEMP_NUM_SYS_TIMEOUT`): with IPv6, mDNS emptied it and lwIP panicked; found with the `RFUPS_DIAG` build
+- [x] Back-to-back UDP packets crashed the IPv6 build (core `UdpContext` helper pbuf flags `0xFF` include `PBUF_FLAG_IS_CUSTOM`): `LWIP_IPV6_FRAG=0`, IPv6 replies <= 1452 bytes — HIL `test_back_to_back_requests_are_answered_and_do_not_crash`
+- [ ] Report the `PBUF_HELPER_FLAG 0xff` bug to arduino-pico (UdpContext.h), then `LWIP_IPV6_FRAG` could go back on
+- [x] Each core gets its own 8 KB stack (`core1_separate_stack`): with IPv6 only ~660 bytes of core 0's 4 KB were left after a page-load burst; now ~5.3 KB stay unused — HIL `test_page_load_burst_keeps_snmp_fast_and_stack_headroom`
+- [x] Rate limiter and access log keyed per full IPv4 or IPv6 address (`SourceKey`, 128 bits), ::/32 sources dropped; not per /64, so trust does not pass to other hosts in a manager's /64 — native `test_access_control`, HIL `test_wrong_community_over_ipv6_is_logged_with_the_full_pc_address`
+- [ ] Stage 2: IPv6 trap destination (v2c only)
+- [ ] Stage 3 (if needed): static IPv6 address, DHCPv6
+- [ ] Consider a hardware watchdog in normal builds (the IPv6 panic would have recovered by itself)
+- [ ] Simplify with lwIP options now that lwIP is known to compile with our flags: `DHCP_ADD_EXTRA_REQUEST_OPTIONS` + `LWIP_HOOK_DHCP_PARSE_OPTION` instead of editing DHCP frames, `SO_REUSE=1` instead of dropping TIME-WAIT entries
+
 ## 12. Web on/off, DHCP trap destination, logo (2.2.0)
 - [x] Web interface on/off: setting `webEnabled`, serial option 8, "Turn off…" on the page with confirmation; port 80 closed, sessions ended, mDNS `_http` removed — native, HIL
 - [x] Trap destination `dhcp`: option 224 requested in the device's DHCP messages (frame edit at the driver) and read from ACKs; verified against Kea 2.2.0 in Docker and the LAN server — native `test_dhcp_option`, HIL `test_dhcp_trap.py`
@@ -175,10 +187,10 @@ An item is only ticked when it is implemented **and** its tests exist and pass (
 - [x] Set in serial option 4 and on the web page, validated, active immediately (DHCP renew, mDNS rename)
 - [x] Free-text sysName from older firmware keeps loading; a cleaned-up name is used for DHCP/mDNS
 - [ ] Check that the DHCP server really shows the name (needs access to the router's lease list)
-- [ ] Investigate SNMP latency spikes: about 3 % of requests take 50-97 ms (median 3.7 ms), measured the same on 2.0.1 and 2.1.0, so not caused by mDNS; device or PC/network side unknown
+- [ ] SNMP latency spikes: on 2.0.1/2.1.0 about 3 % of requests took 50-97 ms (median 3.7 ms); on 2.3.0 (8 KB stacks, IPv6) 600 requests: median 3.8 ms, max 42.5 ms, none over 50 ms. One 116 ms sample in a full HIL run (not reproduced in 3 reruns); keep watching
 
 ## Notes
 - SNMP must be v1 and v2c (no v3) and our own code; networking may use libraries
-- Memory limits: 70 % flash, 50 % RAM (2.2.0: 12.6 % / 39 %, built with -Os)
+- Memory limits: 70 % flash, 50 % RAM (2.3.0: 14.2 % / 41 %, built with -Os)
 - Version: `include/version.h`; every user-visible change goes into CHANGELOG.md under [Unreleased]
-- Core 0 has a 4 KB stack shared with USB/lwIP/W5500 interrupts: keep big buffers static
+- Core 0 has an 8 KB stack (core1_separate_stack, since 2.3.0) shared with USB/lwIP/W5500 interrupts: keep big buffers static

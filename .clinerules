@@ -15,8 +15,10 @@
    - Must operate within 264KB of RAM
    - Build with the core's default optimization (-Os); never unflag it.
      Without optimization stack use more than doubles
-   - Core 0 and core 1 each have a 4 KB stack, and core 0 shares it with
-     USB, lwIP and W5500 interrupts. No buffer or struct larger than ~256
+   - Core 0 and core 1 each have an 8 KB stack (core1_separate_stack in
+     src/main.cpp; without it they share 8 KB as two 4 KB halves and core 0
+     can overwrite core 1's stack). Core 0 shares its stack with USB, lwIP
+     and W5500 interrupts, and IPv6 makes lwIP deeper. No buffer or struct larger than ~256
      bytes on the stack: make it static (single-core use) or allocate it.
      Paths that run deep in the menu or network code (e.g. settings save)
      must have an on-device stack measurement test

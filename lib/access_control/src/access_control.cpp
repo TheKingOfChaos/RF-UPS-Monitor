@@ -1,5 +1,7 @@
 #include "access_control.h"
 
+#include <stdio.h>
+
 // ---- RateLimiter ----
 
 /**
@@ -9,7 +11,7 @@ static int evictionRank(bool used, bool trusted) {
     return !used ? 0 : (trusted ? 2 : 1);
 }
 
-RateLimiter::Bucket* RateLimiter::find(uint32_t source, uint32_t nowMs) {
+RateLimiter::Bucket* RateLimiter::find(SourceKey source, uint32_t nowMs) {
     Bucket* victim = nullptr;
     for (Bucket& b : _buckets) {
         if (b.used && b.source == source) return &b;
@@ -36,7 +38,7 @@ void RateLimiter::configureTrusted(uint32_t globalRatePerSecond, uint32_t global
     _trustTimeoutMs = trustTimeoutMs;
 }
 
-void RateLimiter::markTrusted(uint32_t source) {
+void RateLimiter::markTrusted(SourceKey source) {
     for (Bucket& b : _buckets) {
         if (b.used && b.source == source && !b.trusted && trustedCount() < _maxTrusted) b.trusted = true;
     }
@@ -79,7 +81,7 @@ void RateLimiter::expireTrust(uint32_t nowMs) {
     }
 }
 
-bool RateLimiter::allow(uint32_t source, uint32_t nowMs) {
+bool RateLimiter::allow(SourceKey source, uint32_t nowMs) {
     // Trust ends after a period without requests. Sweep the whole table, not
     // only this source, so idle managers do not keep trust slots or eviction
     // protection forever.
@@ -118,7 +120,7 @@ const char* accessEventName(AccessEvent event) {
     return "unknown";
 }
 
-bool AccessLog::record(uint32_t source, AccessEvent event, uint32_t nowMs) {
+bool AccessLog::record(SourceKey source, AccessEvent event, uint32_t nowMs) {
     _total++;
     if (_size > 0) {
         Entry& last = _entries[(_head + CAPACITY - 1) % CAPACITY];
@@ -148,6 +150,59 @@ void formatIPv4(uint32_t address, char* buf) {
         if (octet >= 10) *p++ = (char)('0' + octet / 10 % 10);
         *p++ = (char)('0' + octet % 10);
         if (shift) *p++ = '.';
+    }
+    *p = '\0';
+}
+
+SourceKey sourceKeyIPv4(const uint8_t a[4]) {
+    return SourceKey((uint32_t)a[0] << 24 | (uint32_t)a[1] << 16 | (uint32_t)a[2] << 8 | a[3]);
+}
+
+bool sourceKeyIPv6(const uint8_t a[16], SourceKey& key) {
+    SourceKey k;
+    for (int i = 0; i < 8; i++) k.hi = k.hi << 8 | a[i];
+    for (int i = 8; i < 16; i++) k.lo = k.lo << 8 | a[i];
+    // ::/32 holds no LAN addresses except ::ffff:a.b.c.d, which is the IPv4 key as it stands
+    if ((k.hi >> 32) == 0 && !k.isIPv4()) return false;
+    key = k;
+    return true;
+}
+
+void formatSource(const SourceKey& key, char* buf) {
+    if (key.isIPv4()) {
+        formatIPv4(key.ipv4(), buf);
+        return;
+    }
+    uint16_t g[8];
+    for (int i = 0; i < 4; i++) {
+        g[i] = (uint16_t)(key.hi >> (48 - 16 * i));
+        g[4 + i] = (uint16_t)(key.lo >> (48 - 16 * i));
+    }
+    // RFC 5952: the longest run of two or more zero groups (the first if tied) becomes ::
+    int bestStart = -1, bestLen = 1;
+    for (int i = 0; i < 8;) {
+        if (g[i] != 0) {
+            i++;
+            continue;
+        }
+        int j = i;
+        while (j < 8 && g[j] == 0) j++;
+        if (j - i > bestLen) {
+            bestStart = i;
+            bestLen = j - i;
+        }
+        i = j;
+    }
+    char* p = buf;
+    for (int i = 0; i < 8; i++) {
+        if (i == bestStart) {
+            *p++ = ':';
+            if (i == 0) *p++ = ':';
+            i += bestLen - 1;
+            continue;
+        }
+        p += snprintf(p, 5, "%x", (unsigned)g[i]);
+        if (i < 7) *p++ = ':';
     }
     *p = '\0';
 }

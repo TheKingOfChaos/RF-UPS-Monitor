@@ -229,7 +229,7 @@ class Device:
         """Menu option 5: list of (ip, event, count) tuples, newest first."""
         out = self.send("5", expect=r"Access log: [\s\S]*> $")
         return [(m.group(1), m.group(2).strip(), int(m.group(3)))
-                for m in re.finditer(r"^\s+([\d.]+)\s+(.+?)\s+x(\d+)\s+last", out, re.MULTILINE)]
+                for m in re.finditer(r"^\s+([\d.]+|[0-9a-f:]*:[0-9a-f:]*)\s+(.+?)\s+x(\d+)\s+last", out, re.MULTILINE)]
 
 
 def ping(host, count=2):

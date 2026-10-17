@@ -6,6 +6,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-10-17
+
+### Added
+- **IPv6 (dual stack):** link-local and SLAAC addresses; SNMP, the web page and mDNS work over IPv6. The status screen and the web page show the IPv6 addresses.
+- Rate limiting, trust and the access log work per full source address for IPv6 as for IPv4 (the log shows `fd16:d833:4f0e:3ece:9000:9aaa:490a:3189`); IPv4-mapped addresses count as IPv4, sources in ::/32 are dropped. Not per /64: every host on a LAN shares one /64, so a manager's trust would have passed to all its neighbours (found in review before release).
+- Diagnosis build `-DRFUPS_DIAG -Wl,--wrap=panic`: hardware watchdog, loop/hook breadcrumbs, hard-fault PC and panic message reported after the restart (docs/TESTING.md).
+
+### Fixed
+- With IPv6, lwIP's timer pool (`MEMP_NUM_SYS_TIMEOUT`) ran empty a few seconds after boot because mDNS keeps timers for both IP versions and the core sizes the pool without mDNS; lwIP then panicked. The pool has 12 more slots (~200 bytes).
+- With IPv6, two SNMP requests arriving back to back crashed the device. The core's `UdpContext` marks a helper buffer between queued UDP packets with flags `0xFF`, which includes lwIP's `PBUF_FLAG_IS_CUSTOM`; IPv6 fragmentation turns custom buffers on, and freeing the helper then jumped to garbage. IPv6 fragmentation is off (`LWIP_IPV6_FRAG=0`), so custom buffers are off as in the IPv4 build; IPv6 SNMP replies are limited to 1452 bytes (one frame), larger GetBulk replies are shortened. Found with the diagnosis build (hard fault in `pbuf_free`).
+- With IPv6, a burst of web page loads left only ~660 bytes of core 0's 4 KB stack unused; an overflow would silently overwrite core 1's stack. Each core now has its own 8 KB stack (`core1_separate_stack`, 8 KB of RAM); ~5.3 KB stay unused after the same burst.
+
+### Notes
+- Earlier docs said lwIP is precompiled. It is compiled from source with the core's `lwipopts.h` and our build flags; the DHCP option 224 and port 80 workarounds still work, but could be replaced by lwIP options (TODO).
+
 ## [2.2.0] - 2026-10-17
 
 ### Added
@@ -105,7 +120,8 @@ First release.
 - The network stack queues 5 UDP packets; larger bursts are dropped (SNMP managers retry).
 - Not yet tested with the real hardware: mains traps with real mains, the factory reset button, the "no link" and "no DHCP server" states. The LibreNMS definitions are validated against the schema but not yet tried in a running LibreNMS (done after 1.0.1).
 
-[Unreleased]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.2.0...HEAD
+[Unreleased]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.3.0...HEAD
+[2.3.0]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.1.1...v2.2.0
 [2.1.1]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.1.0...v2.1.1
 [2.1.0]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.0.1...v2.1.0

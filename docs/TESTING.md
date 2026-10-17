@@ -141,6 +141,7 @@ Flashing an embedded test replaces the firmware, so always reflash with `pio run
 ### `test/native/test_dhcp_option`: DHCP option 224 (`lib/dhcp_option`)
 - Real frames: the device's own DISCOVER and REQUESTs (dumped at the driver), the LAN server's OFFER/ACK, and Kea 2.2.0's replies to the device's frames replayed in Docker with and without option 224 added (`frames.h`). Kea sent 224 only to the edited frames, which proves the request works
 - Editing: 224 appended to option 55 in every device request, length unchanged, nothing else changed, UDP checksum recomputed (not dropped), idempotent, zero checksum kept, no padding = no change, server messages / ARP / corrupt frames untouched, every truncation and every single-byte corruption safe
+- (see also `test_access_control`: IPv4 key = address, IPv6 key = full address, IPv4-mapped = IPv4, ::/32 refused, hosts in one /64 have their own buckets and a manager's trust does not pass to its /64 neighbours, RFC 5952 log formatting)
 - Reading: Kea ACK gives 10.10.6.65, the lease, the transaction id of the device's request and the server id, ACKs without 224, OFFERs and requests are not ACKs, another MAC, wrong option length, bad IP/UDP checksums, fragments, every truncation and corruption
 
 ### `test/native/test_settings_codec`: `lib/settings_codec`
@@ -289,6 +290,12 @@ Uses `test/settings_a.json` and `test/settings_b.json`, never the real settings.
 - A client that never finishes its request does not slow SNMP and is dropped after 5 s; 30 page loads keep SNMP under 100 ms and leave > 1 KB of core 0 stack never used; oversized request gets 413
 - Needs the device default web password (the suite skips otherwise)
 
+### `test/hil/test_ipv6.py`: IPv6 on the device
+- Link-local address from the MAC (EUI-64), SLAAC address from the router's prefix (skipped without an IPv6 router), ping6
+- SNMP get over IPv6, a wrong community over IPv6 logged with the PC's full address, web page at `http://[address]/`, `name.local` resolves to IPv6, IPv4 still answers
+- Four requests sent back to back over IPv4 and over IPv6 are all answered (they crashed the device before `LWIP_IPV6_FRAG=0`)
+- No restart during the run (sysUpTime keeps rising): the first IPv6 build panicked seconds after boot
+
 ### `test/hil/test_dhcp_trap.py`: trap destination from DHCP
 - Choosing `dhcp` asks for option 224 in the renewal, the LAN's server still answers (same lease and IP, SNMP answers), the status screen reports the ACK; back to fixed
 - A forged DHCPACK with option 224 (Kea's capture re-addressed to the device, wrong transaction id) sent from this PC is ignored and counted
@@ -318,6 +325,18 @@ Uses `test/settings_a.json` and `test/settings_b.json`, never the real settings.
 4. Check it can fail: break the code briefly (or write the test before the fix) and watch it go red.
 5. Run all native and embedded tests before committing.
 
+## Diagnosing a hang or crash on the device
+
+A firmware that freezes takes USB serial with it, so neither the menu nor `pio run -t upload` reach it (then: hold BOOTSEL while plugging in). The diagnosis build avoids that:
+
+```powershell
+$env:PLATFORMIO_BUILD_FLAGS = '-DRFUPS_DIAG -Wl,--wrap=panic'
+& $pio run -e pico -t upload
+Remove-Item Env:PLATFORMIO_BUILD_FLAGS
+```
+
+It arms the hardware watchdog (4 s), writes the step of `loop()` and of the frame hooks into watchdog scratch registers, records the program counter of a hard fault and the message of a `panic()` (lwIP asserts end there), and prints all of it after the watchdog restart: `DIAG: previous run PANICKED (called from 0x10025129): lwip`. Look the address up with `arm-none-eabi-addr2line -f -e .pio\build\pico\firmware.elf <address>`. This found the IPv6 timer-pool panic in `sys_timeout_abs` and the hard fault in `pbuf_free` caused by the core's UDP helper buffer.
+
 ## Troubleshooting
 
 | Symptom | Cause and fix |
@@ -328,7 +347,7 @@ Uses `test/settings_a.json` and `test/settings_b.json`, never the real settings.
 | Embedded test hangs with no output | Board not running the test program. Press reset or replug. `scripts/wait_for_port.py` already waits for the port to come back after flashing. |
 | `test_dhcp_lease_obtained` fails | No cable, no link LED, or no DHCP server on that network. |
 | HIL tests skipped with "device is in Static mode" | Switch to DHCP with menu option 2 first. |
-| Device stops answering on USB right after saving | Stack overflow on core 0 (4 KB). Run `test_settings_store` for the stack measurement, check no large buffer was put on the stack, and that `-Os` is not unflagged. Replug USB to recover. |
+| Device stops answering on USB right after saving | Stack overflow on core 0 (8 KB since 2.3.0, 4 KB before). Run `test_settings_store` for the stack measurement, check no large buffer was put on the stack, and that `-Os` is not unflagged. Replug USB to recover. |
 | A HIL run hangs and COM16 stays "Access denied" | The device hung and the test process is stuck in the USB driver; replug the Pico. |
 | Trap tests: "no ... trap" although the status screen counts them as sent | Windows Firewall blocks inbound UDP for PlatformIO's Python; allow it (Public or Private profile, whichever the LAN is). |
 | SNMP tests fail with timeouts right after the flood or rate-limit test | The rate limiter is still refilling; the tests wait 2.5 s, increase if your PC is slow. |

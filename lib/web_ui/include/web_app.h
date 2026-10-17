@@ -22,6 +22,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <access_control.h>
 #include "http_request.h"
 #include "web_auth.h"
 
@@ -38,6 +39,8 @@ struct WebStatus {
     bool linkUp;
     uint32_t linkMbps;
     char ip[16];
+    char ipv6[46];        ///< Global (SLAAC) IPv6 address, else link-local, empty without IPv6
+    char ipv6LinkLocal[46];  ///< fe80:: address, empty without IPv6
     char mac[18];
     bool dhcp;            ///< Configured mode
     char staticIP[16];    ///< Stored static configuration (form defaults)
@@ -71,7 +74,8 @@ public:
     virtual void requestReboot() = 0;
     /// Fill out with random bytes from a good source
     virtual void random(uint8_t* out, size_t len) = 0;
-    virtual void log(uint32_t sourceIP, WebEvent event) = 0;
+    /// source: the client address (lib/access_control SourceKey)
+    virtual void log(const SourceKey& source, WebEvent event) = 0;
 };
 
 static const size_t WEB_BODY_MAX = 8192;
@@ -85,7 +89,7 @@ public:
      * @brief Build the response to a parsed request (state Complete, TooLarge or Bad)
      * @return The full HTTP response; valid until the next call
      */
-    const char* handle(const HttpRequest& req, uint32_t sourceIP, uint32_t nowMs, WebBackend& backend, size_t& len);
+    const char* handle(const HttpRequest& req, const SourceKey& source, uint32_t nowMs, WebBackend& backend, size_t& len);
 
     /// Log every browser out, e.g. after the password changed
     void logoutAll() { _sessions.clear(); }
@@ -102,7 +106,7 @@ public:
     size_t sessionCount() const { return _sessions.count(); }
 
 private:
-    const char* login(const HttpRequest& req, uint32_t sourceIP, uint32_t nowMs, WebBackend& backend, size_t& len);
+    const char* login(const HttpRequest& req, const SourceKey& source, uint32_t nowMs, WebBackend& backend, size_t& len);
     const char* network(const HttpRequest& req, size_t slot, WebBackend& backend, size_t& len);
     const char* community(const HttpRequest& req, size_t slot, WebBackend& backend, size_t& len);
     const char* hostname(const HttpRequest& req, size_t slot, WebBackend& backend, size_t& len);

@@ -1,4 +1,5 @@
 #include "cli.h"
+#include "diag.h"
 
 #include <mains_input.h>
 #include <netconfig.h>
@@ -165,6 +166,7 @@ static void printStatus() {
         Serial.println("Web login: user admin, own password (option 6)");
     }
     Serial.printf("Core 0 stack: %u bytes never used\n", (unsigned)stackWatchNeverUsed());
+    if (diagReport()) Serial.println(diagReport());
 
     Serial.printf("Mode: %s\n", currentSettings.dhcpEnabled ? "DHCP" : "Static");
     Serial.printf("Stored static IP: %s / %s, gateway %s\n",
@@ -307,8 +309,8 @@ static void printAccessLog() {
     Serial.printf("Access log: %u entries, %lu events since boot\n", log.size(), (unsigned long)log.total());
     for (uint8_t i = 0; i < log.size(); i++) {
         const AccessLog::Entry& e = log.newest(i);
-        char ip[16];
-        formatIPv4(e.source, ip);
+        char ip[SOURCE_TEXT_MAX];
+        formatSource(e.source, ip);
         Serial.printf("  %-15s %-14s x%-6lu last %lu s ago\n", ip, accessEventName(e.event),
                       (unsigned long)e.count, (unsigned long)((now - e.lastMs) / 1000));
     }

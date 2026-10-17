@@ -7,6 +7,7 @@
 #include <string.h>
 #include <lwip/dhcp.h>
 #include <lwip/prot/dhcp.h>
+#include "diag.h"
 #include "pins.h"
 
 // W5500 common register with link, speed and duplex
@@ -71,8 +72,11 @@ static err_t inputWithDhcpAck(struct pbuf* p, struct netif* nif) {
 static err_t countingInput(struct pbuf* p, struct netif* nif) {
     // The driver allocates one contiguous pbuf per frame (PBUF_RAM), so payload holds the header
     if (p == nullptr) return originalInput(p, nif);
+    DIAG_HOOK(100);
     ifCountReceived(counters, (const uint8_t*)p->payload, p->len, LWIP_IPV6 != 0);
-    return inputWithDhcpAck(p, nif);
+    err_t err = inputWithDhcpAck(p, nif);
+    DIAG_HOOK(101);
+    return err;
 }
 
 void netStatsCountDiscard(uint16_t length) {
@@ -81,6 +85,7 @@ void netStatsCountDiscard(uint16_t length) {
 
 /// Frame to send: ask for option 224 in our DHCP messages, hand to the driver, count the result
 static err_t countingLinkOutput(struct netif* nif, struct pbuf* p) {
+    DIAG_HOOK(200);
     // lwIP builds each DHCP message in one pbuf (LWIP_NETIF_TX_SINGLE_PBUF), freed after sending
     if (dhcpRequestOn && p->next == nullptr &&
         dhcpRequestOption((uint8_t*)p->payload, p->len, DHCP_OPTION_TRAP_TARGET) == DhcpEdit::Added) {
@@ -92,6 +97,7 @@ static err_t countingLinkOutput(struct netif* nif, struct pbuf* p) {
     } else {
         counters.outErrors++;
     }
+    DIAG_HOOK(201);
     return err;
 }
 

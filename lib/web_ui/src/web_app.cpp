@@ -251,6 +251,8 @@ const char* WebApp::mainPage(int code, const char* reason, size_t slot, WebBacke
     nb.add(".local");
     row(b, "mDNS name", num);
     row(b, "IP address", st.ip);
+    if (st.ipv6[0]) row(b, "IPv6 address", st.ipv6);
+    if (st.ipv6LinkLocal[0] && strcmp(st.ipv6LinkLocal, st.ipv6) != 0) row(b, "IPv6 link-local", st.ipv6LinkLocal);
     row(b, "MAC address", st.mac);
     row(b, "Network mode", st.dhcp ? "DHCP" : "static");
     b.add("</tbody></table></div>");
@@ -311,7 +313,7 @@ const char* WebApp::mainPage(int code, const char* reason, size_t slot, WebBacke
     return respond(code, reason, nullptr, len);
 }
 
-const char* WebApp::login(const HttpRequest& req, uint32_t sourceIP, uint32_t nowMs, WebBackend& backend, size_t& len) {
+const char* WebApp::login(const HttpRequest& req, const SourceKey& sourceIP, uint32_t nowMs, WebBackend& backend, size_t& len) {
     if (!_throttle.allowed(nowMs)) {
         backend.log(sourceIP, WebEvent::LoginLocked);
         char text[80];
@@ -457,7 +459,7 @@ const char* WebApp::favicon(size_t& len) {
     return _response;
 }
 
-const char* WebApp::handle(const HttpRequest& req, uint32_t sourceIP, uint32_t nowMs, WebBackend& backend,
+const char* WebApp::handle(const HttpRequest& req, const SourceKey& sourceIP, uint32_t nowMs, WebBackend& backend,
                            size_t& len) {
     _staticBody = nullptr;
     _staticLen = 0;

@@ -8,6 +8,7 @@
 #include <snmp_trap.h>
 #include "board_temp.h"
 #include "net_stats.h"
+#include "source_key.h"
 #include "version.h"
 
 // Requests handled per snmpPoll() call, so a flood cannot starve the menu
@@ -29,6 +30,8 @@ static SnmpServiceStats serviceStats = {};
 
 static uint8_t inBuf[SNMP_MAX_MESSAGE];
 static uint8_t outBuf[SNMP_MAX_MESSAGE];
+/// Largest reply over IPv6: 1500 - 40 (IPv6) - 8 (UDP); IPv4 allows SNMP_MAX_MESSAGE (1472)
+static const size_t SNMP_MAX_MESSAGE_IPV6 = 1452;
 
 /**
  * @brief sysUpTime in hundredths of a second, from the 64-bit microsecond timer
@@ -67,25 +70,18 @@ static SnmpDeviceState captureState() {
 }
 
 /**
- * @brief Host-order 32-bit value of an address, for the rate limiter and log
- */
-static uint32_t toU32(const IPAddress& ip) {
-    return ((uint32_t)ip[0] << 24) | ((uint32_t)ip[1] << 16) | ((uint32_t)ip[2] << 8) | ip[3];
-}
-
-/**
  * @brief Record a rejected request and print it when it starts a new log entry
  */
-static void logAccess(uint32_t source, AccessEvent event) {
+static void logAccess(const SourceKey& source, AccessEvent event) {
     if (accessLog.record(source, event, millis())) {
-        char ip[16];
-        formatIPv4(source, ip);
+        char ip[SOURCE_TEXT_MAX];
+        formatSource(source, ip);
         bool web = event == AccessEvent::WebLoginFailed || event == AccessEvent::WebLoginLocked;
         Serial.printf("\n%s access: %s from %s\n", web ? "Web" : "SNMP", accessEventName(event), ip);
     }
 }
 
-void accessLogRecord(uint32_t source, AccessEvent event) {
+void accessLogRecord(const SourceKey& source, AccessEvent event) {
     logAccess(source, event);
 }
 
@@ -185,7 +181,11 @@ void snmpPoll() {
         int size = udp.parsePacket();
         if (size <= 0) return;
 
-        uint32_t source = toU32(udp.remoteIP());
+        SourceKey source;
+        if (!sourceKeyOf(udp.remoteIP(), source)) {
+            udp.flush();  // IPv6 source in ::/32: cannot be a real LAN host
+            continue;
+        }
         if ((size_t)size > sizeof(inBuf)) {
             udp.flush();  // Larger than any valid SNMP v1 request we accept
             logAccess(source, AccessEvent::Malformed);
@@ -203,7 +203,10 @@ void snmpPoll() {
 
         IPAddress remote = udp.remoteIP();
         uint16_t remotePort = udp.remotePort();
-        size_t len = agent.handle(inBuf, (size_t)n, outBuf, sizeof(outBuf), captureState());
+        // One Ethernet frame without fragmentation: IPv6 headers are 20 bytes longer than IPv4's
+        // (and IPv6 fragmentation is off, see platformio.ini)
+        size_t outMax = remote.isV6() ? SNMP_MAX_MESSAGE_IPV6 : sizeof(outBuf);
+        size_t len = agent.handle(inBuf, (size_t)n, outBuf, outMax, captureState());
 
         switch (agent.lastOutcome()) {
         case SnmpOutcome::Responded:

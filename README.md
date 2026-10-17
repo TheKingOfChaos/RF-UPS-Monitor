@@ -2,7 +2,7 @@
 
 A mains power monitor built on a Raspberry Pi Pico with a W5500 Ethernet module. It reports whether mains power is present over SNMP v1 and v2c, including traps, together with standard interface statistics (IF-MIB) and the board temperature, so it can be monitored by LibreNMS or any other SNMP manager. It is configured through a menu on the USB serial port.
 
-Current version: **2.2.0** (see [CHANGELOG.md](CHANGELOG.md)).
+Current version: **2.3.0** (see [CHANGELOG.md](CHANGELOG.md)).
 
 ## Overview
 
@@ -30,6 +30,7 @@ More diagrams (firmware architecture, SNMP request flow, mains flow, settings, t
 | Web page with login: status, DHCP/static IP, SNMP community, hostname, restart | Working |
 | Hostname for SNMP sysName, DHCP and mDNS (`name.local`) | Working |
 | Web interface can be turned off (serial menu or the page itself) | Working |
+| IPv6 (dual stack): SNMP, web page and mDNS over IPv6, SLAAC, per-address rate limiting | Working |
 | SNMP trap destination from DHCP option 224 | Working, tested with Kea 2.2.0; in your network once the DHCP server has option 224 |
 | Interface statistics (IF-MIB ifTable/ifXTable, 64-bit counters) | Working, counted by the firmware |
 | Board temperature (RP2040 internal sensor) | Working |
@@ -122,6 +123,8 @@ MAC: 1E:B2:CF:4E:A2:2C
 IP: 10.10.6.111
 Subnet: 255.255.0.0
 Gateway: 10.10.0.1
+IPv6: FE80::1CB2:CFFF:FE4E:A22C
+IPv6: FD16:D833:4F0E:3ECE:1CB2:CFFF:FE4E:A22C
 DNS: 10.10.0.1
 ```
 
@@ -246,6 +249,18 @@ Set it with menu option 4 (first question after the community) or on the web pag
 
 A sysName set with older firmware may contain spaces or other characters; it is kept as it is, and the device uses a cleaned-up version for DHCP and mDNS (`Server room UPS` becomes `Server-room-UPS`). The status screen shows the name in use: `Hostname: rf-ups-monitor (DHCP, mDNS rf-ups-monitor.local)`.
 
+## IPv6
+
+The device runs IPv4 and IPv6 side by side (dual stack):
+
+- **Addresses:** a link-local address (`fe80::`, from the MAC as EUI-64) always, and a global or ULA address from the router's advertisement (SLAAC) when the LAN has an IPv6 router. The status screen lists them (`IPv6: FD16:D833:4F0E:3ECE:1CB2:CFFF:FE4E:A22C`), the web page shows them in the status table.
+- **SNMP** answers over IPv6 on UDP 161 like over IPv4 (replies up to 1452 bytes, one Ethernet frame: the device does not fragment IPv6 packets), e.g. `snmpget -v2c -c public udp6:[fd16:d833:4f0e:3ece:1cb2:cfff:fe4e:a22c] 1.3.6.1.2.1.1.1.0`. LibreNMS can poll the device by its IPv6 address.
+- **Web page:** `http://[<IPv6 address>]/`; **mDNS:** `rf-ups-monitor.local` resolves to the IPv6 address too.
+- **Rate limiting and access log:** per full source address, as for IPv4; the access log shows the address (`fd16:d833:4f0e:3ece:9000:9aaa:490a:3189`). Not per /64: on a LAN every host shares one /64, and a manager's trust must not pass to its neighbours. A host that rotates through many IPv6 addresses is held by the shared limit for untrusted sources, like faked IPv4 addresses.
+- **Still IPv4 only:** traps (the trap destination is an IPv4 address; v1 traps cannot carry an IPv6 agent address anyway), the static IP settings, DHCP option 224, and the IP and IF tables in the MIB stay as they are.
+
+There are no IPv6 settings: the device takes the addresses the network offers. Turning IPv6 off needs a firmware build without `PIO_FRAMEWORK_ARDUINO_ENABLE_IPV6` in `platformio.ini`.
+
 ## Mains power monitoring
 
 ![Mains flow: GPIO27 sampled and debounced on core 1, handed to core 0 for the log, SNMP objects and traps](docs/diagrams/mains-flow.svg)
@@ -340,11 +355,13 @@ src/factory_reset.cpp       Reset button on core 1, reset on core 0
 src/web_service.cpp         Web page on TCP 80: non-blocking connection handling, default password
 src/stack_watch.cpp         Core 0 stack high-water mark for the status screen
 src/hostname.cpp            Hostname for DHCP and mDNS (name.local), applied without restart
+src/source_key.h            Source address -> rate-limit key (full IPv4 or IPv6 address)
+src/diag.cpp                Hang diagnosis build (-DRFUPS_DIAG): watchdog, crash and panic capture
 lib/netconfig/              IPv4 parsing and validation (pure C++)
 lib/settings_codec/         Settings JSON, validation, A/B selection (pure C++)
 lib/settings/               LittleFS storage on top of settings_codec
 lib/power_monitor/          Mains input debouncer, reset button logic (pure C++)
-lib/access_control/         Rate limiter and access log (pure C++)
+lib/access_control/         Rate limiter and access log, IPv4 and IPv6 sources (pure C++)
 lib/mains_input/            GPIO27 sampler on core 1, seqlock hand-over to core 0
 lib/snmp_ber/               ASN.1 BER codec and OIDs for SNMP (pure C++)
 lib/snmp_agent/             SNMP v1/v2c messages, MIB, request handling, traps (pure C++)

@@ -286,9 +286,9 @@ static void test_log_records_newest_first() {
     TEST_ASSERT_TRUE(log.record(PC, AccessEvent::BadCommunity, 10));
     TEST_ASSERT_TRUE(log.record(OTHER, AccessEvent::BadVersion, 20));
     TEST_ASSERT_EQUAL_UINT8(2, log.size());
-    TEST_ASSERT_EQUAL_UINT32(OTHER, log.newest(0).source);
+    TEST_ASSERT_EQUAL_UINT32(OTHER, log.newest(0).source.ipv4());
     TEST_ASSERT_EQUAL(AccessEvent::BadVersion, log.newest(0).event);
-    TEST_ASSERT_EQUAL_UINT32(PC, log.newest(1).source);
+    TEST_ASSERT_EQUAL_UINT32(PC, log.newest(1).source.ipv4());
 }
 
 static void test_repeats_are_folded_into_one_entry() {
@@ -316,15 +316,15 @@ static void test_log_keeps_only_the_most_recent_entries() {
     AccessLog log;
     for (uint32_t i = 0; i < AccessLog::CAPACITY + 5; i++) log.record(i, AccessEvent::Malformed, i);
     TEST_ASSERT_EQUAL_UINT8(AccessLog::CAPACITY, log.size());
-    TEST_ASSERT_EQUAL_UINT32(AccessLog::CAPACITY + 4, log.newest(0).source);
-    TEST_ASSERT_EQUAL_UINT32(5, log.newest(AccessLog::CAPACITY - 1).source);
+    TEST_ASSERT_EQUAL_UINT32(AccessLog::CAPACITY + 4, log.newest(0).source.ipv4());
+    TEST_ASSERT_EQUAL_UINT32(5, log.newest(AccessLog::CAPACITY - 1).source.ipv4());
     TEST_ASSERT_EQUAL_UINT32(AccessLog::CAPACITY + 5, log.total());
 }
 
 static void test_newest_out_of_range_is_clamped() {
     AccessLog log;
     log.record(PC, AccessEvent::Malformed, 1);
-    TEST_ASSERT_EQUAL_UINT32(PC, log.newest(200).source);
+    TEST_ASSERT_EQUAL_UINT32(PC, log.newest(200).source.ipv4());
 }
 
 static void test_event_names_and_ip_format() {
@@ -344,8 +344,165 @@ static void test_event_names_and_ip_format() {
     TEST_ASSERT_EQUAL_STRING("0.0.0.0", buf);
 }
 
+// ---- IPv6 sources ----
+
+static const uint8_t V6_A[16] = {0xfd, 0x16, 0xd8, 0x33, 0x4f, 0x0e, 0x3e, 0xce,   // fd16:d833:4f0e:3ece:9000:9aaa:490a:3189
+                                 0x90, 0x00, 0x9a, 0xaa, 0x49, 0x0a, 0x31, 0x89};
+static const uint8_t V6_A2[16] = {0xfd, 0x16, 0xd8, 0x33, 0x4f, 0x0e, 0x3e, 0xce,  // same /64, other host
+                                  0x19, 0x6a, 0xb2, 0x18, 0x7f, 0xdb, 0x1c, 0xce};
+static const uint8_t V6_B[16] = {0x20, 0x01, 0x0d, 0xb8, 0x00, 0x01, 0x00, 0x02,   // 2001:db8:1:2::1
+                                 0, 0, 0, 0, 0, 0, 0, 1};
+static const uint8_t V4_MAPPED[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 10, 10, 6, 65};
+static const uint8_t LOOPBACK6[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1};
+
+static SourceKey v6(const uint8_t a[16]) {
+    SourceKey k;
+    TEST_ASSERT_TRUE(sourceKeyIPv6(a, k));
+    return k;
+}
+
+static void test_ipv4_source_key_is_the_address() {
+    const uint8_t a[4] = {10, 10, 6, 65};
+    SourceKey k = sourceKeyIPv4(a);
+    TEST_ASSERT_TRUE(k == SourceKey(PC));
+    TEST_ASSERT_TRUE(k.isIPv4());
+    TEST_ASSERT_EQUAL_UINT32(PC, k.ipv4());
+    TEST_ASSERT_TRUE(k != SourceKey(OTHER));
+}
+
+static void test_ipv6_source_key_is_the_full_address() {
+    SourceKey a = v6(V6_A), a2 = v6(V6_A2), b = v6(V6_B);
+    TEST_ASSERT_TRUE(a.hi == 0xfd16d8334f0e3eceull && a.lo == 0x90009aaa490a3189ull);
+    TEST_ASSERT_TRUE(a != a2);  // same /64, different hosts: different keys
+    TEST_ASSERT_TRUE(a != b);
+    TEST_ASSERT_FALSE(a.isIPv4());
+    TEST_ASSERT_FALSE(b.isIPv4());
+    // Same low 64 bits as an IPv4 key but another prefix: not IPv4
+    uint8_t lookalike[16] = {0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0xff, 0xff, 10, 10, 6, 65};
+    SourceKey l = v6(lookalike);
+    TEST_ASSERT_FALSE(l.isIPv4());
+    TEST_ASSERT_TRUE(l != SourceKey(PC));
+}
+
+static void test_ipv4_mapped_ipv6_counts_as_ipv4_and_reserved_space_is_refused() {
+    SourceKey k(1);
+    TEST_ASSERT_TRUE(sourceKeyIPv6(V4_MAPPED, k));
+    TEST_ASSERT_TRUE(k == SourceKey(PC));
+    // ::/32 (loopback, unspecified, IPv4-compatible ...) cannot come from the LAN
+    TEST_ASSERT_FALSE(sourceKeyIPv6(LOOPBACK6, k));
+    uint8_t zero32[16] = {0, 0, 0, 0, 0x12, 0x34, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9};
+    TEST_ASSERT_FALSE(sourceKeyIPv6(zero32, k));
+    uint8_t compat[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 10, 6, 65};  // ::10.10.6.65
+    TEST_ASSERT_FALSE(sourceKeyIPv6(compat, k));
+    uint8_t almostMapped[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0xff, 0xff, 10, 10, 6, 65};
+    TEST_ASSERT_FALSE(sourceKeyIPv6(almostMapped, k));
+}
+
+static void test_ipv6_hosts_in_one_64_have_their_own_buckets() {
+    RateLimiter rl(1, 2);
+    SourceKey a = v6(V6_A), a2 = v6(V6_A2), b = v6(V6_B);
+    TEST_ASSERT_TRUE(rl.allow(a, 0));
+    TEST_ASSERT_TRUE(rl.allow(a, 0));
+    TEST_ASSERT_FALSE(rl.allow(a, 0));
+    TEST_ASSERT_TRUE(rl.allow(a2, 0));   // same /64, another host: its own bucket
+    TEST_ASSERT_TRUE(rl.allow(b, 0));
+    TEST_ASSERT_TRUE(rl.allow(PC, 0));   // and IPv4 sources are separate
+}
+
+static void test_trust_does_not_extend_to_other_hosts_in_the_managers_64() {
+    // The manager authenticated over IPv6; a neighbour in the same /64 did not.
+    // Untrusted traffic shares a bucket of 10, trusted traffic one of 1000.
+    RateLimiter rl(1000, 1000, 1, 10);
+    rl.configureTrusted(1, 1000, 4);
+    SourceKey manager = v6(V6_A), neighbour = v6(V6_A2);
+    TEST_ASSERT_TRUE(rl.allow(manager, 0));
+    rl.markTrusted(manager);
+    TEST_ASSERT_EQUAL_UINT8(1, rl.trustedCount());
+    uint32_t allowed = 0;
+    for (int i = 0; i < 100; i++) {
+        if (rl.allow(neighbour, 0)) allowed++;
+    }
+    TEST_ASSERT_EQUAL_UINT32(9, allowed);  // what is left of the untrusted bucket, not the trusted one
+    TEST_ASSERT_EQUAL_UINT8(1, rl.trustedCount());
+    TEST_ASSERT_TRUE(rl.allow(manager, 0));  // the manager still draws from the trusted bucket
+}
+
+static void test_neighbour_cannot_drain_the_managers_bucket() {
+    RateLimiter rl(1, 3);
+    SourceKey manager = v6(V6_A), neighbour = v6(V6_A2);
+    rl.allow(manager, 0);
+    rl.markTrusted(manager);
+    for (int i = 0; i < 50; i++) rl.allow(neighbour, 0);
+    TEST_ASSERT_TRUE(rl.allow(manager, 0));
+    TEST_ASSERT_TRUE(rl.allow(manager, 0));
+    TEST_ASSERT_FALSE(rl.allow(manager, 0));  // only its own 3 tokens were used
+}
+
+static void test_access_log_keeps_ipv6_addresses() {
+    AccessLog log;
+    SourceKey a = v6(V6_A), a2 = v6(V6_A2);
+    TEST_ASSERT_TRUE(log.record(a, AccessEvent::BadCommunity, 1));
+    TEST_ASSERT_FALSE(log.record(a, AccessEvent::BadCommunity, 2));  // folded
+    TEST_ASSERT_TRUE(log.record(a2, AccessEvent::BadCommunity, 3));  // same /64, another host
+    TEST_ASSERT_TRUE(log.record(PC, AccessEvent::BadCommunity, 4));  // IPv4 is another source
+    TEST_ASSERT_TRUE(log.newest(2).source == a);
+    TEST_ASSERT_TRUE(log.newest(1).source == a2);
+}
+
+static void test_format_source_ipv4() {
+    char buf[SOURCE_TEXT_MAX];
+    formatSource(PC, buf);
+    TEST_ASSERT_EQUAL_STRING("10.10.6.65", buf);
+    formatSource(0xFFFFFFFFu, buf);
+    TEST_ASSERT_EQUAL_STRING("255.255.255.255", buf);
+}
+
+static void test_format_source_ipv6_full_address() {
+    char buf[SOURCE_TEXT_MAX];
+    formatSource(v6(V6_A), buf);
+    TEST_ASSERT_EQUAL_STRING("fd16:d833:4f0e:3ece:9000:9aaa:490a:3189", buf);
+    SourceKey max;
+    max.hi = max.lo = 0xFFFFFFFFFFFFFFFFull;
+    formatSource(max, buf);
+    TEST_ASSERT_EQUAL_STRING("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", buf);
+    TEST_ASSERT_EQUAL_size_t(SOURCE_TEXT_MAX - 1, strlen(buf));  // the longest text fits exactly
+}
+
+static void test_format_source_ipv6_compresses_longest_zero_run() {
+    char buf[SOURCE_TEXT_MAX];
+    formatSource(v6(V6_B), buf);
+    TEST_ASSERT_EQUAL_STRING("2001:db8:1:2::1", buf);
+    SourceKey k;
+    k.hi = 0xfd16d8334f0e3eceull;  // run at the end
+    k.lo = 0;
+    formatSource(k, buf);
+    TEST_ASSERT_EQUAL_STRING("fd16:d833:4f0e:3ece::", buf);
+    k.hi = 0x2001000000000001ull;  // 2001:0:0:1:0:0:0:1, the longer run wins
+    k.lo = 0x0000000000000001ull;
+    formatSource(k, buf);
+    TEST_ASSERT_EQUAL_STRING("2001:0:0:1::1", buf);
+    k.hi = 0x2001000000000001ull;  // 2001:0:0:1:0:0:2:3, tie: the first run
+    k.lo = 0x0000000000020003ull;
+    formatSource(k, buf);
+    TEST_ASSERT_EQUAL_STRING("2001::1:0:0:2:3", buf);
+    k.hi = 0x2001000100000002ull;  // a single zero group is not compressed
+    k.lo = 0x0003000400050006ull;
+    formatSource(k, buf);
+    TEST_ASSERT_EQUAL_STRING("2001:1:0:2:3:4:5:6", buf);
+}
+
 int main() {
     UNITY_BEGIN();
+    RUN_TEST(test_ipv4_source_key_is_the_address);
+    RUN_TEST(test_ipv6_source_key_is_the_full_address);
+    RUN_TEST(test_ipv4_mapped_ipv6_counts_as_ipv4_and_reserved_space_is_refused);
+    RUN_TEST(test_ipv6_hosts_in_one_64_have_their_own_buckets);
+    RUN_TEST(test_trust_does_not_extend_to_other_hosts_in_the_managers_64);
+    RUN_TEST(test_neighbour_cannot_drain_the_managers_bucket);
+    RUN_TEST(test_access_log_keeps_ipv6_addresses);
+    RUN_TEST(test_format_source_ipv4);
+    RUN_TEST(test_format_source_ipv6_full_address);
+    RUN_TEST(test_format_source_ipv6_compresses_longest_zero_run);
     RUN_TEST(test_burst_is_allowed_then_refused);
     RUN_TEST(test_tokens_refill_at_the_rate);
     RUN_TEST(test_refill_never_exceeds_burst);

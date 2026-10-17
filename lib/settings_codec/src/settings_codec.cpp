@@ -119,7 +119,7 @@ SettingsParseError settingsFromJson(const char* json, Settings& out) {
     }
 
     // Start from defaults so optional fields missing in older files get them.
-    // Static: ~400 bytes is too much for core 0's 4 KB stack. Not reentrant, but
+    // Static: ~400 bytes is too much for core 0's stack. Not reentrant, but
     // settings are only ever parsed on core 0.
     static Settings s;
     settingsDefaults(s);

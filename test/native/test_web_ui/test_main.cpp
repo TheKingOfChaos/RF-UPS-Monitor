@@ -534,6 +534,8 @@ public:
         st.linkUp = true;
         st.linkMbps = 100;
         strcpy(st.ip, "10.10.6.111");
+        strcpy(st.ipv6, "fd16:d833:4f0e:3ece:1cb2:cfff:fe4e:a22c");
+        strcpy(st.ipv6LinkLocal, "fe80::1cb2:cfff:fe4e:a22c");
         strcpy(st.mac, "1E:B2:CF:4E:A2:2C");
         st.dhcp = true;
         strcpy(st.staticIP, "10.10.6.249");
@@ -576,7 +578,7 @@ public:
         for (size_t i = 0; i < len; i++) out[i] = (uint8_t)(seed * 31 + i);
         seed++;
     }
-    void log(uint32_t, WebEvent e) override {
+    void log(const SourceKey&, WebEvent e) override {
         if (e == WebEvent::LoginFailed) failed++;
         if (e == WebEvent::LoginLocked) locked++;
         if (e == WebEvent::LoggedIn) loggedIn++;
@@ -713,6 +715,8 @@ static void test_status_page_shows_device_values_escaped() {
     std::string page = get("/", logIn(csrf));
     TEST_ASSERT_TRUE(page.find("&middot; v2.0.0") != std::string::npos);
     TEST_ASSERT_TRUE(page.find("<td>10.10.6.111</td>") != std::string::npos);
+    TEST_ASSERT_TRUE(page.find("<td>fd16:d833:4f0e:3ece:1cb2:cfff:fe4e:a22c</td>") != std::string::npos);
+    TEST_ASSERT_TRUE(page.find("<td>fe80::1cb2:cfff:fe4e:a22c</td>") != std::string::npos);
     TEST_ASSERT_TRUE(page.find("1E:B2:CF:4E:A2:2C") != std::string::npos);
     TEST_ASSERT_TRUE(page.find("1 d 1 h 1 min") != std::string::npos);
     TEST_ASSERT_TRUE(page.find("-0.5 \xC2\xB0" "C") != std::string::npos);
@@ -720,6 +724,14 @@ static void test_status_page_shows_device_values_escaped() {
     TEST_ASSERT_TRUE(page.find("value=\"a&lt;b&gt;&quot;c&#39;&amp;\"") != std::string::npos);
     TEST_ASSERT_TRUE(page.find("a<b>") == std::string::npos);
     TEST_ASSERT_TRUE(page.find("value=\"dhcp\" checked") != std::string::npos);
+}
+
+static void test_ipv6_rows_only_when_the_device_has_ipv6() {
+    webSetUp();
+    fb->st.ipv6[0] = fb->st.ipv6LinkLocal[0] = '\0';
+    std::string csrf;
+    std::string page = get("/", logIn(csrf));
+    TEST_ASSERT_TRUE(page.find("IPv6") == std::string::npos);
 }
 
 static void test_actions_need_a_session() {
@@ -1124,6 +1136,7 @@ int main() {
     RUN_TEST(test_wrong_password_or_user_is_refused_and_logged);
     RUN_TEST(test_five_failures_lock_logins_for_30_s);
     RUN_TEST(test_status_page_shows_device_values_escaped);
+    RUN_TEST(test_ipv6_rows_only_when_the_device_has_ipv6);
     RUN_TEST(test_actions_need_a_session);
     RUN_TEST(test_actions_need_the_session_csrf_token);
     RUN_TEST(test_change_community);

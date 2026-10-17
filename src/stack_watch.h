@@ -4,7 +4,7 @@
  * @file stack_watch.h
  * @brief High-water mark of core 0's stack.
  *
- * Core 0 has only 4 KB of stack, shared with USB, lwIP and W5500 interrupts.
+ * Core 0 has an 8 KB stack (core1_separate_stack), shared with USB, lwIP and W5500 interrupts.
  * At boot the unused part is filled with a pattern; the status screen then
  * shows how many bytes were never touched, so the HIL tests can check the
  * headroom after SNMP and web traffic.

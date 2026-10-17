@@ -39,6 +39,49 @@
  * Time comes from millis() on a single core and only moves forward; a gap
  * long enough to fill a bucket (including more than 2^31 ms) fills it.
  */
+/**
+ * @brief Who sent a request: the full source address, for rate limiting, trust and the access log
+ *
+ * Stored as 128 bits; an IPv4 address is held as ::ffff:a.b.c.d. The full
+ * address and not the /64: trust is granted per key, and every host on a LAN
+ * shares one /64, so a /64 key would let any of them use a manager's trust.
+ * A host rotating through addresses gets a fresh bucket for each, the same
+ * as spoofed IPv4 addresses; the shared untrusted bucket caps all of them.
+ */
+struct SourceKey {
+    uint64_t hi;  ///< Address bytes 0..7, big-endian
+    uint64_t lo;  ///< Address bytes 8..15, big-endian
+
+    SourceKey() : hi(0), lo(0) {}
+    /// IPv4 address in host order (10.10.6.65 = 0x0A0A0641)
+    SourceKey(uint32_t ipv4) : hi(0), lo(0x0000FFFF00000000ull | ipv4) {}
+
+    bool isIPv4() const { return hi == 0 && (lo >> 32) == 0xFFFF; }
+    /// The IPv4 address in host order; only meaningful when isIPv4()
+    uint32_t ipv4() const { return (uint32_t)lo; }
+
+    bool operator==(const SourceKey& o) const { return hi == o.hi && lo == o.lo; }
+    bool operator!=(const SourceKey& o) const { return !(*this == o); }
+};
+
+/// Key of an IPv4 source (network byte order bytes)
+SourceKey sourceKeyIPv4(const uint8_t address[4]);
+
+/**
+ * @brief Key of an IPv6 source (network byte order bytes)
+ *
+ * ::ffff:a.b.c.d (IPv4-mapped) gives the IPv4 key. Other addresses in ::/32
+ * (loopback, unspecified, IPv4-compatible) cannot come from the LAN: false,
+ * drop the request.
+ */
+bool sourceKeyIPv6(const uint8_t address[16], SourceKey& key);
+
+/// Longest formatSource() text including the NUL ("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")
+static const size_t SOURCE_TEXT_MAX = 40;
+
+/// "10.10.6.65" or "fd16:d833:4f0e:3ece::a22c" (RFC 5952: lower case, longest zero run as ::)
+void formatSource(const SourceKey& key, char* buf);
+
 class RateLimiter {
 public:
     /// Sources tracked at the same time
@@ -61,10 +104,10 @@ public:
 
     /**
      * @brief Take one token for this source
-     * @param source IPv4 address as a 32-bit value
+     * @param source sourceKeyIPv4() / sourceKeyIPv6()
      * @return true if the request may be handled
      */
-    bool allow(uint32_t source, uint32_t nowMs);
+    bool allow(SourceKey source, uint32_t nowMs);
 
     /**
      * @brief Mark a tracked source as trusted (it authenticated successfully)
@@ -72,7 +115,7 @@ public:
      * Call after allow() for a request that had the right community. Unknown
      * sources are ignored, and nothing happens when maxTrusted is reached.
      */
-    void markTrusted(uint32_t source);
+    void markTrusted(SourceKey source);
 
     /// Revoke trust of every source (call when the community changes)
     void clearTrust();
@@ -85,7 +128,7 @@ public:
 
 private:
     struct Bucket {
-        uint32_t source;
+        SourceKey source;
         uint32_t milliTokens;  // tokens * 1000, avoids floating point
         uint32_t lastMs;
         bool used;
@@ -100,7 +143,7 @@ private:
         bool started;
     };
 
-    Bucket* find(uint32_t source, uint32_t nowMs);
+    Bucket* find(SourceKey source, uint32_t nowMs);
     void expireTrust(uint32_t nowMs);
     static void refill(uint32_t& milliTokens, uint32_t& lastMs, uint32_t rate, uint32_t burst, uint32_t nowMs);
     static void refillShared(SharedBucket& b, uint32_t nowMs);
@@ -144,7 +187,7 @@ public:
     struct Entry {
         uint32_t firstMs;   ///< millis() of the first event
         uint32_t lastMs;    ///< millis() of the latest event
-        uint32_t source;    ///< IPv4 address
+        SourceKey source;   ///< See SourceKey
         uint32_t count;     ///< Events folded into this entry
         AccessEvent event;
     };
@@ -153,7 +196,7 @@ public:
      * @brief Record an event
      * @return true if it started a new entry (worth printing), false if it was folded
      */
-    bool record(uint32_t source, AccessEvent event, uint32_t nowMs);
+    bool record(SourceKey source, AccessEvent event, uint32_t nowMs);
 
     /// Number of entries held (at most CAPACITY)
     uint8_t size() const { return _size; }

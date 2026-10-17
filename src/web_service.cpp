@@ -11,6 +11,7 @@
 #include "hostname.h"
 #include "net_stats.h"
 #include "snmp_service.h"
+#include "source_key.h"
 #include "version.h"
 
 extern CountingW5500lwIP eth;  // main.cpp
@@ -20,7 +21,7 @@ static const uint32_t REBOOT_DELAY_MS = 300;  // let the last response leave bef
 
 static WiFiServer server(80);
 static WiFiClient client;
-static HttpRequest request;  // 2 KB, static: core 0 has a 4 KB stack
+static HttpRequest request;  // 2 KB, static: keep large buffers off core 0's stack
 static WebApp app;           // response buffers, static for the same reason
 static char defaultPassword[WEB_DEFAULT_PASSWORD_LEN + 1];
 static bool started = false;
@@ -34,7 +35,7 @@ static const uint32_t HASH_ROUNDS_PER_POLL = 20;
 static WebPasswordCheck passwordCheck;
 static Conn conn = Conn::Idle;
 static uint32_t connStartMs = 0;
-static uint32_t peer = 0;
+static SourceKey peer;
 static const char* out = nullptr;
 static size_t outLen = 0, outPos = 0;
 static const uint8_t* staticBody = nullptr;  // sent after out (the stylesheet, from flash)
@@ -50,7 +51,7 @@ static uint32_t lastListenTryMs = 0;
 /**
  * @brief Forget finished web connections in TIME-WAIT on port 80
  *
- * The core's lwIP is built without SO_REUSE, so a connection the device closed
+ * The core's lwipopts.h leaves SO_REUSE off, so a connection the device closed
  * keeps port 80 bound for 2 minutes (2 x TCP_MSL) and opening the server again
  * fails. Removing those entries is safe for finished HTTP connections on a LAN;
  * tcp_abort() frees a TIME-WAIT pcb without sending anything.
@@ -86,10 +87,6 @@ static void stopListening() {
     app.logoutAll();
 }
 
-static uint32_t toU32(const IPAddress& ip) {
-    return ((uint32_t)ip[0] << 24) | ((uint32_t)ip[1] << 16) | ((uint32_t)ip[2] << 8) | ip[3];
-}
-
 static void formatIP(const IPAddress& ip, char* buf, size_t size) {
     snprintf(buf, size, "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
 }
@@ -110,6 +107,18 @@ public:
         st.linkUp = ifs.linkUp;
         st.linkMbps = ifs.speedBps / 1000000;
         formatIP(eth.connected() ? eth.localIP() : IPAddress(0, 0, 0, 0), st.ip, sizeof(st.ip));
+#if LWIP_IPV6
+        netif* nif = eth.getNetIf();
+        for (int i = 0; i < LWIP_IPV6_NUM_ADDRESSES; i++) {
+            if (!ip6_addr_isvalid(netif_ip6_addr_state(nif, i))) continue;
+            const ip6_addr_t* a = netif_ip6_addr(nif, i);
+            char* dest = ip6_addr_islinklocal(a) ? st.ipv6LinkLocal : st.ipv6;
+            if (dest[0] == '\0') ip6addr_ntoa_r(a, dest, sizeof(st.ipv6));
+        }
+        for (char* c = st.ipv6; *c; c++) *c = (char)tolower(*c);
+        for (char* c = st.ipv6LinkLocal; *c; c++) *c = (char)tolower(*c);
+        if (st.ipv6[0] == '\0') strlcpy(st.ipv6, st.ipv6LinkLocal, sizeof(st.ipv6));
+#endif
         snprintf(st.mac, sizeof(st.mac), "%02X:%02X:%02X:%02X:%02X:%02X", ifs.mac[0], ifs.mac[1], ifs.mac[2],
                  ifs.mac[3], ifs.mac[4], ifs.mac[5]);
         st.dhcp = currentSettings.dhcpEnabled;
@@ -186,14 +195,15 @@ public:
         }
     }
 
-    void log(uint32_t source, WebEvent event) override {
+    void log(const SourceKey& source, WebEvent event) override {
         if (event == WebEvent::LoginFailed) {
             accessLogRecord(source, AccessEvent::WebLoginFailed);
         } else if (event == WebEvent::LoginLocked) {
             accessLogRecord(source, AccessEvent::WebLoginLocked);
         } else {
-            Serial.printf("\nWeb: admin logged in from %u.%u.%u.%u\n", (unsigned)(source >> 24),
-                          (unsigned)(source >> 16 & 255), (unsigned)(source >> 8 & 255), (unsigned)(source & 255));
+            char text[SOURCE_TEXT_MAX];
+            formatSource(source, text);
+            Serial.printf("\nWeb: admin logged in from %s\n", text);
         }
     }
 };
@@ -316,7 +326,10 @@ void webPoll() {
         client.setSync(false);  // writes never wait for ACKs
         client.setTimeout(50);
         request.reset();
-        peer = toU32(client.remoteIP());
+        if (!sourceKeyOf(client.remoteIP(), peer)) {
+            client.stop(1);  // IPv6 source in ::/32: cannot be a real LAN host
+            return;
+        }
         connStartMs = millis();
         conn = Conn::Receiving;
     }

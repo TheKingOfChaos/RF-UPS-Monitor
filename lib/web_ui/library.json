@@ -19,6 +19,7 @@
     "platforms": "*",
     "dependencies": {
         "netconfig": "*",
-        "settings_codec": "*"
+        "settings_codec": "*",
+        "access_control": "*"
     }
 }

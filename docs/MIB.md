@@ -2,6 +2,7 @@
 
 The device runs an SNMP agent on UDP port 161 and sends traps. Every object is read-only.
 
+- **Transport:** UDP port 161 over IPv4 and IPv6 (see the README, IPv6).
 - **Versions:** SNMPv1 and SNMPv2c. Each request is answered in the version it was sent in. SNMPv3 requests get no response.
 - **Community:** from the settings, default `public`, changed with menu option 4 (active immediately). A request with the wrong community gets no response; it is counted on the status screen.
 - **sysName, sysContact, sysLocation:** set with menu option 4 (sysName also on the web page); read-only over SNMP. sysName is the device hostname, also used for DHCP and mDNS (`<sysName>.local`).
@@ -14,7 +15,7 @@ The device runs an SNMP agent on UDP port 161 and sends traps. Every object is r
 
 | OID | Name | Type | Value |
 |---|---|---|---|
-| `1.3.6.1.2.1.1.1.0` | sysDescr | OCTET STRING | `RF-UPS-Monitor 2.2.0 mains power monitor (RP2040, W5500)` (with the firmware version) |
+| `1.3.6.1.2.1.1.1.0` | sysDescr | OCTET STRING | `RF-UPS-Monitor 2.3.0 mains power monitor (RP2040, W5500)` (with the firmware version) |
 | `1.3.6.1.2.1.1.2.0` | sysObjectID | OBJECT IDENTIFIER | `1.3.6.1.4.1.63050` |
 | `1.3.6.1.2.1.1.3.0` | sysUpTime | TimeTicks | Hundredths of a second since boot |
 | `1.3.6.1.2.1.1.4.0` | sysContact | OCTET STRING | From the settings (menu option 4), default empty |
@@ -141,17 +142,19 @@ option rfups-trap-target 10.10.6.65;
 dhcp-option=224,10.10.6.65
 ```
 
-How it works: the core's lwIP is precompiled and cannot be told to ask for or keep extra options, so the firmware edits the device's own outgoing DHCP DISCOVER/REQUEST at the driver: it appends 224 to the Parameter Request List (option 55), using one of the padding bytes lwIP always leaves after the END option, and fixes the UDP checksum. Option 224 is taken only from a DHCPACK that the device's DHCP client (lwIP) actually accepted: lwIP must be waiting for an ACK, the frame must carry lwIP's current transaction id and the server id of the server lwIP talks to, and lwIP must become bound while processing that frame. A forged "ACK" sent by another host on the LAN is ignored (and counted on the status screen: `DHCP: N ACK-like frames ignored`). With the trap destination fixed or off, DHCP messages are not changed.
+How it works: lwIP is compiled with the Arduino-Pico core's `lwipopts.h`, which does not ask for or keep extra DHCP options (lwIP's `DHCP_ADD_EXTRA_REQUEST_OPTIONS` and DHCP hooks are not set), so the firmware edits the device's own outgoing DHCP DISCOVER/REQUEST at the driver: it appends 224 to the Parameter Request List (option 55), using one of the padding bytes lwIP always leaves after the END option, and fixes the UDP checksum. Option 224 is taken only from a DHCPACK that the device's DHCP client (lwIP) actually accepted: lwIP must be waiting for an ACK, the frame must carry lwIP's current transaction id and the server id of the server lwIP talks to, and lwIP must become bound while processing that frame. A forged "ACK" sent by another host on the LAN is ignored (and counted on the status screen: `DHCP: N ACK-like frames ignored`). With the trap destination fixed or off, DHCP messages are not changed.
 
 Remaining risk: DHCP has no authentication. A host that sees the device's DHCP request (they are broadcast) and answers faster than the real server can hand out the address, gateway and DNS, and so also option 224. Traps carry the SNMP community in clear text, so such a host would learn it. Use `dhcp` only on a network where you trust the DHCP server and its neighbours; otherwise set a fixed trap destination.
 
 ## Rate limiting and access log
 
-Each source address may send 50 requests per second on average, with bursts of up to 100. Requests beyond that are dropped without a response and counted on the status screen ("rate limited"). Up to 8 sources are tracked at once; when more appear, the one seen least recently is forgotten. A flood from one source does not affect others.
+Each source address (IPv4 or the full IPv6 address) may send 50 requests per second on average, with bursts of up to 100. Requests beyond that are dropped without a response and counted on the status screen ("rate limited"). Up to 8 sources are tracked at once; when more appear, the one seen least recently is forgotten. A flood from one source does not affect others.
 
 On top of that, all untrusted sources together may send at most 100 requests per second (bursts of 200). Source addresses are easy to fake with UDP, and a new address starts with a full bucket, so without this global limit an attacker rotating through many addresses could bypass the per-source limit. A request refused for its own source does not count against the global limit.
 
 A source becomes trusted once it sends a request with the right community. Trusted sources (your SNMP managers) use a separate shared limit of 200 requests per second (bursts of 400) instead of the untrusted one, so a flood from addresses that do not know the community cannot starve them. They are also kept in the 8-entry table in preference to untrusted sources, so such a flood cannot push them out and reset their state.
+
+Trust belongs to the exact address that sent the right community. IPv6 sources are not grouped by /64: all hosts on a LAN share one /64, so grouping would hand a manager's trust (and its budget) to every neighbour. A host rotating through many IPv6 addresses gets nothing more than one faking IPv4 addresses: each new address is untrusted and draws from the shared untrusted limit.
 
 Trust is deliberately bounded, because the community is only a weak secret: the default `public` is well known, and SNMPv1 sends it in clear text.
 - At most 4 sources are trusted at once.
@@ -206,7 +209,7 @@ This needs the standard IETF MIBs, which Debian/Ubuntu ship separately: `sudo ap
 ## Limits
 
 - Up to 16 variable bindings per request and at most 16 in a GetBulk response. A larger GetBulk reply would let a small request with a faked source address make the device send a much larger packet to a victim (reflection); a bulk walk simply takes more requests (4 for the 53 objects). A GetBulk request also does not make its source trusted for the rate limiter.
-- Requests up to 1472 bytes (one Ethernet frame); larger packets are dropped.
+- Requests up to 1472 bytes (one Ethernet frame); larger packets are dropped. Replies over IPv6 are at most 1452 bytes (the IPv6 header is 20 bytes longer; the device does not fragment); GetBulk replies are shortened to fit.
 - The network stack queues up to 5 UDP packets. Requests sent in a burst beyond that are dropped; SNMP managers retry, and normal polling or `snmpwalk` sends one request at a time.
 - If the device has not talked to a manager for a few minutes, it first has to look up the manager's MAC address (ARP). lwIP holds one reply during that lookup, so only one request of a burst arriving at that moment is answered.
 - Typical response time is about 4 ms on the local network (requirement: 100 ms).

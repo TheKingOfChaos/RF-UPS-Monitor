@@ -32,7 +32,7 @@ declare -A SUITES=(
     [test_if_stats]="if_stats"
     [test_dhcp_option]="dhcp_option"
     [test_access_control]="access_control"
-    [test_web_ui]="web_ui settings_codec netconfig"
+    [test_web_ui]="web_ui settings_codec netconfig access_control"
 )
 
 failed=0

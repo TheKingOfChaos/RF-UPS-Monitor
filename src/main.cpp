@@ -4,6 +4,7 @@
 #include <W5500lwIP.h>
 #include <mains_input.h>
 #include "cli.h"
+#include "diag.h"
 #include "board_temp.h"
 #include "factory_reset.h"
 #include "hostname.h"
@@ -13,6 +14,13 @@
 #include "stack_watch.h"
 #include "web_service.h"
 #include "version.h"
+
+// Give each core its own 8 KB stack (core 1's from the heap) instead of splitting
+// the 8 KB scratch stack into two 4 KB halves. With IPv6, lwIP's processing on
+// core 0 left only ~660 bytes of a 4 KB stack after a burst of web page loads,
+// and core 0 overflowing would silently overwrite core 1's stack (Arduino-Pico
+// docs, multicore.rst). Costs 8 KB of RAM.
+bool core1_separate_stack = true;
 
 // W5500 on SPI0 (MISO 16, CS 17, SCK 18, MOSI 19) with interrupt on GPIO21;
 // the core's Wiznet5500lwIP driver, counting dropped frames for IF-MIB
@@ -45,6 +53,19 @@ void printNetworkInfo() {
     Serial.print("IP: ");      Serial.println(eth.localIP());
     Serial.print("Subnet: ");  Serial.println(eth.subnetMask());
     Serial.print("Gateway: "); Serial.println(eth.gatewayIP());
+#if LWIP_IPV6
+    // Link-local and router-advertised (SLAAC) addresses; "tentative" while duplicate detection runs
+    netif* nif = eth.getNetIf();
+    bool any = false;
+    for (int i = 0; i < LWIP_IPV6_NUM_ADDRESSES; i++) {
+        u8_t state = netif_ip6_addr_state(nif, i);
+        if (ip6_addr_isinvalid(state)) continue;
+        any = true;
+        Serial.printf("IPv6: %s%s\n", ip6addr_ntoa(netif_ip6_addr(nif, i)),
+                      ip6_addr_istentative(state) ? " (tentative)" : ip6_addr_isdeprecated(state) ? " (deprecated)" : "");
+    }
+    if (!any) Serial.println("IPv6: none");
+#endif
     Serial.print("DNS: ");     Serial.println(eth.dnsIP());
 }
 
@@ -132,6 +153,7 @@ void setup() {
     uint32_t serialWait = millis();
     while (!Serial && millis() - serialWait < 3000) delay(10);
     Serial.println("\nRF-UPS-Monitor " FIRMWARE_VERSION " starting...");
+    diagBegin();  // only with -DRFUPS_DIAG
     boardTempBegin();
 
     // Initialize pins (POWER_PIN and FACTORY_RESET_PIN are configured on core 1)
@@ -182,6 +204,8 @@ void setup() {
 }
 
 void loop() {
+    diagPoll();
+    DIAG_MARK(1);
     // Report when the address is obtained, changed or lost
     static uint32_t lastIP = 0;
     uint32_t ip = eth.connected() ? (uint32_t)eth.localIP() : 0;
@@ -197,6 +221,7 @@ void loop() {
         }
     }
 
+    DIAG_MARK(2);
     // Report mains power changes detected by core 1
     static uint32_t lastMainsChanges = 0;
     MainsSnapshot mains;
@@ -208,20 +233,27 @@ void loop() {
     }
 
     // Link state for IF-MIB, board temperature
+    DIAG_MARK(3);
     netStatsPoll(snmpUptimeTicks());
+    DIAG_MARK(4);
     boardTempPoll();
 
     // SNMP requests
+    DIAG_MARK(5);
     snmpPoll();
 
     // Configuration web page (non-blocking)
+    DIAG_MARK(6);
     webPoll();
 
     // Serial configuration menu
+    DIAG_MARK(7);
     cliProcess();
 
     // Factory reset requested by core 1
+    DIAG_MARK(8);
     factoryResetPoll();
+    DIAG_MARK(9);
 }
 
 // Core 1: mains power monitoring, reset button and LED

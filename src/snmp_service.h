@@ -103,4 +103,4 @@ const AccessLog& snmpAccessLog();
 /**
  * @brief Record a rejected access attempt from another service (the web page) in the same log
  */
-void accessLogRecord(uint32_t source, AccessEvent event);
+void accessLogRecord(const SourceKey& source, AccessEvent event);

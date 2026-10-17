@@ -4,7 +4,8 @@
  * @file dhcp_option.h
  * @brief Request and read one extra DHCP option by editing and reading Ethernet frames.
  *
- * The core's lwIP is precompiled without DHCP hooks, so it neither asks for
+ * lwIP is compiled with the core's lwipopts.h, which sets no DHCP hooks and no
+ * extra request options, so it neither asks for
  * nor keeps site-specific options. The firmware sees every frame at the
  * driver (src/net_stats.cpp), so it
  *  - adds the option code to the Parameter Request List (option 55) of every

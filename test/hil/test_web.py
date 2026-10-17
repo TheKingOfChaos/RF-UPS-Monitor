@@ -137,8 +137,8 @@ class WebPageTest(unittest.TestCase):
         st = self.dev.status()
         self.assertIn("<td>%s</td>" % self.ip, page)
         self.assertIn(st["mac"], page)
-        self.assertRegex(page, r"RF-UPS-Monitor \d+\.\d+\.\d+</h1>")
-        self.assertIn("<td>Mains power</td><td>%s</td>" % st["mains"], page)
+        self.assertRegex(page, r"&middot; v\d+\.\d+\.\d+</span>")
+        self.assertIn('">%s</span></td></tr>' % st["mains"], page)  # mains badge
         self.assertIn('value="public"', page)
         self.assertIn('value="dhcp" checked', page)
 
@@ -224,7 +224,7 @@ class WebPageTest(unittest.TestCase):
         web = self.logged_in()
         status, _, page = web.post("/community", community="x" * 32)
         self.assertEqual(400, status)
-        self.assertIn('class="err"', page)
+        self.assertIn('alert alert-danger', page)
         self.assertEqual("public", self.dev.status()["community"])
 
     def test_invalid_static_address_is_rejected_without_reboot(self):
@@ -402,6 +402,27 @@ class WebPageTest(unittest.TestCase):
                 self.assertLess(max(samples), 0.1, "SNMP blocked during a login: worst %.0f ms" % (max(samples) * 1000))
         finally:
             self.assertIn("reset to the device default", self.dev.set_web_password("-"))
+
+    # ---- stylesheet ----
+
+    def test_bootstrap_stylesheet_is_served_from_flash(self):
+        import base64
+        import gzip
+        import hashlib
+        conn = http.client.HTTPConnection(self.ip, 80, timeout=5)
+        conn.request("GET", "/static/bootstrap-5.3.3.min.css")
+        r = conn.getresponse()
+        data = r.read()
+        conn.close()
+        self.assertEqual(200, r.status)
+        self.assertEqual("gzip", r.getheader("Content-Encoding"))
+        self.assertIn("immutable", r.getheader("Cache-Control"))
+        css = gzip.decompress(data)
+        # Exactly Bootstrap 5.3.3's bootstrap.min.css: its official integrity hash
+        sri = "sha384-" + base64.b64encode(hashlib.sha384(css).digest()).decode()
+        self.assertEqual("sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH", sri)
+        # 31 KB from flash must not hold up SNMP
+        self.assertLess(raw_get(self.ip, 7400)[1], 0.1)
 
     # ---- robustness ----
 

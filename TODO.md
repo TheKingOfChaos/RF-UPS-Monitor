@@ -161,6 +161,7 @@ An item is only ticked when it is implemented **and** its tests exist and pass (
 - [x] Session cookie found among up to 1 KB of other cookies of the same host — native `test_session_found_among_many_other_cookies`
 - [x] Checked with real Chromium (headless, Playwright): login, reloads, form post, logout all under 120 ms
 - [x] Serial option 7: replace the default password with a new random one (stored, read back, old one refused, browsers logged out) — HIL `test_new_default_password_from_serial_menu`, `test_new_default_keeps_an_own_password_in_use`
+- [x] Bootstrap 5.3.3 styling, CSS embedded in flash (gzip, cached), works without internet — native, HIL `test_bootstrap_stylesheet_is_served_from_flash`, checked in Chromium (desktop and phone)
 - [ ] HTTPS (decided 2026-10-17: plain HTTP on the management LAN)
 
 ## 11. Hostname

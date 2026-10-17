@@ -10,6 +10,7 @@
 #include <web_auth.h>
 #include <http_request.h>
 #include <web_app.h>
+#include <bootstrap_css.h>
 #include <settings_codec.h>
 
 void setUp() {}
@@ -706,7 +707,7 @@ static void test_status_page_shows_device_values_escaped() {
     fb->st.boardTempDeciC = -5;
     std::string csrf;
     std::string page = get("/", logIn(csrf));
-    TEST_ASSERT_TRUE(page.find("RF-UPS-Monitor 2.0.0") != std::string::npos);
+    TEST_ASSERT_TRUE(page.find("&middot; v2.0.0") != std::string::npos);
     TEST_ASSERT_TRUE(page.find("<td>10.10.6.111</td>") != std::string::npos);
     TEST_ASSERT_TRUE(page.find("1E:B2:CF:4E:A2:2C") != std::string::npos);
     TEST_ASSERT_TRUE(page.find("1 d 1 h 1 min") != std::string::npos);
@@ -776,7 +777,7 @@ static void test_invalid_hostname_is_not_saved() {
     for (const std::string& h : bad) {
         std::string resp = post("/hostname", "csrf=" + csrf + "&hostname=" + h, token);
         TEST_ASSERT_EQUAL_MESSAGE(400, statusCode(resp), h.c_str());
-        TEST_ASSERT_TRUE(resp.find("class=\"err\"") != std::string::npos);
+        TEST_ASSERT_TRUE(resp.find("alert alert-danger") != std::string::npos);
     }
     TEST_ASSERT_EQUAL(0, fb->hostnameSaves);
     TEST_ASSERT_EQUAL(200, statusCode(post("/hostname", "csrf=" + csrf + "&hostname=" + std::string(32, 'h'), token)));
@@ -844,7 +845,7 @@ static void test_invalid_static_ip_is_not_saved() {
     for (const char* b : bad) {
         std::string resp = post("/network", "csrf=" + csrf + "&" + b, token);
         TEST_ASSERT_EQUAL_MESSAGE(400, statusCode(resp), b);
-        TEST_ASSERT_TRUE_MESSAGE(resp.find("class=\"err\"") != std::string::npos, b);
+        TEST_ASSERT_TRUE_MESSAGE(resp.find("alert alert-danger") != std::string::npos, b);
     }
     TEST_ASSERT_EQUAL(0, fb->networkSaves);
     TEST_ASSERT_EQUAL(0, fb->reboots);
@@ -901,6 +902,66 @@ static void test_unknown_paths_methods_and_bad_requests() {
     TEST_ASSERT_EQUAL(303, statusCode(get("/login")));
     TEST_ASSERT_EQUAL(400, statusCode(send("GARBAGE\r\n\r\n")));
     TEST_ASSERT_EQUAL(413, statusCode(send("POST /login HTTP/1.1\r\nContent-Length: 5000\r\n\r\n")));
+}
+
+// ---- the embedded Bootstrap stylesheet ----
+
+static void test_stylesheet_is_served_gzipped_from_flash_without_login() {
+    webSetUp();
+    std::string resp = get(BOOTSTRAP_CSS_PATH);
+    TEST_ASSERT_EQUAL(200, statusCode(resp));
+    TEST_ASSERT_TRUE(resp.find("Content-Type: text/css; charset=utf-8\r\n") != std::string::npos);
+    TEST_ASSERT_TRUE(resp.find("Content-Encoding: gzip\r\n") != std::string::npos);
+    TEST_ASSERT_TRUE(resp.find("Cache-Control: public, max-age=31536000, immutable\r\n") != std::string::npos);
+    TEST_ASSERT_EQUAL((int)BOOTSTRAP_CSS_GZ_LEN, atoi(between(resp, "Content-Length: ", "\r\n").c_str()));
+    // The response itself is only the headers; the body comes straight from flash
+    TEST_ASSERT_EQUAL(resp.size(), resp.find("\r\n\r\n") + 4);
+    size_t len = 0;
+    TEST_ASSERT_EQUAL_PTR(BOOTSTRAP_CSS_GZ, app->staticBody(len));
+    TEST_ASSERT_EQUAL(BOOTSTRAP_CSS_GZ_LEN, len);
+}
+
+static void test_embedded_stylesheet_is_a_gzip_file_of_bootstrap() {
+    // gzip magic, deflate, no name (deterministic build), and the trailer's size field
+    TEST_ASSERT_GREATER_THAN(1000, BOOTSTRAP_CSS_GZ_LEN);
+    TEST_ASSERT_EQUAL_HEX8(0x1f, BOOTSTRAP_CSS_GZ[0]);
+    TEST_ASSERT_EQUAL_HEX8(0x8b, BOOTSTRAP_CSS_GZ[1]);
+    TEST_ASSERT_EQUAL_HEX8(0x08, BOOTSTRAP_CSS_GZ[2]);
+    const uint8_t* t = BOOTSTRAP_CSS_GZ + BOOTSTRAP_CSS_GZ_LEN - 4;
+    uint32_t isize = (uint32_t)t[0] | (uint32_t)t[1] << 8 | (uint32_t)t[2] << 16 | (uint32_t)t[3] << 24;
+    TEST_ASSERT_EQUAL_UINT32(BOOTSTRAP_CSS_LEN, isize);
+}
+
+static void test_other_responses_have_no_static_body_and_pages_link_the_stylesheet() {
+    webSetUp();
+    get(BOOTSTRAP_CSS_PATH);
+    std::string page = get("/");
+    size_t len = 99;
+    TEST_ASSERT_NULL(app->staticBody(len));
+    TEST_ASSERT_EQUAL(0, len);
+    TEST_ASSERT_TRUE(page.find("<link rel=\"stylesheet\" href=\"" BOOTSTRAP_CSS_PATH "\">") != std::string::npos);
+    // The policy allows the own stylesheet and Bootstrap's data: images, still no scripts
+    TEST_ASSERT_TRUE(page.find("default-src 'none'; style-src 'self' 'unsafe-inline'; img-src data:;") !=
+                     std::string::npos);
+    TEST_ASSERT_TRUE(page.find("<script") == std::string::npos);
+    TEST_ASSERT_EQUAL(405, statusCode(post(BOOTSTRAP_CSS_PATH, "")));
+    TEST_ASSERT_EQUAL(404, statusCode(get("/static/bootstrap-0.0.0.min.css")));
+}
+
+static void test_mains_and_link_badges_show_the_state() {
+    webSetUp();
+    std::string csrf;
+    std::string token = logIn(csrf);
+    std::string page = get("/", token);
+    TEST_ASSERT_TRUE(page.find("text-bg-success\">present</span>") != std::string::npos);
+    TEST_ASSERT_TRUE(page.find("text-bg-success\">up, 100 Mbit/s</span>") != std::string::npos);
+    fb->st.mainsPresent = false;
+    fb->st.linkUp = false;
+    page = get("/", token);
+    TEST_ASSERT_TRUE(page.find("text-bg-danger\">LOST</span>") != std::string::npos);
+    TEST_ASSERT_TRUE(page.find("text-bg-danger\">down</span>") != std::string::npos);
+    fb->st.mainsKnown = false;
+    TEST_ASSERT_TRUE(get("/", token).find("text-bg-secondary\">unknown</span>") != std::string::npos);
 }
 
 static void test_session_found_among_many_other_cookies() {
@@ -1008,6 +1069,10 @@ int main() {
     RUN_TEST(test_logout_ends_the_session);
     RUN_TEST(test_session_expires_after_idle_time_and_logout_all);
     RUN_TEST(test_unknown_paths_methods_and_bad_requests);
+    RUN_TEST(test_stylesheet_is_served_gzipped_from_flash_without_login);
+    RUN_TEST(test_embedded_stylesheet_is_a_gzip_file_of_bootstrap);
+    RUN_TEST(test_other_responses_have_no_static_body_and_pages_link_the_stylesheet);
+    RUN_TEST(test_mains_and_link_badges_show_the_state);
     RUN_TEST(test_session_found_among_many_other_cookies);
     RUN_TEST(test_every_single_byte_corruption_gets_a_well_formed_response);
     RUN_TEST(test_longest_values_still_fit_the_page);

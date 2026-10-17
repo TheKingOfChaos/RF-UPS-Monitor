@@ -3,42 +3,40 @@
 #include <string.h>
 #include <netconfig.h>
 #include <settings_codec.h>
+#include "bootstrap_css.h"
 
-// Headers on every response. The page has no scripts at all; the policy keeps it that way.
+// Headers on every page. The pages have no scripts at all; the policy keeps it that way.
+// Bootstrap's form controls use small data: SVG images, hence img-src data:.
 static const char COMMON_HEADERS[] =
     "Content-Type: text/html; charset=utf-8\r\n"
     "Cache-Control: no-store\r\n"
     "X-Frame-Options: DENY\r\n"
     "X-Content-Type-Options: nosniff\r\n"
     "Referrer-Policy: no-referrer\r\n"
-    "Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; "
-    "frame-ancestors 'none'\r\n"
+    "Content-Security-Policy: default-src 'none'; style-src 'self' 'unsafe-inline'; img-src data:; "
+    "form-action 'self'; frame-ancestors 'none'\r\n"
     "Connection: close\r\n";
 
-static const char STYLE[] =
-    "body{font-family:system-ui,sans-serif;max-width:40em;margin:2em auto;padding:0 1em;color:#222}"
-    "h1{font-size:1.4em}table{border-collapse:collapse}td{padding:2px 1.5em 2px 0}"
-    "fieldset{margin:1em 0;border:1px solid #bbb;border-radius:6px}"
-    "label{display:block;margin:.4em 0}input[type=text],input[type=password]{width:14em}"
-    ".msg{padding:.5em;background:#e6f4ea}.err{padding:.5em;background:#fde7e9}"
-    "form.inline{display:inline}";
-
 static void pageStart(TextBuffer& b, const char* title) {
-    b.add("<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
+    b.add("<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">"
           "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>");
     b.addEscaped(title);
-    b.add("</title><style>");
-    b.add(STYLE);
-    b.add("</style></head><body>");
+    b.add("</title><link rel=\"stylesheet\" href=\"" BOOTSTRAP_CSS_PATH "\">"
+          "<style>body{background:#f3f5f8}.container{max-width:1000px}</style></head><body>"
+          "<nav class=\"navbar navbar-dark bg-dark mb-4\"><div class=\"container\">"
+          "<span class=\"navbar-brand fw-semibold\">RF-UPS-Monitor</span>");
 }
 
-static void pageEnd(TextBuffer& b) { b.add("</body></html>"); }
+/// Close the navbar and open the page container
+static void navEnd(TextBuffer& b) { b.add("</div></nav><main class=\"container pb-5\">"); }
+
+static void pageEnd(TextBuffer& b) { b.add("</main></body></html>"); }
 
 static void message(TextBuffer& b, const char* text, bool error) {
     if (text == nullptr || text[0] == '\0') return;
-    b.add(error ? "<p class=\"err\">" : "<p class=\"msg\">");
+    b.add(error ? "<div class=\"alert alert-danger\" role=\"alert\">" : "<div class=\"alert alert-success\" role=\"alert\">");
     b.addEscaped(text);
-    b.add("</p>");
+    b.add("</div>");
 }
 
 static void csrfField(TextBuffer& b, const char* csrf) {
@@ -48,23 +46,53 @@ static void csrfField(TextBuffer& b, const char* csrf) {
 }
 
 static void row(TextBuffer& b, const char* name, const char* value) {
-    b.add("<tr><td>");
+    b.add("<tr><th scope=\"row\" class=\"ps-3 fw-normal text-secondary\">");
     b.add(name);
-    b.add("</td><td>");
+    b.add("</th><td>");
     b.addEscaped(value);
     b.add("</td></tr>");
 }
 
-static void textInput(TextBuffer& b, const char* label, const char* name, const char* value, size_t maxLen) {
-    b.add("<label>");
+/// A status row whose value is a coloured badge (style: success, danger, secondary)
+static void badgeRow(TextBuffer& b, const char* name, const char* value, const char* style) {
+    b.add("<tr><th scope=\"row\" class=\"ps-3 fw-normal text-secondary\">");
+    b.add(name);
+    b.add("</th><td><span class=\"badge text-bg-");
+    b.add(style);
+    b.add("\">");
+    b.addEscaped(value);
+    b.add("</span></td></tr>");
+}
+
+static void textInput(TextBuffer& b, const char* label, const char* name, const char* value, size_t maxLen,
+                      const char* help = nullptr) {
+    b.add("<div class=\"mb-3\"><label class=\"form-label\" for=\"f-");
+    b.add(name);
+    b.add("\">");
     b.add(label);
-    b.add("<br><input type=\"text\" name=\"");
+    b.add("</label><input class=\"form-control\" type=\"text\" id=\"f-");
+    b.add(name);
+    b.add("\" name=\"");
     b.add(name);
     b.add("\" maxlength=\"");
     b.addUnsigned((uint32_t)maxLen);
     b.add("\" value=\"");
     b.addEscaped(value);
-    b.add("\"></label>");
+    b.add("\">");
+    if (help) {
+        b.add("<div class=\"form-text\">");
+        b.add(help);
+        b.add("</div>");
+    }
+    b.add("</div>");
+}
+
+static void cardStart(TextBuffer& b, const char* title, const char* extraClass = "") {
+    b.add("<div class=\"card shadow-sm ");
+    b.add(extraClass);
+    b.add("\"><div class=\"card-header fw-semibold\">");
+    b.add(title);
+    b.add("</div>");
 }
 
 const char* WebApp::respond(int code, const char* reason, const char* extraHeaders, size_t& len) {
@@ -91,19 +119,41 @@ const char* WebApp::respond(int code, const char* reason, const char* extraHeade
     return _response;
 }
 
+const char* WebApp::stylesheet(size_t& len) {
+    // Served from flash as it is: headers here, the gzip body via staticBody()
+    TextBuffer out(_response, sizeof(_response));
+    out.add("HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/css; charset=utf-8\r\n"
+            "Content-Encoding: gzip\r\n"
+            "Cache-Control: public, max-age=31536000, immutable\r\n"
+            "X-Content-Type-Options: nosniff\r\n"
+            "Connection: close\r\n"
+            "Content-Length: ");
+    out.addUnsigned((uint32_t)BOOTSTRAP_CSS_GZ_LEN);
+    out.add("\r\n\r\n");
+    _staticBody = BOOTSTRAP_CSS_GZ;
+    _staticLen = BOOTSTRAP_CSS_GZ_LEN;
+    len = out.length();
+    return _response;
+}
+
 const char* WebApp::loginPage(int code, const char* reason, const char* text, size_t& len) {
     TextBuffer b(_body, sizeof(_body));
     pageStart(b, "RF-UPS-Monitor login");
-    b.add("<h1>RF-UPS-Monitor</h1>");
+    navEnd(b);
+    b.add("<div class=\"row justify-content-center\"><div class=\"col-sm-9 col-md-6 col-lg-4\">"
+          "<div class=\"card shadow-sm\"><div class=\"card-body p-4\"><h1 class=\"h4 mb-3\">Log in</h1>");
     message(b, text, true);
-    b.add("<form method=\"post\" action=\"/login\"><fieldset><legend>Log in</legend>"
-          "<label>User<br><input type=\"text\" name=\"user\" value=\"admin\" maxlength=\"16\" "
-          "autocomplete=\"username\"></label>"
-          "<label>Password<br><input type=\"password\" name=\"password\" maxlength=\"32\" autofocus "
-          "autocomplete=\"current-password\"></label>"
-          "<button type=\"submit\">Log in</button></fieldset></form>"
-          "<p>The default password is shown on the serial status screen (menu option 1) and can be "
-          "changed with menu option 6.</p>");
+    b.add("<form method=\"post\" action=\"/login\">"
+          "<div class=\"mb-3\"><label class=\"form-label\" for=\"f-user\">User</label>"
+          "<input class=\"form-control\" type=\"text\" id=\"f-user\" name=\"user\" value=\"admin\" maxlength=\"16\" "
+          "autocomplete=\"username\"></div>"
+          "<div class=\"mb-3\"><label class=\"form-label\" for=\"f-password\">Password</label>"
+          "<input class=\"form-control\" type=\"password\" id=\"f-password\" name=\"password\" maxlength=\"32\" "
+          "autofocus autocomplete=\"current-password\"></div>"
+          "<button class=\"btn btn-primary w-100\" type=\"submit\">Log in</button></form></div></div>"
+          "<p class=\"text-secondary small mt-3\">The default password is shown on the serial status screen "
+          "(menu option 1); set your own with menu option 6.</p></div></div>");
     pageEnd(b);
     return respond(code, reason, nullptr, len);
 }
@@ -111,11 +161,13 @@ const char* WebApp::loginPage(int code, const char* reason, const char* text, si
 const char* WebApp::notice(int code, const char* reason, const char* title, const char* text, size_t& len) {
     TextBuffer b(_body, sizeof(_body));
     pageStart(b, title);
-    b.add("<h1>");
+    navEnd(b);
+    b.add("<div class=\"row justify-content-center\"><div class=\"col-md-8 col-lg-6\"><div class=\"card shadow-sm\">"
+          "<div class=\"card-body p-4\"><h1 class=\"h4\">");
     b.addEscaped(title);
     b.add("</h1><p>");
     b.addEscaped(text);
-    b.add("</p><p><a href=\"/\">Back to the start page</a></p>");
+    b.add("</p><a class=\"btn btn-outline-primary\" href=\"/\">Back to the start page</a></div></div></div></div>");
     pageEnd(b);
     return respond(code, reason, nullptr, len);
 }
@@ -138,14 +190,26 @@ const char* WebApp::mainPage(int code, const char* reason, size_t slot, WebBacke
 
     TextBuffer b(_body, sizeof(_body));
     pageStart(b, "RF-UPS-Monitor");
-    b.add("<h1>RF-UPS-Monitor ");
+    b.add("<div class=\"d-flex align-items-center gap-3\"><span class=\"navbar-text\">");
+    b.addEscaped(st.hostname);
+    b.add(" &middot; v");
     b.addEscaped(st.version ? st.version : "");
-    b.add("</h1>");
+    b.add("</span><form method=\"post\" action=\"/logout\" class=\"m-0\">");
+    csrfField(b, csrf);
+    b.add("<button class=\"btn btn-outline-light btn-sm\" type=\"submit\">Log out</button></form></div>");
+    navEnd(b);
     message(b, text, error);
 
+    // Left column: status and restart
     char num[48];
-    b.add("<h2>Status</h2><table>");
-    row(b, "Mains power", !st.mainsKnown ? "unknown" : st.mainsPresent ? "present" : "LOST");
+    b.add("<div class=\"row g-4\"><div class=\"col-lg-5\">");
+    cardStart(b, "Status");
+    b.add("<table class=\"table table-sm mb-0\"><tbody>");
+    if (!st.mainsKnown) {
+        badgeRow(b, "Mains power", "unknown", "secondary");
+    } else {
+        badgeRow(b, "Mains power", st.mainsPresent ? "present" : "LOST", st.mainsPresent ? "success" : "danger");
+    }
     TextBuffer nb(num, sizeof(num));
     nb.addUnsigned(st.mainsChanges);
     row(b, "Mains changes since boot", num);
@@ -172,10 +236,8 @@ const char* WebApp::mainPage(int code, const char* reason, size_t slot, WebBacke
         nb.add("up, ");
         nb.addUnsigned(st.linkMbps);
         nb.add(" Mbit/s");
-    } else {
-        nb.add("down");
     }
-    row(b, "Ethernet link", num);
+    badgeRow(b, "Ethernet link", st.linkUp ? num : "down", st.linkUp ? "success" : "danger");
     row(b, "Hostname", st.hostname);
     nb = TextBuffer(num, sizeof(num));
     nb.add(st.hostname);
@@ -184,39 +246,52 @@ const char* WebApp::mainPage(int code, const char* reason, size_t slot, WebBacke
     row(b, "IP address", st.ip);
     row(b, "MAC address", st.mac);
     row(b, "Network mode", st.dhcp ? "DHCP" : "static");
-    b.add("</table>");
+    b.add("</tbody></table></div>");
 
-    b.add("<form method=\"post\" action=\"/network\"><fieldset><legend>Network (saving restarts the device)"
-          "</legend>");
+    b.add("<div class=\"card shadow-sm mt-4\"><div class=\"card-body d-flex justify-content-between "
+          "align-items-center\"><span>Restart the device</span>"
+          "<form method=\"post\" action=\"/reboot\" class=\"m-0\">");
     csrfField(b, csrf);
-    b.add("<label><input type=\"radio\" name=\"mode\" value=\"dhcp\"");
+    b.add("<button class=\"btn btn-outline-danger btn-sm\" type=\"submit\">Restart device</button></form></div></div>");
+
+    // Right column: settings
+    b.add("</div><div class=\"col-lg-7\">");
+    cardStart(b, "Network");
+    b.add("<div class=\"card-body\"><form method=\"post\" action=\"/network\">");
+    csrfField(b, csrf);
+    b.add("<div class=\"mb-3\"><div class=\"form-check form-check-inline\"><input class=\"form-check-input\" "
+          "type=\"radio\" name=\"mode\" id=\"m-dhcp\" value=\"dhcp\"");
     if (st.dhcp) b.add(" checked");
-    b.add("> DHCP</label><label><input type=\"radio\" name=\"mode\" value=\"static\"");
+    b.add("><label class=\"form-check-label\" for=\"m-dhcp\">DHCP</label></div>"
+          "<div class=\"form-check form-check-inline\"><input class=\"form-check-input\" type=\"radio\" "
+          "name=\"mode\" id=\"m-static\" value=\"static\"");
     if (!st.dhcp) b.add(" checked");
-    b.add("> Static</label>");
+    b.add("><label class=\"form-check-label\" for=\"m-static\">Static</label></div></div>"
+          "<div class=\"row g-2\"><div class=\"col-sm-4\">");
     textInput(b, "IP address", "ip", st.staticIP, 15);
+    b.add("</div><div class=\"col-sm-4\">");
     textInput(b, "Subnet mask", "mask", st.subnetMask, 15);
+    b.add("</div><div class=\"col-sm-4\">");
     textInput(b, "Gateway", "gateway", st.gateway, 15);
-    b.add("<button type=\"submit\">Save and restart</button></fieldset></form>");
+    b.add("</div></div><button class=\"btn btn-primary\" type=\"submit\">Save and restart</button>"
+          "<span class=\"form-text ms-2\">Saving restarts the device.</span></form></div></div>");
 
-    b.add("<form method=\"post\" action=\"/community\"><fieldset><legend>SNMP community (active immediately)"
-          "</legend>");
+    cardStart(b, "Device name", "mt-4");
+    b.add("<div class=\"card-body\"><form method=\"post\" action=\"/hostname\">");
     csrfField(b, csrf);
-    textInput(b, "Community", "community", st.community, COMMUNITY_MAX_LENGTH);
-    b.add("<button type=\"submit\">Save</button></fieldset></form>");
+    textInput(b, "Hostname", "hostname", st.hostname, HOSTNAME_MAX_LENGTH,
+              "Also the SNMP sysName and the mDNS name (name.local). 1-32 letters, digits and hyphens. "
+              "Active immediately.");
+    b.add("<button class=\"btn btn-primary\" type=\"submit\">Save</button></form></div></div>");
 
-    b.add("<form method=\"post\" action=\"/hostname\"><fieldset><legend>Device name (active immediately)"
-          "</legend>");
+    cardStart(b, "SNMP", "mt-4");
+    b.add("<div class=\"card-body\"><form method=\"post\" action=\"/community\">");
     csrfField(b, csrf);
-    textInput(b, "Hostname (also SNMP sysName and name.local)", "hostname", st.hostname, HOSTNAME_MAX_LENGTH);
-    b.add("<button type=\"submit\">Save</button></fieldset></form>");
+    textInput(b, "Community", "community", st.community, COMMUNITY_MAX_LENGTH,
+              "1-31 printable characters. Active immediately.");
+    b.add("<button class=\"btn btn-primary\" type=\"submit\">Save</button></form></div></div>");
 
-    b.add("<form class=\"inline\" method=\"post\" action=\"/reboot\">");
-    csrfField(b, csrf);
-    b.add("<button type=\"submit\">Restart device</button></form> "
-          "<form class=\"inline\" method=\"post\" action=\"/logout\">");
-    csrfField(b, csrf);
-    b.add("<button type=\"submit\">Log out</button></form>");
+    b.add("</div></div>");
     pageEnd(b);
     return respond(code, reason, nullptr, len);
 }
@@ -325,6 +400,8 @@ const char* WebApp::hostname(const HttpRequest& req, size_t slot, WebBackend& ba
 
 const char* WebApp::handle(const HttpRequest& req, uint32_t sourceIP, uint32_t nowMs, WebBackend& backend,
                            size_t& len) {
+    _staticBody = nullptr;
+    _staticLen = 0;
     if (req.state() == HttpParse::TooLarge) {
         return notice(413, "Payload Too Large", "Request too large", "The request was too large.", len);
     }
@@ -340,6 +417,11 @@ const char* WebApp::handle(const HttpRequest& req, uint32_t sourceIP, uint32_t n
 
     const char* path = req.path();
     bool get = req.method() == HttpMethod::Get, post = req.method() == HttpMethod::Post;
+
+    if (strcmp(path, BOOTSTRAP_CSS_PATH) == 0) {
+        if (!get) return notice(405, "Method Not Allowed", "Not allowed", "Use GET for this file.", len);
+        return stylesheet(len);  // no login needed: public CSS
+    }
 
     if (strcmp(path, "/") == 0) {
         if (!get) return notice(405, "Method Not Allowed", "Not allowed", "Use GET for this page.", len);

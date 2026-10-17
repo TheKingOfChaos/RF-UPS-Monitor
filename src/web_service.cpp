@@ -36,6 +36,8 @@ static uint32_t connStartMs = 0;
 static uint32_t peer = 0;
 static const char* out = nullptr;
 static size_t outLen = 0, outPos = 0;
+static const uint8_t* staticBody = nullptr;  // sent after out (the stylesheet, from flash)
+static size_t staticLen = 0;
 static bool rebootRequested = false;
 static uint32_t rebootAtMs = 0;
 
@@ -192,6 +194,7 @@ static bool needsHashedCheck() {
 /// Build the response to the received request and start sending it
 static void respond() {
     out = app.handle(request, peer, millis(), backend, outLen);
+    staticBody = app.staticBody(staticLen);
     outPos = 0;
     conn = Conn::Sending;
 }
@@ -255,12 +258,22 @@ void webPoll() {
     }
 
     if (conn == Conn::Sending) {
+        // The response (headers + page), then for the stylesheet its body straight from flash
+        size_t total = outLen + staticLen;
         size_t room = (size_t)client.availableForWrite();
-        if (room > 0) {
-            size_t n = outLen - outPos < room ? outLen - outPos : room;
-            outPos += client.write((const uint8_t*)out + outPos, n);
+        if (room > 0 && outPos < total) {
+            const uint8_t* src;
+            size_t left;
+            if (outPos < outLen) {
+                src = (const uint8_t*)out + outPos;
+                left = outLen - outPos;
+            } else {
+                src = staticBody + (outPos - outLen);
+                left = total - outPos;
+            }
+            outPos += client.write(src, left < room ? left : room);
         }
-        if (outPos >= outLen || !client.connected() || millis() - connStartMs > 2 * WEB_CONNECTION_TIMEOUT_MS) {
+        if (outPos >= total || !client.connected() || millis() - connStartMs > 2 * WEB_CONNECTION_TIMEOUT_MS) {
             closeConnection();
         }
     }

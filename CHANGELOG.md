@@ -6,6 +6,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-10-17
+
+### Changed
+- Web page restyled with Bootstrap 5.3.3: dark navigation bar, status card with green/red badges for mains power and the Ethernet link, settings in cards, Bootstrap forms and alerts, two columns on wide screens and one on phones. Bootstrap's CSS is built into the firmware (31 KB gzip in flash, served at `/static/bootstrap-5.3.3.min.css`, cached for a year, no login needed), so no internet access is needed. `scripts/embed_bootstrap.py` regenerates it from a pinned, integrity-checked download.
+- Content-Security-Policy now allows the device's own stylesheet and Bootstrap's `data:` images; still no scripts.
+
 ## [2.1.0] - 2026-10-17
 
 ### Added
@@ -90,7 +96,8 @@ First release.
 - The network stack queues 5 UDP packets; larger bursts are dropped (SNMP managers retry).
 - Not yet tested with the real hardware: mains traps with real mains, the factory reset button, the "no link" and "no DHCP server" states. The LibreNMS definitions are validated against the schema but not yet tried in a running LibreNMS (done after 1.0.1).
 
-[Unreleased]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.1.0...HEAD
+[Unreleased]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.1.1...HEAD
+[2.1.1]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.1.0...v2.1.1
 [2.1.0]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.0.1...v2.1.0
 [2.0.1]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v1.0.2...v2.0.0

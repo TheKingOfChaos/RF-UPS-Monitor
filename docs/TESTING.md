@@ -189,6 +189,7 @@ Flashing an embedded test replaces the firmware, so always reflash with `pio run
 - Password rules, salted iterated hash compared with an independent Python `hashlib` result, the stepwise check equals the one-shot check for every step size and always runs all rounds, wrong/malformed hashes never match, default password alphabet, constant-time compare
 - Sessions: token format, idle expiry, millis wrap, replacement of the least recently used, logout/clear; login throttle: lockout after 5 failures for 30 s, reset on success, wrap
 - HTTP parser: GET/POST, every prefix incomplete, byte-by-byte, header lookup, size limits at the boundary, malformed request lines, chunked, NUL bytes, extra bytes; form and cookie decoding; HTML escaping
+- Stylesheet: served without login with gzip and year-long caching headers, body straight from flash; the embedded data is a gzip file whose trailer matches the CSS size; pages link it; the policy allows it and still no scripts; mains and link badges follow the state
 - Page logic with a fake backend: login form, right/wrong login, lockout, status values escaped, every action needs session and CSRF token, community and network validation, save failure, reboot, logout, idle expiry, 404/405/400/413, security headers and Content-Length on every response, every single-byte corruption of two real requests gives a well-formed response
 
 ### `test/native/test_snmp_trap`: trap encoding
@@ -275,6 +276,7 @@ Uses `test/settings_a.json` and `test/settings_b.json`, never the real settings.
 - Hostname from the web page: status screen, SNMP sysName and mDNS (`name.local` resolved by the PC) follow at once without restart; invalid names refused; restored afterwards
 - New default password via serial option 7: `n` changes nothing; `y` gives a new 10-character password, logs browsers out, refuses the old one and keeps the new one across a restart; an own password stays in use
 - Own password via serial option 6: masked echo, old sessions logged out, default refused, hashed check under 2 s, mismatch and short passwords change nothing, `-` restores the default
+- The Bootstrap stylesheet downloaded from the device unpacks to exactly Bootstrap 5.3.3 (official integrity hash), without slowing SNMP
 - With an own password set, SNMP stays under 100 ms while a login (right or wrong) hashes the password
 - A client that never finishes its request does not slow SNMP and is dropped after 5 s; 30 page loads keep SNMP under 100 ms and leave > 1 KB of core 0 stack never used; oversized request gets 413
 - Needs the device default web password (the suite skips otherwise)

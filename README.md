@@ -2,7 +2,7 @@
 
 A mains power monitor built on a Raspberry Pi Pico with a W5500 Ethernet module. It reports whether mains power is present over SNMP v1 and v2c, including traps, together with standard interface statistics (IF-MIB) and the board temperature, so it can be monitored by LibreNMS or any other SNMP manager. It is configured through a menu on the USB serial port.
 
-Current version: **2.1.0** (see [CHANGELOG.md](CHANGELOG.md)).
+Current version: **2.1.1** (see [CHANGELOG.md](CHANGELOG.md)).
 
 ## Overview
 
@@ -202,11 +202,13 @@ The device serves a small configuration page on **http://&lt;device IP&gt;/** (p
 
 - **Login:** user `admin`. Until you set your own password, the password is the device's **default password**: 10 random characters generated on first boot, different for every device, and shown only on the serial status screen (menu option 1): `Web login: user admin, default password "k7wqz3mtd9"`. A factory reset does not change it; menu option 7 replaces it with a new random one.
 - **Own password:** serial menu option 6 sets one (8-32 characters, no spaces; typed characters are shown as `*`), or `-` goes back to the device default. Changing it logs every browser out. The password is stored as a salted SHA-256 hash (2000 rounds), never as text; checking it takes about half a second, done in small steps so SNMP keeps answering meanwhile. It can only be changed from the serial menu, so someone who learns it cannot lock you out.
-- **Status:** mains power and change count, uptime, board temperature, Ethernet link, hostname and `.local` name, IP and MAC address, network mode, firmware version.
+- **Status:** mains power (green or red badge) and change count, uptime, board temperature, Ethernet link, hostname and `.local` name, IP and MAC address, network mode, firmware version.
 - **Device name:** the hostname (also SNMP sysName and mDNS name), active immediately.
 - **Network:** DHCP or static IP (address, mask and gateway are checked as in the serial menu). Saving restarts the device; the page tells you the new address.
 - **SNMP community:** active immediately, no restart.
 - **Restart device** and **Log out** buttons.
+
+The page is styled with [Bootstrap](https://getbootstrap.com/) 5.3.3, which is built into the firmware: the device serves its CSS from flash (31 KB, gzip-compressed, cached by the browser for a year), so the page looks the same on a management network without internet access. It works on phones too. `scripts/embed_bootstrap.py` downloads a pinned version, checks it against Bootstrap's official integrity hash and regenerates `lib/web_ui/src/bootstrap_css.cpp`.
 
 Security:
 - Five wrong logins in a row lock the login for 30 seconds, from any address. Failed logins and lockouts appear in the access log (menu option 5) as `web login failed` / `web locked out`.
@@ -346,6 +348,7 @@ test/native/                Unit tests, run on the PC
 test/embedded/              Unity tests, run on the Pico
 test/hil/                   Python tests over the serial port
 scripts/wait_for_port.py    Waits for the USB port after flashing, for pio test
+scripts/embed_bootstrap.py  Embeds Bootstrap's CSS (pinned, integrity-checked) in lib/web_ui
 scripts/sanitize.sh         Native tests under ASan/UBSan (run in WSL)
 scripts/host_agent_check.sh Agent against real net-snmp tools, no hardware (run in WSL)
 docs/TESTING.md             Test guide
@@ -421,3 +424,5 @@ Object details, traps, error behaviour, limits and the MIB file: [docs/MIB.md](d
 ## License
 
 MIT
+
+The web page includes Bootstrap's CSS, Copyright 2011-2024 The Bootstrap Authors, MIT license (https://github.com/twbs/bootstrap/blob/main/LICENSE).

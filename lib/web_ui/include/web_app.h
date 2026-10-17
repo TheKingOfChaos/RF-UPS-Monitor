@@ -13,6 +13,7 @@
  *   POST /community SNMP community; saves, active immediately
  *   POST /hostname  hostname (sysName, DHCP, mDNS); saves, active immediately
  *   POST /reboot
+ *   GET  /static/bootstrap-<version>.min.css  Bootstrap from flash, gzip, cached a year, no login
  * Every POST except /login needs a valid session cookie and the session's
  * CSRF token in the form. The cookie is HttpOnly and SameSite=Strict.
  */
@@ -69,7 +70,7 @@ public:
     virtual void log(uint32_t sourceIP, WebEvent event) = 0;
 };
 
-static const size_t WEB_BODY_MAX = 5120;
+static const size_t WEB_BODY_MAX = 8192;
 /// Longest Cookie header read; browsers send every cookie of the host, not only ours
 static const size_t WEB_COOKIE_HEADER_MAX = 1024;
 static const size_t WEB_RESPONSE_MAX = WEB_BODY_MAX + 768;
@@ -85,6 +86,15 @@ public:
     /// Log every browser out, e.g. after the password changed
     void logoutAll() { _sessions.clear(); }
 
+    /**
+     * @brief Body that follows the response handle() returned, sent straight from flash
+     *        (the stylesheet); nullptr for normal pages, whose body is in the response itself
+     */
+    const uint8_t* staticBody(size_t& len) const {
+        len = _staticLen;
+        return _staticBody;
+    }
+
     size_t sessionCount() const { return _sessions.count(); }
 
 private:
@@ -98,10 +108,13 @@ private:
     const char* notice(int code, const char* reason, const char* title, const char* text, size_t& len);
     const char* redirect(const char* extraHeaders, size_t& len);
     const char* respond(int code, const char* reason, const char* extraHeaders, size_t& len);
+    const char* stylesheet(size_t& len);
 
     WebSessions _sessions;
     LoginThrottle _throttle;
     char _cookies[WEB_COOKIE_HEADER_MAX];
     char _body[WEB_BODY_MAX];
     char _response[WEB_RESPONSE_MAX];
+    const uint8_t* _staticBody = nullptr;
+    size_t _staticLen = 0;
 };

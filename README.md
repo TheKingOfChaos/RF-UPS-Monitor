@@ -43,7 +43,7 @@ See [TODO.md](TODO.md) for the detailed plan.
 
 | Document | Contents |
 |---|---|
-| This README | Hardware, wiring, serial menu, network, mains monitoring, factory reset, settings, building, SNMP overview, troubleshooting |
+| This README | Hardware, wiring, serial menu, web page, network, IPv6, mains monitoring, factory reset, settings, building, SNMP overview, troubleshooting |
 | [docs/MIB.md](docs/MIB.md) | Every SNMP object (system, IF-MIB, RF-UPS-MONITOR-MIB), traps, v1/v2c differences, rate limiting, errors, limits |
 | [docs/LIBRENMS.md](docs/LIBRENMS.md) | Monitoring the device with LibreNMS: install, sensors, alerts, traps, Docker test setup |
 | [docs/TESTING.md](docs/TESTING.md) | Test layers, how to run them, automated mains tests with a smart plug, what each suite covers |
@@ -231,11 +231,11 @@ If you lock yourself out with a wrong static address, use the serial menu to swi
 
 ## Web page
 
-The device serves a small configuration page on **http://&lt;device IP&gt;/** (port 80): log in, see the status, change the network settings and the SNMP community, and restart the device.
+The device serves a small configuration page on **http://&lt;device IP&gt;/** (port 80): log in, see the status, change the network settings (IPv4 and static IPv6), the hostname and the SNMP community, restart the device, or turn the page off. It is also reachable as **http://rf-ups-monitor.local/** (mDNS, see [Hostname](#hostname)) and over IPv6 as **http://[&lt;IPv6 address&gt;]/**. Everything on the page can also be done in the serial menu.
 
 - **Login:** user `admin`. Until you set your own password, the password is the device's **default password**: 10 random characters generated on first boot, different for every device, and shown only on the serial status screen (menu option 1): `Web login: user admin, default password "k7wqz3mtd9"`. A factory reset does not change it; menu option 7 replaces it with a new random one.
 - **Own password:** serial menu option 6 sets one (8-32 characters, no spaces; typed characters are shown as `*`), or `-` goes back to the device default. Changing it logs every browser out. The password is stored as a salted SHA-256 hash (2000 rounds), never as text; checking it takes about half a second, done in small steps so SNMP keeps answering meanwhile. It can only be changed from the serial menu, so someone who learns it cannot lock you out.
-- **Status:** mains power (green or red badge) and change count, uptime, board temperature, Ethernet link, hostname and `.local` name, IP and MAC address, network mode, firmware version.
+- **Status:** mains power (green or red badge) and change count, uptime, board temperature, Ethernet link, hostname and `.local` name, IP address, IPv6 address and link-local address (when the device has them), MAC address, network mode, static IPv6 address (when set), firmware version (top bar).
 - **Device name:** the hostname (also SNMP sysName and mDNS name), active immediately.
 - **Network:** DHCP or static IP (address, mask and gateway are checked as in the serial menu). Saving restarts the device; the page tells you the new address.
 - **IPv6:** static IPv6 address and gateway, checked as in the serial menu (option 9); empty fields remove them. Saving restarts the device.
@@ -252,7 +252,26 @@ Security:
 - A session ends after 15 minutes without a request, on Log out, after a restart, or when the password changes. At most two browsers are logged in at once.
 - The session cookie is `HttpOnly` and `SameSite=Strict`, every form carries a per-session token (CSRF protection), and the page sends a strict Content-Security-Policy (no scripts at all) and forbids framing.
 - **Plain HTTP:** the password and the session cookie cross the network unencrypted, like the SNMP community. Use the page on a trusted management network.
+- Settings changed on the page are saved to flash like those from the serial menu, and are written to the serial log (`Web: network settings saved ...`).
 - The server handles one connection at a time without ever blocking: requests are read as they arrive (at most 2 KB), responses are written as fast as the network takes them, and a connection that does not finish within 5 seconds is closed. SNMP keeps answering in between.
+
+Pages and forms, for scripts (e.g. `curl` with a cookie jar). Every POST except `/login` needs the session cookie `sid` and the form field `csrf` with the token from the page (`name="csrf" value="..."`); forms are `application/x-www-form-urlencoded`.
+
+| Path | Method | Fields | Does |
+|---|---|---|---|
+| `/` | GET | | Login form, or the status and settings page when logged in |
+| `/login` | POST | `user`, `password` | Logs in; sets the `sid` cookie and redirects to `/` |
+| `/logout` | POST | | Ends the session |
+| `/network` | POST | `mode` (`dhcp` or `static`), `ip`, `mask`, `gateway` | Saves IPv4 settings and restarts |
+| `/ipv6` | POST | `ipv6`, `ipv6gw` (empty = none) | Saves the static IPv6 address and gateway and restarts |
+| `/hostname` | POST | `hostname` | Saves the hostname (sysName, DHCP, mDNS), active immediately |
+| `/community` | POST | `community` | Saves the SNMP community, active immediately |
+| `/reboot` | POST | | Restarts the device |
+| `/disable` | POST | `confirm=yes` (without it: the confirmation page) | Turns the web interface off |
+| `/favicon.svg` | GET | | The logo, no login |
+| `/static/bootstrap-5.3.3.min.css` | GET | | The stylesheet (gzip), no login |
+
+Responses: `400` with the reason on the page for an invalid value (nothing is saved), `403` without a valid session or CSRF token, `429` while logins are locked, `413` for a request over 2 KB.
 
 ## Network
 
@@ -466,6 +485,9 @@ Object details, traps, error behaviour, limits and the MIB file: [docs/MIB.md](d
 | Traps go nowhere with trap destination `dhcp` | Status screen "Trap destination source": the DHCP server must have option 224 configured |
 | Forgot the web password | Serial menu option 6, enter `-` to go back to the device default password shown on the status screen |
 | Web page does not load | Use `http://` (not https); the status screen shows the device IP |
+| Web page says "Too many failed logins" | Five wrong passwords in a row lock the login for 30 s; wait and use the password from the status screen (or your own from option 6) |
+| Web page says "Form expired" or "Not logged in" | The session ended (15 min idle, restart, password change, or a third browser logged in) or the page was old: reload it and log in again |
+| Device restarts after saving on the web page | Network and IPv6 settings need a restart; it is expected. Find the new address on the status screen if it changed |
 | No traps arrive | Trap destination set (status screen shows it and "N sent"); firewall on the receiving PC must allow inbound UDP 162 |
 | A manager gets no answers after polling hard | Rate limit (50/s per source): check menu option 5 for "rate limited" |
 | No IP address | Menu option 1 shows the state: cable/link, or no DHCP answer (it keeps retrying) |

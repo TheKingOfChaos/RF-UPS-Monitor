@@ -184,6 +184,41 @@ class WebPageTest(unittest.TestCase):
             self.assertEqual(200, status)
         self.assertEqual("public", self.dev.status()["community"])
 
+    def resolve_mdns(self, name, timeout=10):
+        """Address of name.local via the PC's mDNS resolver, or None."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                return socket.getaddrinfo(name + ".local", 80, socket.AF_INET)[0][4][0]
+            except socket.gaierror:
+                time.sleep(1)
+        return None
+
+    def test_hostname_from_web_applies_to_snmp_mdns_and_status(self):
+        self.wait_lockout_over()
+        web = self.logged_in()
+        before = self.dev.status()["hostname"]
+        self.assertEqual(self.ip, self.resolve_mdns(before))
+        new = "hil-ups-%d" % (int(time.time()) % 10000)  # fresh name: no stale mDNS cache entry
+        try:
+            status, _, page = web.post("/hostname", hostname=new)
+            self.assertEqual(200, status, page)
+            self.assertIn("<td>%s.local</td>" % new, page)
+            st = self.dev.status()
+            self.assertEqual(new, st["hostname"])
+            self.assertEqual(new, st["sysName"])
+            rc, out = net_snmp("snmpget", self.ip, "1.3.6.1.2.1.1.5.0")
+            self.assertIn('STRING: "%s"' % new, out)
+            self.assertEqual(self.ip, self.resolve_mdns(new), "%s.local does not resolve" % new)
+            # Invalid names change nothing
+            status, _, _ = web.post("/hostname", hostname="bad name")
+            self.assertEqual(400, status)
+            self.assertEqual(new, self.dev.status()["hostname"])
+        finally:
+            status, _, _ = web.post("/hostname", hostname=before)
+            self.assertEqual(200, status)
+        self.assertEqual(before, self.dev.status()["hostname"])
+
     def test_invalid_community_is_rejected(self):
         self.wait_lockout_over()
         web = self.logged_in()

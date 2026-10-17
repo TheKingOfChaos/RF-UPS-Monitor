@@ -515,9 +515,9 @@ class FakeBackend : public WebBackend {
 public:
     std::string password = "goodpasswd1";
     bool saveOk = true;
-    int passwordChecks = 0, networkSaves = 0, communitySaves = 0, reboots = 0;
+    int passwordChecks = 0, networkSaves = 0, communitySaves = 0, hostnameSaves = 0, reboots = 0;
     bool savedDhcp = false;
-    std::string savedIP, savedMask, savedGateway, savedCommunity;
+    std::string savedIP, savedMask, savedGateway, savedCommunity, savedHostname;
     int failed = 0, locked = 0, loggedIn = 0;
     uint8_t seed = 1;
     WebStatus st;
@@ -539,6 +539,7 @@ public:
         strcpy(st.subnetMask, "255.255.0.0");
         strcpy(st.gateway, "10.10.0.1");
         strcpy(st.community, "public");
+        strcpy(st.hostname, "rf-ups-monitor");
     }
     void status(WebStatus& out) override { out = st; }
     bool checkPassword(const char* p) override {
@@ -557,6 +558,12 @@ public:
         communitySaves++;
         savedCommunity = c;
         if (saveOk) strcpy(st.community, c);
+        return saveOk;
+    }
+    bool saveHostname(const char* h) override {
+        hostnameSaves++;
+        savedHostname = h;
+        if (saveOk) strcpy(st.hostname, h);
         return saveOk;
     }
     void requestReboot() override { reboots++; }
@@ -712,14 +719,14 @@ static void test_status_page_shows_device_values_escaped() {
 
 static void test_actions_need_a_session() {
     webSetUp();
-    const char* paths[] = {"/community", "/network", "/reboot", "/logout"};
+    const char* paths[] = {"/community", "/network", "/reboot", "/logout", "/hostname"};
     for (const char* p : paths) {
-        std::string resp = post(p, "community=x&mode=dhcp&csrf=00");
+        std::string resp = post(p, "community=x&mode=dhcp&hostname=x&csrf=00");
         TEST_ASSERT_EQUAL_MESSAGE(403, statusCode(resp), p);
         resp = post(p, "community=x&mode=dhcp", std::string(32, 'a'));
         TEST_ASSERT_EQUAL_MESSAGE(403, statusCode(resp), p);
     }
-    TEST_ASSERT_EQUAL(0, fb->communitySaves + fb->networkSaves + fb->reboots);
+    TEST_ASSERT_EQUAL(0, fb->communitySaves + fb->networkSaves + fb->hostnameSaves + fb->reboots);
 }
 
 static void test_actions_need_the_session_csrf_token() {
@@ -744,6 +751,37 @@ static void test_change_community() {
     TEST_ASSERT_TRUE(resp.find("SNMP community saved and active.") != std::string::npos);
     TEST_ASSERT_TRUE(resp.find("value=\"s3cret!\"") != std::string::npos);
     TEST_ASSERT_EQUAL(0, fb->reboots);
+}
+
+static void test_change_hostname() {
+    webSetUp();
+    std::string csrf;
+    std::string token = logIn(csrf);
+    std::string page = get("/", token);
+    TEST_ASSERT_TRUE(page.find("<td>rf-ups-monitor</td>") != std::string::npos);
+    TEST_ASSERT_TRUE(page.find("<td>rf-ups-monitor.local</td>") != std::string::npos);
+    std::string resp = post("/hostname", "csrf=" + csrf + "&hostname=ups-rack4", token);
+    TEST_ASSERT_EQUAL(200, statusCode(resp));
+    TEST_ASSERT_EQUAL_STRING("ups-rack4", fb->savedHostname.c_str());
+    TEST_ASSERT_TRUE(resp.find("Hostname saved and active.") != std::string::npos);
+    TEST_ASSERT_TRUE(resp.find("<td>ups-rack4.local</td>") != std::string::npos);
+    TEST_ASSERT_EQUAL(0, fb->reboots);
+}
+
+static void test_invalid_hostname_is_not_saved() {
+    webSetUp();
+    std::string csrf;
+    std::string token = logIn(csrf);
+    std::string bad[] = {"", "ups+rack", "-ups", "ups-", "ups.local", "ups_4", std::string(33, 'h'), "%3Cb%3E"};
+    for (const std::string& h : bad) {
+        std::string resp = post("/hostname", "csrf=" + csrf + "&hostname=" + h, token);
+        TEST_ASSERT_EQUAL_MESSAGE(400, statusCode(resp), h.c_str());
+        TEST_ASSERT_TRUE(resp.find("class=\"err\"") != std::string::npos);
+    }
+    TEST_ASSERT_EQUAL(0, fb->hostnameSaves);
+    TEST_ASSERT_EQUAL(200, statusCode(post("/hostname", "csrf=" + csrf + "&hostname=" + std::string(32, 'h'), token)));
+    fb->saveOk = false;
+    TEST_ASSERT_EQUAL(500, statusCode(post("/hostname", "csrf=" + csrf + "&hostname=other", token)));
 }
 
 static void test_invalid_community_is_not_saved() {
@@ -907,6 +945,7 @@ static void test_every_single_byte_corruption_gets_a_well_formed_response() {
 static void test_longest_values_still_fit_the_page() {
     webSetUp();
     strcpy(fb->st.community, std::string(31, '"').c_str());  // every character escaped to 6
+    strcpy(fb->st.hostname, std::string(32, 'h').c_str());
     std::string csrf;
     std::string page = get("/", logIn(csrf));
     TEST_ASSERT_EQUAL(200, statusCode(page));
@@ -958,6 +997,8 @@ int main() {
     RUN_TEST(test_actions_need_a_session);
     RUN_TEST(test_actions_need_the_session_csrf_token);
     RUN_TEST(test_change_community);
+    RUN_TEST(test_change_hostname);
+    RUN_TEST(test_invalid_hostname_is_not_saved);
     RUN_TEST(test_invalid_community_is_not_saved);
     RUN_TEST(test_switch_to_dhcp_keeps_static_values_and_reboots);
     RUN_TEST(test_static_ip_is_validated_saved_and_reboots);

@@ -13,10 +13,25 @@
  */
 
 #include <Arduino.h>
+#include <LwipEthernet.h>
 #include <W5500lwIP.h>
 #include <snmp_mib.h>
 
 struct netif;
+
+/**
+ * @brief Hold the lwIP/driver lock, as the W5500 driver does; needed for every lwIP call from loop()
+ */
+struct DriverLock {
+    DriverLock() {
+        if (ethernet_arch_lwip_gpio_mask) ethernet_arch_lwip_gpio_mask();
+        if (ethernet_arch_lwip_begin) ethernet_arch_lwip_begin();
+    }
+    ~DriverLock() {
+        if (ethernet_arch_lwip_end) ethernet_arch_lwip_end();
+        if (ethernet_arch_lwip_gpio_unmask) ethernet_arch_lwip_gpio_unmask();
+    }
+};
 
 /**
  * @brief Count a received frame the driver dropped. Called with the driver lock held.

@@ -11,6 +11,7 @@
  *   POST /logout
  *   POST /network   DHCP or static IP; saves and reboots
  *   POST /community SNMP community; saves, active immediately
+ *   POST /hostname  hostname (sysName, DHCP, mDNS); saves, active immediately
  *   POST /reboot
  * Every POST except /login needs a valid session cookie and the session's
  * CSRF token in the form. The cookie is HttpOnly and SameSite=Strict.
@@ -40,6 +41,7 @@ struct WebStatus {
     char subnetMask[16];
     char gateway[16];
     char community[32];
+    char hostname[33];    ///< Valid hostname in use (DHCP, mDNS name.local, sysName)
 };
 
 /// Events the backend may log
@@ -58,6 +60,8 @@ public:
     virtual bool saveNetwork(bool dhcp, const char* ip, const char* mask, const char* gateway) = 0;
     /// Save and apply a new SNMP community
     virtual bool saveCommunity(const char* community) = 0;
+    /// Save and apply a new hostname (already validated): sysName, DHCP and mDNS
+    virtual bool saveHostname(const char* hostname) = 0;
     /// Reboot once the response has been sent
     virtual void requestReboot() = 0;
     /// Fill out with random bytes from a good source
@@ -87,6 +91,7 @@ private:
     const char* login(const HttpRequest& req, uint32_t sourceIP, uint32_t nowMs, WebBackend& backend, size_t& len);
     const char* network(const HttpRequest& req, size_t slot, WebBackend& backend, size_t& len);
     const char* community(const HttpRequest& req, size_t slot, WebBackend& backend, size_t& len);
+    const char* hostname(const HttpRequest& req, size_t slot, WebBackend& backend, size_t& len);
     const char* mainPage(int code, const char* reason, size_t slot, WebBackend& backend, const char* message,
                          bool error, size_t& len);
     const char* loginPage(int code, const char* reason, const char* message, size_t& len);

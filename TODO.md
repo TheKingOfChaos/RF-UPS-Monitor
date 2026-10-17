@@ -163,8 +163,15 @@ An item is only ticked when it is implemented **and** its tests exist and pass (
 - [x] Serial option 7: replace the default password with a new random one (stored, read back, old one refused, browsers logged out) — HIL `test_new_default_password_from_serial_menu`, `test_new_default_keeps_an_own_password_in_use`
 - [ ] HTTPS (decided 2026-10-17: plain HTTP on the management LAN)
 
+## 11. Hostname
+- [x] One hostname = SNMP sysName, DHCP hostname (option 12) and mDNS `<name>.local` with `_http._tcp` — native `test_netconfig` hostname tests, HIL `test_hostname_from_web_applies_to_snmp_mdns_and_status`
+- [x] Set in serial option 4 and on the web page, validated, active immediately (DHCP renew, mDNS rename)
+- [x] Free-text sysName from older firmware keeps loading; a cleaned-up name is used for DHCP/mDNS
+- [ ] Check that the DHCP server really shows the name (needs access to the router's lease list)
+- [ ] Investigate SNMP latency spikes: about 3 % of requests take 50-97 ms (median 3.7 ms), measured the same on 2.0.1 and 2.1.0, so not caused by mDNS; device or PC/network side unknown
+
 ## Notes
 - SNMP must be v1 and v2c (no v3) and our own code; networking may use libraries
-- Memory limits: 70 % flash, 50 % RAM (2.0.1: 9.7 % / 36 %, built with -Os)
+- Memory limits: 70 % flash, 50 % RAM (2.1.0: 10.4 % / 37 %, built with -Os)
 - Version: `include/version.h`; every user-visible change goes into CHANGELOG.md under [Unreleased]
 - Core 0 has a 4 KB stack shared with USB/lwIP/W5500 interrupts: keep big buffers static

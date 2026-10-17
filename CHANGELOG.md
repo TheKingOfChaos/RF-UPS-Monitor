@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-10-17
+
+### Added
+- **Hostname:** one name for SNMP sysName, the DHCP hostname (option 12) and mDNS: the device answers as `<hostname>.local` and announces the web page as `_http._tcp`. Set in serial menu option 4 ("Hostname (sysName)") or on the web page ("Device name"); changes apply immediately (mDNS rename, DHCP lease renewal), no restart.
+- Status screen and web page show the hostname and the `.local` name.
+
+### Changed
+- New sysName values must be valid hostnames (1-32 letters, digits and `-`). A free-text sysName from older firmware still loads; DHCP and mDNS then use a cleaned-up version of it.
+- A login with an own web password hashes 20 rounds per loop pass instead of 40 (about 5 ms), for more margin to the 100 ms SNMP limit.
+
 ## [2.0.1] - 2026-10-17
 
 ### Security
@@ -80,7 +90,8 @@ First release.
 - The network stack queues 5 UDP packets; larger bursts are dropped (SNMP managers retry).
 - Not yet tested with the real hardware: mains traps with real mains, the factory reset button, the "no link" and "no DHCP server" states. The LibreNMS definitions are validated against the schema but not yet tried in a running LibreNMS (done after 1.0.1).
 
-[Unreleased]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.0.1...HEAD
+[Unreleased]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.0.1...v2.1.0
 [2.0.1]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v1.0.2...v2.0.0
 [1.0.2]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v1.0.1...v1.0.2

@@ -159,6 +159,8 @@ class Device:
         m = re.search(r'^Web login: user admin, (?:default password "(\w+)"|(own password))', out, re.MULTILINE)
         info["webDefaultPassword"] = m.group(1) if m else None
         info["webOwnPassword"] = bool(m and m.group(2))
+        m = re.search(r"^Hostname: ([\w-]+) \(DHCP, mDNS ([\w-]+)\.local\)", out, re.MULTILINE)
+        info["hostname"] = m.group(1) if m else None
         m = re.search(r"^Core 0 stack: (\d+) bytes never used", out, re.MULTILINE)
         info["stackNeverUsed"] = int(m.group(1)) if m else None
         m = re.search(r"^MAC: ([0-9A-F:]+)", out, re.MULTILINE)
@@ -181,7 +183,7 @@ class Device:
         def entry(value):
             return value if value else "-"
         self.send("4", expect=r"Community \[.*\]: $")
-        self.send(entry(community), expect=r"sysName \[.*\]: $")
+        self.send(entry(community), expect=r"\(sysName\) \[.*\]: $")
         self.send(entry(sys_name), expect=r"sysContact \[.*\]: $")
         self.send(entry(sys_contact), expect=r"sysLocation \[.*\]: $")
         self.send(entry(sys_location), expect=r"Trap destination IP \[.*\]: $")

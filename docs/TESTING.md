@@ -133,6 +133,10 @@ Flashing an embedded test replaces the firmware, so always reflash with `pio run
 - Subnet masks: every prefix /1 to /32 accepted, zero and non-contiguous masks rejected
 - Static configuration: first failing field reported, network/broadcast host rejected, /31 and /32 handled, gateway outside the subnet or equal to the host rejected
 
+### Hostnames in `test/native/test_netconfig`
+- Hostname rules (length 1-32, letters/digits/'-', no leading or trailing '-', one label, ASCII only)
+- Free text to hostname: valid names unchanged, runs of other characters become one '-', cut at 32 on a word end, fallback name; every printable text gives a valid hostname
+
 ### `test/native/test_settings_codec`: `lib/settings_codec`
 - Defaults and JSON round trip, maximum-length fields fit the buffer
 - v1 files without `sequence` still load (backward compatibility)
@@ -268,6 +272,7 @@ Uses `test/settings_a.json` and `test/settings_b.json`, never the real settings.
 - 5 failed logins lock out even the right password for 30 s, logged as `web locked out`
 - Actions need session and CSRF token; community change applies to SNMP at once (old community refused) and is restored; invalid community and invalid static address rejected without restart
 - Restart button and DHCP save restart the device (sysUpTime restarts, default password kept); static IP from the web page and back (opt-in `RFUPS_STATIC_IP`)
+- Hostname from the web page: status screen, SNMP sysName and mDNS (`name.local` resolved by the PC) follow at once without restart; invalid names refused; restored afterwards
 - New default password via serial option 7: `n` changes nothing; `y` gives a new 10-character password, logs browsers out, refuses the old one and keeps the new one across a restart; an own password stays in use
 - Own password via serial option 6: masked echo, old sessions logged out, default refused, hashed check under 2 s, mismatch and short passwords change nothing, `-` restores the default
 - With an own password set, SNMP stays under 100 ms while a login (right or wrong) hashes the password

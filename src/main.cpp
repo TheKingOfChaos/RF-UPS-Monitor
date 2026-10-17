@@ -6,6 +6,7 @@
 #include "cli.h"
 #include "board_temp.h"
 #include "factory_reset.h"
+#include "hostname.h"
 #include "net_stats.h"
 #include "pins.h"
 #include "snmp_service.h"
@@ -166,6 +167,7 @@ void setup() {
 
     // Load settings
     settingsLoaded = loadSettings();
+    hostnameBegin();  // before Ethernet, so the first DHCP request carries the name
 
     // Bring up Ethernet and the SNMP agent
     if (startEthernet()) {
@@ -188,6 +190,7 @@ void loop() {
             Serial.printf("\nNetwork up after %lu ms\n", (unsigned long)millis());
             printNetworkInfo();
             snmpNetworkUp(eth.localIP());
+            hostnameNetworkUp();
         } else {
             Serial.println("\nNetwork down, retrying");
         }

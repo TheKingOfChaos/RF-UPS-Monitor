@@ -7,6 +7,7 @@
 #include <settings.h>
 #include <web_app.h>
 #include "board_temp.h"
+#include "hostname.h"
 #include "net_stats.h"
 #include "snmp_service.h"
 #include "version.h"
@@ -27,8 +28,8 @@ static Settings settingsBackup;  // restored when a save fails; static: too big 
 enum class Conn : uint8_t { Idle, Receiving, Checking, Sending };
 
 // A login with an own password needs WEB_HASH_ITERATIONS SHA-256 rounds (~0.45 s).
-// Run them a few at a time (~10 ms per loop pass) so SNMP keeps answering.
-static const uint32_t HASH_ROUNDS_PER_POLL = 40;
+// Run them a few at a time (~5 ms per loop pass) so SNMP keeps answering.
+static const uint32_t HASH_ROUNDS_PER_POLL = 20;
 static WebPasswordCheck passwordCheck;
 static Conn conn = Conn::Idle;
 static uint32_t connStartMs = 0;
@@ -69,6 +70,7 @@ public:
         strlcpy(st.subnetMask, currentSettings.subnetMask, sizeof(st.subnetMask));
         strlcpy(st.gateway, currentSettings.gateway, sizeof(st.gateway));
         strlcpy(st.community, currentSettings.community, sizeof(st.community));
+        strlcpy(st.hostname, hostnameCurrent(), sizeof(st.hostname));
     }
 
     bool checkPassword(const char* password) override {
@@ -98,6 +100,17 @@ public:
         if (saveSettings()) {
             snmpCommunityChanged();
             Serial.println("\nWeb: SNMP community changed");
+            return true;
+        }
+        currentSettings = settingsBackup;
+        return false;
+    }
+
+    bool saveHostname(const char* hostname) override {
+        settingsBackup = currentSettings;
+        strlcpy(currentSettings.sysName, hostname, sizeof(currentSettings.sysName));
+        if (saveSettings()) {
+            hostnameApply();
             return true;
         }
         currentSettings = settingsBackup;

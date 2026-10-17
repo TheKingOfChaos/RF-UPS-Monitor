@@ -4,6 +4,7 @@
 #include <netconfig.h>
 #include <settings.h>
 #include "board_temp.h"
+#include "hostname.h"
 #include "net_stats.h"
 #include "snmp_service.h"
 #include "stack_watch.h"
@@ -125,6 +126,7 @@ static void printStatus() {
     Serial.printf("Trap destination: \"%s\" (%lu sent, %lu failed)\n", currentSettings.trapTarget,
                   (unsigned long)svc.trapsSent, (unsigned long)svc.trapsFailed);
     Serial.printf("Trap version: %s\n", currentSettings.trapVersion == TRAP_VERSION_V1 ? "v1" : "v2c");
+    Serial.printf("Hostname: %s (DHCP, mDNS %s.local)\n", hostnameCurrent(), hostnameCurrent());
     if (webUsesDefaultPassword()) {
         Serial.printf("Web login: user admin, default password \"%s\" (change with option 6)\n", webDefaultPassword());
     } else {
@@ -201,12 +203,29 @@ static bool takeText(const char* input, const char* current, char* dest, size_t 
 }
 
 /**
+ * @brief Accept the hostname (also sysName): Enter keeps the current value, else it must be a valid hostname
+ */
+static bool takeHostname(const char* input, const char* current, char* dest) {
+    if (input[0] == '\0') {
+        strlcpy(dest, current, SYS_TEXT_MAX_LENGTH + 1);  // may be free text from older firmware
+        return true;
+    }
+    if (!hostnameIsValid(input)) {
+        Serial.printf("Not a valid hostname: 1-%u letters, digits and '-', not starting or ending with '-'\n",
+                      (unsigned)HOSTNAME_MAX_LENGTH);
+        return false;
+    }
+    strlcpy(dest, input, SYS_TEXT_MAX_LENGTH + 1);
+    return true;
+}
+
+/**
  * @brief Prompt for the SNMP setting that belongs to the current state
  */
 static void promptSnmp() {
     switch (state) {
     case CLI_SNMP_COMMUNITY: prompt("Community", currentSettings.community); break;
-    case CLI_SNMP_NAME:      prompt("sysName", currentSettings.sysName); break;
+    case CLI_SNMP_NAME:      prompt("Hostname (sysName)", currentSettings.sysName); break;
     case CLI_SNMP_CONTACT:   prompt("sysContact", currentSettings.sysContact); break;
     case CLI_SNMP_LOCATION:  prompt("sysLocation", currentSettings.sysLocation); break;
     case CLI_SNMP_TRAP:      prompt("Trap destination IP", currentSettings.trapTarget); break;
@@ -408,7 +427,7 @@ static void handleLine(const char* line) {
         break;
 
     case CLI_SNMP_NAME:
-        if (takeText(line, currentSettings.sysName, newSysName, SYS_TEXT_MAX_LENGTH, true)) {
+        if (takeHostname(line, currentSettings.sysName, newSysName)) {
             state = CLI_SNMP_CONTACT;
         }
         promptSnmp();
@@ -463,6 +482,7 @@ static void handleLine(const char* line) {
             // The SNMP agent reads these on every request, so no reboot is needed
             if (saveSettings()) {
                 if (communityChanged) snmpCommunityChanged();
+                hostnameApply();  // no-op when sysName did not change
                 Serial.println("SNMP settings saved and active");
             } else {
                 currentSettings = settingsBackup;

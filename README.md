@@ -2,7 +2,7 @@
 
 A mains power monitor built on a Raspberry Pi Pico with a W5500 Ethernet module. It reports whether mains power is present over SNMP v1 and v2c, including traps, together with standard interface statistics (IF-MIB) and the board temperature, so it can be monitored by LibreNMS or any other SNMP manager. It is configured through a menu on the USB serial port.
 
-Current version: **2.0.1** (see [CHANGELOG.md](CHANGELOG.md)).
+Current version: **2.1.0** (see [CHANGELOG.md](CHANGELOG.md)).
 
 ## Overview
 
@@ -10,7 +10,7 @@ Current version: **2.0.1** (see [CHANGELOG.md](CHANGELOG.md)).
 
 - **Mains side:** an isolated detector (optocoupler with filtering) turns mains presence into a clean 3.3 V level on GPIO27. In the test setup an IKEA smart plug in front of it lets the tests switch mains off and on.
 - **Board:** the Pico's core 1 samples GPIO27 and the reset button (GPIO22) every millisecond; core 0 runs the network, the SNMP agent and the serial menu. Settings live in the Pico's flash in two copies, and the W5500 provides 10/100 Ethernet over SPI.
-- **Network:** the device gets its address by DHCP (or a static IP), answers SNMP v1/v2c on UDP 161 for LibreNMS or net-snmp, sends traps on UDP 162, and serves a configuration web page with login on TCP 80 ([Web page](#web-page)).
+- **Network:** the device gets its address by DHCP (or a static IP), is reachable as `rf-ups-monitor.local` (mDNS), answers SNMP v1/v2c on UDP 161 for LibreNMS or net-snmp, sends traps on UDP 162, and serves a configuration web page with login on TCP 80 ([Web page](#web-page)).
 - **PC:** the USB serial port carries the configuration menu and the hardware-in-the-loop tests.
 
 More diagrams (firmware architecture, SNMP request flow, mains flow, settings, tests) are in [docs/diagrams/](docs/diagrams/README.md).
@@ -27,7 +27,8 @@ More diagrams (firmware architecture, SNMP request flow, mains flow, settings, t
 | SNMP v1 and v2c agent (Get, GetNext, GetBulk, walk, bulkwalk) | Working, tested with net-snmp |
 | SNMP traps in v1 or v2c (coldStart, authenticationFailure, mainsPowerLost/Restored) | Working, mains traps verified with real mains |
 | SNMP rate limiting and access log | Working |
-| Web page with login: status, DHCP/static IP, SNMP community, restart | Working |
+| Web page with login: status, DHCP/static IP, SNMP community, hostname, restart | Working |
+| Hostname for SNMP sysName, DHCP and mDNS (`name.local`) | Working |
 | Interface statistics (IF-MIB ifTable/ifXTable, 64-bit counters) | Working, counted by the firmware |
 | Board temperature (RP2040 internal sensor) | Working |
 | LibreNMS OS definition (mains state, temperature, change counter) | Working, tested with LibreNMS 26.9.1 |
@@ -105,6 +106,7 @@ sysContact: ""
 sysLocation: ""
 Trap destination: "" (4 sent, 0 failed)
 Trap version: v2c
+Hostname: rf-ups-monitor (DHCP, mDNS rf-ups-monitor.local)
 Web login: user admin, default password "k7wqz3mtd9" (change with option 6)
 Core 0 stack: 2520 bytes never used
 Mode: DHCP
@@ -153,13 +155,13 @@ Every value is checked before it is accepted, and a rejected value is asked for 
 
 Nothing changes until you answer `y`. Changes are saved to flash and the device reboots to apply them. Answer `n` to cancel.
 
-**4. SNMP settings** asks for the community string, sysName, sysContact, sysLocation and the trap destination in turn. Press Enter to keep the value in brackets, or type `-` to clear a value (for the trap destination: turn traps off).
+**4. SNMP settings** asks for the community string, the hostname (which is also the SNMP sysName, see [Hostname](#hostname)), sysContact, sysLocation and the trap destination in turn. Press Enter to keep the value in brackets, or type `-` to clear a value (for the trap destination: turn traps off).
 
 ```
 > 4
 Press Enter to keep the value in brackets, '-' to clear it.
 Community [public]: s3cret
-sysName [rf-ups-monitor]: ups-rack4
+Hostname (sysName) [rf-ups-monitor]: ups-rack4
 sysContact []: ops@example.com
 sysLocation []: Server room, rack 4
 Trap destination IP []: 10.10.6.65
@@ -171,7 +173,8 @@ SNMP settings saved and active
 ```
 
 - Community: 1-31 printable ASCII characters. After saving, requests with the old community get no answer.
-- sysName, sysContact, sysLocation: 0-63 printable ASCII characters.
+- Hostname (sysName): 1-32 letters, digits and `-`, not starting or ending with `-`; `-` does not clear it. Active immediately for DHCP and mDNS too.
+- sysContact, sysLocation: 0-63 printable ASCII characters.
 - Trap destination: an IPv4 address that receives traps on UDP 162, or empty for no traps.
 - Trap version: `1` (SNMPv1 Trap-PDU) or `2c` (SNMPv2-Trap, default).
 - Saved to flash and active immediately, no reboot. A factory reset restores `public`, `rf-ups-monitor`, empty contact and location, no trap destination and v2c traps.
@@ -199,7 +202,8 @@ The device serves a small configuration page on **http://&lt;device IP&gt;/** (p
 
 - **Login:** user `admin`. Until you set your own password, the password is the device's **default password**: 10 random characters generated on first boot, different for every device, and shown only on the serial status screen (menu option 1): `Web login: user admin, default password "k7wqz3mtd9"`. A factory reset does not change it; menu option 7 replaces it with a new random one.
 - **Own password:** serial menu option 6 sets one (8-32 characters, no spaces; typed characters are shown as `*`), or `-` goes back to the device default. Changing it logs every browser out. The password is stored as a salted SHA-256 hash (2000 rounds), never as text; checking it takes about half a second, done in small steps so SNMP keeps answering meanwhile. It can only be changed from the serial menu, so someone who learns it cannot lock you out.
-- **Status:** mains power and change count, uptime, board temperature, Ethernet link, IP and MAC address, network mode, firmware version.
+- **Status:** mains power and change count, uptime, board temperature, Ethernet link, hostname and `.local` name, IP and MAC address, network mode, firmware version.
+- **Device name:** the hostname (also SNMP sysName and mDNS name), active immediately.
 - **Network:** DHCP or static IP (address, mask and gateway are checked as in the serial menu). Saving restarts the device; the page tells you the new address.
 - **SNMP community:** active immediately, no restart.
 - **Restart device** and **Log out** buttons.
@@ -217,6 +221,18 @@ Security:
 - **Static IP** is set through the serial menu.
 - The MAC address is derived from the Pico's unique chip ID, so it is stable across reboots. Reserve it in your DHCP server for a fixed address.
 - Networking uses the Arduino-Pico core's lwIP driver for the W5500 (`Wiznet5500lwIP`).
+
+## Hostname
+
+The device has one name, the **hostname** (default `rf-ups-monitor`), used in three places:
+
+- **SNMP sysName**: LibreNMS and other managers show it as the device name.
+- **DHCP**: sent to the DHCP server with every request (option 12), so the lease list of your router shows the name.
+- **mDNS**: the device answers as **`<hostname>.local`**, so `http://rf-ups-monitor.local/` and `snmpwalk -v2c -c public rf-ups-monitor.local` work without knowing the IP address (Windows 10 and later, macOS, Linux with Avahi; not from inside WSL with its default NAT networking, where mDNS from the LAN does not arrive). The web page is also announced as an `_http._tcp` service.
+
+Set it with menu option 4 (first question after the community) or on the web page. It must be 1-32 letters, digits and `-`, not starting or ending with `-`. A change applies immediately: mDNS announces the new name and the DHCP lease is renewed with it; no restart.
+
+A sysName set with older firmware may contain spaces or other characters; it is kept as it is, and the device uses a cleaned-up version for DHCP and mDNS (`Server room UPS` becomes `Server-room-UPS`). The status screen shows the name in use: `Hostname: rf-ups-monitor (DHCP, mDNS rf-ups-monitor.local)`.
 
 ## Mains power monitoring
 
@@ -259,7 +275,8 @@ Settings are stored as JSON on the Pico's internal flash (LittleFS) in two copie
 | Field | Meaning |
 |---|---|
 | `community` | SNMP community string, 1-31 printable characters |
-| `sysName`, `sysContact`, `sysLocation` | SNMP system group text, 0-63 printable characters; optional, defaults if missing |
+| `sysName` | Hostname and SNMP sysName (new values: a valid hostname; older free text still loads); optional, default `rf-ups-monitor` |
+| `sysContact`, `sysLocation` | SNMP system group text, 0-63 printable characters; optional, default empty |
 | `trapTarget` | IPv4 address that receives traps, empty = no traps; optional |
 | `trapVersion` | `1` = SNMPv1 Trap-PDU, `2` = SNMPv2-Trap (default); optional |
 | `webPassword` | Salted SHA-256 hash of the web password (`<salt>$<hash>`), empty = device default password; optional |
@@ -308,6 +325,7 @@ src/cli.cpp                 Serial menu
 src/factory_reset.cpp       Reset button on core 1, reset on core 0
 src/web_service.cpp         Web page on TCP 80: non-blocking connection handling, default password
 src/stack_watch.cpp         Core 0 stack high-water mark for the status screen
+src/hostname.cpp            Hostname for DHCP and mDNS (name.local), applied without restart
 lib/netconfig/              IPv4 parsing and validation (pure C++)
 lib/settings_codec/         Settings JSON, validation, A/B selection (pure C++)
 lib/settings/               LittleFS storage on top of settings_codec

@@ -152,6 +152,63 @@ static void test_every_error_has_a_message() {
     }
 }
 
+// ---- hostnames ----
+
+static void test_hostname_rules() {
+    TEST_ASSERT_TRUE(hostnameIsValid("rf-ups-monitor"));
+    TEST_ASSERT_TRUE(hostnameIsValid("UPS4"));
+    TEST_ASSERT_TRUE(hostnameIsValid("a"));
+    TEST_ASSERT_TRUE(hostnameIsValid("4ups"));                               // RFC 1123 allows a digit first
+    TEST_ASSERT_TRUE(hostnameIsValid("a--b"));
+    TEST_ASSERT_TRUE(hostnameIsValid("abcdefghijklmnopqrstuvwxyz012345"));  // 32
+    TEST_ASSERT_FALSE(hostnameIsValid("abcdefghijklmnopqrstuvwxyz0123456")); // 33
+    TEST_ASSERT_FALSE(hostnameIsValid(""));
+    TEST_ASSERT_FALSE(hostnameIsValid(nullptr));
+    TEST_ASSERT_FALSE(hostnameIsValid("-ups"));
+    TEST_ASSERT_FALSE(hostnameIsValid("ups-"));
+    TEST_ASSERT_FALSE(hostnameIsValid("-"));
+    TEST_ASSERT_FALSE(hostnameIsValid("ups rack"));
+    TEST_ASSERT_FALSE(hostnameIsValid("ups.local"));   // one label only
+    TEST_ASSERT_FALSE(hostnameIsValid("ups_4"));
+    TEST_ASSERT_FALSE(hostnameIsValid("r\xc3\xb8""d"));  // non-ASCII
+}
+
+static void test_hostname_from_free_text() {
+    char out[HOSTNAME_MAX_LENGTH + 1];
+    struct { const char* in; const char* out; } cases[] = {
+        {"rf-ups-monitor", "rf-ups-monitor"},
+        {"a--b", "a--b"},                           // valid names stay exactly as they are
+        {"Rack 4 / UPS", "Rack-4-UPS"},
+        {"  Server room, rack 4  ", "Server-room-rack-4"},
+        {"-ups-", "ups"},
+        {"ups_4.local", "ups-4-local"},
+        {"caf\xc3\xa9 ups", "caf-ups"},
+        {"", HOSTNAME_FALLBACK},
+        {" !!! ", HOSTNAME_FALLBACK},
+        {nullptr, HOSTNAME_FALLBACK},
+        // 40 characters are cut to 32, and a '-' at the cut is dropped
+        {"abcdefghijklmnopqrstuvwxyz01234 6789abc", "abcdefghijklmnopqrstuvwxyz01234"},
+        {"abcdefghijklmnopqrstuvwxyz012345678901", "abcdefghijklmnopqrstuvwxyz012345"},
+    };
+    for (auto& c : cases) {
+        hostnameFromText(c.in, out);
+        TEST_ASSERT_EQUAL_STRING_MESSAGE(c.out, out, c.in ? c.in : "(null)");
+        TEST_ASSERT_TRUE(hostnameIsValid(out));
+    }
+}
+
+static void test_every_printable_text_gives_a_valid_hostname() {
+    char text[70], out[HOSTNAME_MAX_LENGTH + 1];
+    for (int start = 0x20; start < 0x7F; start++) {
+        for (int len = 1; len < 69; len += 7) {
+            for (int i = 0; i < len; i++) text[i] = (char)(0x20 + (start + i * 13) % 95);
+            text[len] = '\0';
+            hostnameFromText(text, out);
+            TEST_ASSERT_TRUE_MESSAGE(hostnameIsValid(out), text);
+        }
+    }
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_parse_valid_addresses);
@@ -172,5 +229,8 @@ int main() {
     RUN_TEST(test_validate_rejects_gateway_outside_subnet);
     RUN_TEST(test_validate_rejects_gateway_equal_to_host);
     RUN_TEST(test_every_error_has_a_message);
+    RUN_TEST(test_hostname_rules);
+    RUN_TEST(test_hostname_from_free_text);
+    RUN_TEST(test_every_printable_text_gives_a_valid_hostname);
     return UNITY_END();
 }

@@ -176,6 +176,11 @@ const char* WebApp::mainPage(int code, const char* reason, size_t slot, WebBacke
         nb.add("down");
     }
     row(b, "Ethernet link", num);
+    row(b, "Hostname", st.hostname);
+    nb = TextBuffer(num, sizeof(num));
+    nb.add(st.hostname);
+    nb.add(".local");
+    row(b, "mDNS name", num);
     row(b, "IP address", st.ip);
     row(b, "MAC address", st.mac);
     row(b, "Network mode", st.dhcp ? "DHCP" : "static");
@@ -198,6 +203,12 @@ const char* WebApp::mainPage(int code, const char* reason, size_t slot, WebBacke
           "</legend>");
     csrfField(b, csrf);
     textInput(b, "Community", "community", st.community, COMMUNITY_MAX_LENGTH);
+    b.add("<button type=\"submit\">Save</button></fieldset></form>");
+
+    b.add("<form method=\"post\" action=\"/hostname\"><fieldset><legend>Device name (active immediately)"
+          "</legend>");
+    csrfField(b, csrf);
+    textInput(b, "Hostname (also SNMP sysName and name.local)", "hostname", st.hostname, HOSTNAME_MAX_LENGTH);
     b.add("<button type=\"submit\">Save</button></fieldset></form>");
 
     b.add("<form class=\"inline\" method=\"post\" action=\"/reboot\">");
@@ -300,6 +311,18 @@ const char* WebApp::community(const HttpRequest& req, size_t slot, WebBackend& b
     return mainPage(200, "OK", slot, backend, "SNMP community saved and active.", false, len);
 }
 
+const char* WebApp::hostname(const HttpRequest& req, size_t slot, WebBackend& backend, size_t& len) {
+    char value[HOSTNAME_MAX_LENGTH + 2];
+    if (!formValue(req.body(), req.bodyLength(), "hostname", value, sizeof(value)) || !hostnameIsValid(value)) {
+        return mainPage(400, "Bad Request", slot, backend,
+                        "The hostname must be 1-32 letters, digits and '-', not starting or ending with '-'.", true, len);
+    }
+    if (!backend.saveHostname(value)) {
+        return mainPage(500, "Internal Server Error", slot, backend, "Saving failed, nothing changed.", true, len);
+    }
+    return mainPage(200, "OK", slot, backend, "Hostname saved and active.", false, len);
+}
+
 const char* WebApp::handle(const HttpRequest& req, uint32_t sourceIP, uint32_t nowMs, WebBackend& backend,
                            size_t& len) {
     if (req.state() == HttpParse::TooLarge) {
@@ -330,7 +353,8 @@ const char* WebApp::handle(const HttpRequest& req, uint32_t sourceIP, uint32_t n
     }
 
     bool action = strcmp(path, "/logout") == 0 || strcmp(path, "/network") == 0 ||
-                  strcmp(path, "/community") == 0 || strcmp(path, "/reboot") == 0;
+                  strcmp(path, "/community") == 0 || strcmp(path, "/reboot") == 0 ||
+                  strcmp(path, "/hostname") == 0;
     if (!action) return notice(404, "Not Found", "Not found", "There is no such page.", len);
     if (!post) return notice(405, "Method Not Allowed", "Not allowed", "Use the buttons on the start page.", len);
     if (slot < 0) {
@@ -348,6 +372,7 @@ const char* WebApp::handle(const HttpRequest& req, uint32_t sourceIP, uint32_t n
     }
     if (strcmp(path, "/network") == 0) return network(req, (size_t)slot, backend, len);
     if (strcmp(path, "/community") == 0) return community(req, (size_t)slot, backend, len);
+    if (strcmp(path, "/hostname") == 0) return hostname(req, (size_t)slot, backend, len);
     backend.requestReboot();
     return notice(200, "OK", "Restarting", "The device restarts now. Log in again in a few seconds.", len);
 }

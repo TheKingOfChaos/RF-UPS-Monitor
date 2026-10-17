@@ -1,4 +1,4 @@
 #pragma once
 
 /// Firmware version (semantic versioning), reported in sysDescr and at boot
-#define FIRMWARE_VERSION "2.0.1"
+#define FIRMWARE_VERSION "2.1.0"

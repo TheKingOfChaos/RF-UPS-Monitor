@@ -8,6 +8,7 @@
  * (`pio test -e native`). Used by the serial menu and by settings loading.
  */
 
+#include <stddef.h>
 #include <stdint.h>
 
 /**
@@ -68,3 +69,26 @@ StaticConfigError validateStaticConfig(const char* ip, const char* mask, const c
  * @brief Human-readable message for a validation error, for the serial menu
  */
 const char* staticConfigErrorMessage(StaticConfigError error);
+
+/// Longest hostname: the DHCP hostname of the lwIP driver takes at most 32 characters
+static const size_t HOSTNAME_MAX_LENGTH = 32;
+
+/// Used when no valid hostname can be derived
+static const char HOSTNAME_FALLBACK[] = "rf-ups-monitor";
+
+/**
+ * @brief A valid device hostname (one DNS label, RFC 1123): 1-32 letters,
+ *        digits and '-', not starting or ending with '-'
+ */
+bool hostnameIsValid(const char* name);
+
+/**
+ * @brief Make a valid hostname from free text, e.g. a sysName set by older firmware
+ *
+ * A valid name is kept as it is. Otherwise every run of other characters
+ * becomes one '-', leading and trailing '-' are dropped and the result is cut
+ * to HOSTNAME_MAX_LENGTH ("Rack 4 / UPS" -> "Rack-4-UPS"). Falls back to
+ * HOSTNAME_FALLBACK when nothing usable remains.
+ * @param out At least HOSTNAME_MAX_LENGTH + 1 bytes
+ */
+void hostnameFromText(const char* text, char* out);

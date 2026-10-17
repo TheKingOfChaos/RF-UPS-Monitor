@@ -1,5 +1,7 @@
 #include "netconfig.h"
 
+#include <string.h>
+
 bool parseIPv4(const char* text, uint8_t out[4]) {
     if (text == nullptr) return false;
 
@@ -82,4 +84,43 @@ const char* staticConfigErrorMessage(StaticConfigError error) {
     case StaticConfigError::GatewayIsHost:            return "Gateway must differ from the IP address";
     }
     return "Unknown error";
+}
+
+static bool isHostnameChar(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-';
+}
+
+bool hostnameIsValid(const char* name) {
+    if (name == nullptr || name[0] == '\0' || name[0] == '-') return false;
+    size_t len = 0;
+    for (const char* c = name; *c; c++, len++) {
+        if (len >= HOSTNAME_MAX_LENGTH || !isHostnameChar(*c)) return false;
+    }
+    return name[len - 1] != '-';
+}
+
+void hostnameFromText(const char* text, char* out) {
+    if (hostnameIsValid(text)) {
+        strcpy(out, text);
+        return;
+    }
+    size_t len = 0;
+    bool pendingDash = false;
+    for (const char* c = text ? text : ""; *c && len < HOSTNAME_MAX_LENGTH; c++) {
+        if (isHostnameChar(*c) && *c != '-') {
+            if (pendingDash && len > 0) {
+                if (len + 2 > HOSTNAME_MAX_LENGTH) break;  // no room for '-' and a letter: stop at the word end
+                out[len++] = '-';
+            }
+            pendingDash = false;
+            out[len++] = *c;
+        } else {
+            pendingDash = true;  // '-' and anything invalid: at most one '-' between letters
+        }
+    }
+    out[len] = '\0';
+    if (!hostnameIsValid(out)) {
+        strncpy(out, HOSTNAME_FALLBACK, HOSTNAME_MAX_LENGTH);
+        out[HOSTNAME_MAX_LENGTH] = '\0';
+    }
 }

@@ -24,20 +24,6 @@ static uint32_t lastChangeTicks = 0;
 static uint8_t mac[6] = {0};
 static bool started = false;
 
-/**
- * @brief Run code with the lwIP/driver lock held, as the W5500 driver does
- */
-struct DriverLock {
-    DriverLock() {
-        if (ethernet_arch_lwip_gpio_mask) ethernet_arch_lwip_gpio_mask();
-        if (ethernet_arch_lwip_begin) ethernet_arch_lwip_begin();
-    }
-    ~DriverLock() {
-        if (ethernet_arch_lwip_end) ethernet_arch_lwip_end();
-        if (ethernet_arch_lwip_gpio_unmask) ethernet_arch_lwip_gpio_unmask();
-    }
-};
-
 /// Received frame: count, then hand to lwIP as before (it drops what it cannot use)
 static err_t countingInput(struct pbuf* p, struct netif* nif) {
     // The driver allocates one contiguous pbuf per frame (PBUF_RAM), so payload holds the header

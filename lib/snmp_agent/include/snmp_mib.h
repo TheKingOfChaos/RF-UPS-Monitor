@@ -69,3 +69,12 @@ const MibEntry* mibFind(const Oid& oid);
  * @return nullptr past the end of the MIB
  */
 const MibEntry* mibNext(const Oid& oid);
+
+/**
+ * @brief true if oid lies under an object of the MIB (a scalar's OID without
+ *        its ".0" instance), e.g. sysDescr.5 or sysDescr itself
+ *
+ * Distinguishes v2c noSuchInstance (object exists, wrong instance) from
+ * noSuchObject (no such object at all).
+ */
+bool mibHasObject(const Oid& oid);

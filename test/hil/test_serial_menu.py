@@ -164,13 +164,16 @@ class SerialMenuTest(unittest.TestCase):
         d.send('Rack "4", \\shelf', expect=r"Trap destination IP \[.*\]: $")
         out = d.send("10.10.6.300", expect=r"Trap destination IP \[.*\]: $")
         self.assertIn("is not a valid IPv4 address", out)
-        out = d.send("10.10.6.99", expect=r"Save\? \(y/n\): $")
+        d.send("10.10.6.99", expect=r"Trap version \(1/2c\) \[.*\]: $")
+        out = d.send("3", expect=r"Trap version \(1/2c\) \[.*\]: $")
+        self.assertIn("Enter 1 or 2c", out)
+        out = d.send("1", expect=r"Save\? \(y/n\): $")
         self.assertIn('community "%s", sysName "%s", sysContact "", sysLocation "Rack "4", \\shelf", '
-                      'trap destination "10.10.6.99"' % ("c" * 31, before["sysName"]), out)
+                      'trap destination "10.10.6.99", trap version v1' % ("c" * 31, before["sysName"]), out)
 
         d.send("n", expect=r"Cancelled[\s\S]*> $")
         after = d.status()
-        for key in ("community", "sysName", "sysContact", "sysLocation", "trapTarget"):
+        for key in ("community", "sysName", "sysContact", "sysLocation", "trapTarget", "trapVersion"):
             self.assertEqual(before[key], after[key], "cancel changed %s" % key)
 
     # ---- changes that reboot the device ----

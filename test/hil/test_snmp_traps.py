@@ -1,9 +1,10 @@
-"""Hardware-in-the-loop tests for SNMPv1 traps sent by the device.
+"""Hardware-in-the-loop tests for the traps sent by the device, in v1 and v2c.
 
-The trap destination is set to this PC for the duration of the tests and
-restored afterwards. Traps are received on UDP 162 here, so Windows Firewall
-must allow inbound UDP for PlatformIO's Python (the "Allow" prompt the first
-time it listens on the network).
+Every test runs twice: once with the trap version set to v1 (Trap-PDU) and
+once with v2c (SNMPv2-Trap). The trap destination is set to this PC for the
+duration of the tests; destination and version are restored afterwards.
+Traps are received on UDP 162 here, so Windows Firewall must allow inbound
+UDP for PlatformIO's Python (the "Allow" prompt the first time it listens).
 
 Run:
     %USERPROFILE%\\.platformio\\penv\\Scripts\\python.exe -m unittest discover -s test/hil -p "test_snmp_traps.py" -v
@@ -29,7 +30,10 @@ def bad_community_request():
     return bytes(pkt)
 
 
-class SnmpTrapTest(unittest.TestCase):
+class TrapTests:
+    """Shared tests; subclasses set TRAP_VERSION ("1" or "2c")."""
+
+    TRAP_VERSION = None
 
     @classmethod
     def setUpClass(cls):
@@ -41,16 +45,16 @@ class SnmpTrapTest(unittest.TestCase):
             cls.dev.close()
             raise unittest.SkipTest("device must be in DHCP mode with community public")
         cls.ip = st["ip"]
-        cls.original_target = st["trapTarget"]
+        cls.original = (st["trapTarget"], st["trapVersion"])
         cls.pc = local_ip_towards(cls.ip)
         cls.listener = TrapListener()
-        cls.dev.set_trap_target(cls.pc)
+        cls.dev.set_trap_target(cls.pc, cls.TRAP_VERSION)
 
     @classmethod
     def tearDownClass(cls):
         try:
             cls.dev.wait_for_menu(timeout=10)
-            cls.dev.set_trap_target(cls.original_target)
+            cls.dev.set_trap_target(*cls.original)
         finally:
             cls.listener.close()
             cls.dev.close()
@@ -59,36 +63,45 @@ class SnmpTrapTest(unittest.TestCase):
         self.dev.wait_for_menu(timeout=10)
         self.listener.clear()
 
+    @property
+    def expected_version(self):
+        return 0 if self.TRAP_VERSION == "1" else 1
+
+    def wait_kind(self, kind, timeout):
+        return self.listener.wait_for(lambda t: t["kind"] == kind, timeout)
+
     def assertFromDevice(self, trap):
-        self.assertEqual(1 - 1, trap["version"])          # SNMPv1
+        self.assertEqual(self.expected_version, trap["version"], "trap sent in the wrong version")
         self.assertEqual("public", trap["community"])
-        self.assertEqual(ENTERPRISE, trap["enterprise"])
-        self.assertEqual(self.ip, trap["agent"])
         self.assertEqual(self.ip, trap["source"])
+        if trap["version"] == 0:
+            self.assertEqual(ENTERPRISE, trap["enterprise"])
+            self.assertEqual(self.ip, trap["agent"])
 
     # ---- coldStart ----
 
     def test_cold_start_trap_after_reboot(self):
         # After a reboot the ARP table is empty: the very first packet to this PC is the trap
         d = self.dev
+        self.assertEqual(self.TRAP_VERSION, d.status()["trapVersion"])
         d.send("2", expect=r"\(y/n\): $")
         d.send("y", expect=r"Rebooting", timeout=10)
-        trap = self.listener.wait_for(lambda t: t["generic"] == 0, timeout=45)
+        trap = self.wait_kind("coldStart", timeout=45)
         self.assertIsNotNone(trap, "no coldStart trap within 45 s of the reboot")
         self.assertFromDevice(trap)
-        self.assertEqual(0, trap["specific"])
         self.assertEqual({}, trap["varbinds"])
         self.assertLess(trap["timestamp"], 60 * 100, "coldStart time-stamp should be shortly after boot")
         d.reconnect_after_reboot()
-        self.assertEqual(1, len(self.listener.matching(lambda t: t["generic"] == 0)),
+        self.assertEqual(1, len(self.listener.matching(lambda t: t["kind"] == "coldStart")),
                          "exactly one coldStart per boot")
+        self.assertEqual(self.TRAP_VERSION, d.status()["trapVersion"], "trap version not kept across reboot")
 
     # ---- authenticationFailure ----
 
     def test_wrong_community_sends_one_throttled_auth_failure_trap(self):
         time.sleep(AUTH_TRAP_INTERVAL + 0.5)      # let an earlier auth trap's throttle expire
         send_raw(self.ip, [bad_community_request()])
-        trap = self.listener.wait_for(lambda t: t["generic"] == 4, timeout=3)
+        trap = self.wait_kind("authenticationFailure", timeout=3)
         self.assertIsNotNone(trap, "no authenticationFailure trap")
         self.assertFromDevice(trap)
 
@@ -97,10 +110,23 @@ class SnmpTrapTest(unittest.TestCase):
             send_raw(self.ip, [bad_community_request()])
             time.sleep(0.05)
         time.sleep(2)
-        self.assertEqual(1, len(self.listener.matching(lambda t: t["generic"] == 4)))
+        self.assertEqual(1, len(self.listener.matching(lambda t: t["kind"] == "authenticationFailure")))
         entries = [e for e in self.dev.access_log() if e[0] == self.pc and e[1] == "bad community"]
         self.assertTrue(entries, "bad community not in the access log")
         self.assertGreaterEqual(entries[0][2], 6)
+
+    def test_v2c_traps_have_increasing_request_ids(self):
+        if self.TRAP_VERSION != "2c":
+            self.skipTest("v2c only")
+        ids = []
+        for _ in range(2):
+            time.sleep(AUTH_TRAP_INTERVAL + 0.5)
+            self.listener.clear()
+            send_raw(self.ip, [bad_community_request()])
+            trap = self.wait_kind("authenticationFailure", timeout=3)
+            self.assertIsNotNone(trap)
+            ids.append(trap["requestId"])
+        self.assertGreater(ids[1], ids[0])
 
     def test_no_traps_when_destination_is_off(self):
         d = self.dev
@@ -112,13 +138,13 @@ class SnmpTrapTest(unittest.TestCase):
             self.assertIsNone(self.listener.wait_for(lambda t: True, timeout=3), "trap sent although off")
         finally:
             d.wait_for_menu(timeout=10)
-            d.set_trap_target(self.pc)
+            d.set_trap_target(self.pc, self.TRAP_VERSION)
 
     def test_trap_counter_on_status_screen(self):
         before = self.dev.status()["trapsSent"]
         time.sleep(AUTH_TRAP_INTERVAL + 0.5)
         send_raw(self.ip, [bad_community_request()])
-        self.assertIsNotNone(self.listener.wait_for(lambda t: t["generic"] == 4, timeout=3))
+        self.assertIsNotNone(self.wait_kind("authenticationFailure", timeout=3))
         self.assertEqual(before + 1, self.dev.status()["trapsSent"])
 
     def test_agent_keeps_answering_while_sending_traps(self):
@@ -133,8 +159,8 @@ class SnmpTrapTest(unittest.TestCase):
     @unittest.skipUnless(os.environ.get("RFUPS_MANUAL_MAINS"),
                          "manual: set RFUPS_MANUAL_MAINS=1 and switch mains off and on when asked")
     def test_mains_traps_with_real_mains(self):
-        print("\n>>> Switch mains power OFF now (60 s)...", flush=True)
-        lost = self.listener.wait_for(lambda t: t["generic"] == 6 and t["specific"] == 1, timeout=60)
+        print("\n>>> [%s traps] Switch mains power OFF now (60 s)..." % self.TRAP_VERSION, flush=True)
+        lost = self.wait_kind("mainsPowerLost", timeout=60)
         self.assertIsNotNone(lost, "no mainsPowerLost trap")
         self.assertFromDevice(lost)
         vb = lost["varbinds"]
@@ -143,12 +169,20 @@ class SnmpTrapTest(unittest.TestCase):
         self.assertEqual(lost["timestamp"], vb[ENTERPRISE + ".3.0"][1])
 
         print(">>> Switch mains power ON again (60 s)...", flush=True)
-        restored = self.listener.wait_for(lambda t: t["generic"] == 6 and t["specific"] == 2, timeout=60)
+        restored = self.wait_kind("mainsPowerRestored", timeout=60)
         self.assertIsNotNone(restored, "no mainsPowerRestored trap")
         vb = restored["varbinds"]
         self.assertEqual((0x02, 1), vb[ENTERPRISE + ".1.0"])
         self.assertEqual(changes + 1, vb[ENTERPRISE + ".2.0"][1])
         self.assertGreater(restored["timestamp"], lost["timestamp"])
+
+
+class V1TrapTest(TrapTests, unittest.TestCase):
+    TRAP_VERSION = "1"
+
+
+class V2cTrapTest(TrapTests, unittest.TestCase):
+    TRAP_VERSION = "2c"
 
 
 if __name__ == "__main__":

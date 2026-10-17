@@ -316,8 +316,39 @@ static void test_rejects_invalid_trap_target() {
     TEST_ASSERT_EQUAL(SettingsParseError::None, settingsFromJson(json, s));
 }
 
+static void test_trap_version_defaults_to_v2c_and_round_trips() {
+    Settings s;
+    settingsDefaults(s);
+    TEST_ASSERT_EQUAL_UINT8(TRAP_VERSION_V2C, s.trapVersion);
+    TEST_ASSERT_EQUAL(SettingsParseError::None, settingsFromJson(LEGACY_V1_JSON, s));
+    TEST_ASSERT_EQUAL_UINT8(TRAP_VERSION_V2C, s.trapVersion);
+
+    Settings in = staticSettings();
+    in.trapVersion = TRAP_VERSION_V1;
+    char json[SETTINGS_JSON_MAX];
+    TEST_ASSERT_GREATER_THAN(0, settingsToJson(in, json, sizeof(json)));
+    Settings out;
+    TEST_ASSERT_EQUAL(SettingsParseError::None, settingsFromJson(json, out));
+    TEST_ASSERT_EQUAL_UINT8(TRAP_VERSION_V1, out.trapVersion);
+    TEST_ASSERT_TRUE(settingsEqual(in, out));
+    out.trapVersion = TRAP_VERSION_V2C;
+    TEST_ASSERT_FALSE(settingsEqual(in, out));
+}
+
+static void test_rejects_invalid_trap_version() {
+    char json[SETTINGS_JSON_MAX];
+    Settings s;
+    const char* bad[] = {"\"trapVersion\":0", "\"trapVersion\":3", "\"trapVersion\":\"2c\"", "\"trapVersion\":-1"};
+    for (const char* field : bad) {
+        withField(json, sizeof(json), field);
+        TEST_ASSERT_NOT_EQUAL_MESSAGE(SettingsParseError::None, settingsFromJson(json, s), field);
+    }
+    withField(json, sizeof(json), "\"trapVersion\":1");
+    TEST_ASSERT_EQUAL(SettingsParseError::None, settingsFromJson(json, s));
+}
+
 static void test_every_parse_error_has_a_message() {
-    for (uint8_t e = 0; e <= (uint8_t)SettingsParseError::BadTrapTarget; e++) {
+    for (uint8_t e = 0; e <= (uint8_t)SettingsParseError::BadTrapVersion; e++) {
         TEST_ASSERT_TRUE_MESSAGE(strcmp("unknown error", settingsParseErrorMessage((SettingsParseError)e)) != 0,
                                  "error code has no message");
     }
@@ -410,6 +441,8 @@ int main() {
     RUN_TEST(test_trap_target_defaults_to_off);
     RUN_TEST(test_trap_target_round_trip);
     RUN_TEST(test_rejects_invalid_trap_target);
+    RUN_TEST(test_trap_version_defaults_to_v2c_and_round_trips);
+    RUN_TEST(test_rejects_invalid_trap_version);
     RUN_TEST(test_every_parse_error_has_a_message);
     RUN_TEST(test_equal_ignores_bytes_after_terminator);
     RUN_TEST(test_sequence_newer_handles_wraparound);

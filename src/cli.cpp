@@ -17,6 +17,7 @@ enum CliState {
     CLI_SNMP_CONTACT,   // Entering sysContact
     CLI_SNMP_LOCATION,  // Entering sysLocation
     CLI_SNMP_TRAP,      // Entering trap destination
+    CLI_SNMP_TRAP_VER,  // Entering trap version
     CLI_SNMP_CONFIRM    // Confirming SNMP change, save without reboot
 };
 
@@ -37,6 +38,11 @@ static char newSysName[SYS_TEXT_MAX_LENGTH + 1];
 static char newSysContact[SYS_TEXT_MAX_LENGTH + 1];
 static char newSysLocation[SYS_TEXT_MAX_LENGTH + 1];
 static char newTrapTarget[16];
+static uint8_t newTrapVersion;
+
+static const char* trapVersionName(uint8_t v) {
+    return v == TRAP_VERSION_V1 ? "1" : "2c";
+}
 
 /**
  * @brief Print the main menu
@@ -77,6 +83,8 @@ static void printStatus() {
                   (unsigned long)snmp.inGetRequests, (unsigned long)snmp.inGetNextRequests,
                   (unsigned long)snmp.inSetRequests, (unsigned long)snmp.inBadCommunity,
                   (unsigned long)snmp.inBadVersions, (unsigned long)snmp.inParseErrors);
+    Serial.printf("SNMP v2c: %lu requests, %lu getbulk\n", (unsigned long)snmp.inV2cRequests,
+                  (unsigned long)snmp.inGetBulkRequests);
     const SnmpServiceStats& svc = snmpServiceStats();
     Serial.printf("SNMP security: %lu rate limited, %lu access log events\n",
                   (unsigned long)svc.rateLimited, (unsigned long)snmpAccessLog().total());
@@ -86,6 +94,7 @@ static void printStatus() {
     Serial.printf("sysLocation: \"%s\"\n", currentSettings.sysLocation);
     Serial.printf("Trap destination: \"%s\" (%lu sent, %lu failed)\n", currentSettings.trapTarget,
                   (unsigned long)svc.trapsSent, (unsigned long)svc.trapsFailed);
+    Serial.printf("Trap version: %s\n", currentSettings.trapVersion == TRAP_VERSION_V1 ? "v1" : "v2c");
 
     Serial.printf("Mode: %s\n", currentSettings.dhcpEnabled ? "DHCP" : "Static");
     Serial.printf("Stored static IP: %s / %s, gateway %s\n",
@@ -165,6 +174,7 @@ static void promptSnmp() {
     case CLI_SNMP_CONTACT:   prompt("sysContact", currentSettings.sysContact); break;
     case CLI_SNMP_LOCATION:  prompt("sysLocation", currentSettings.sysLocation); break;
     case CLI_SNMP_TRAP:      prompt("Trap destination IP", currentSettings.trapTarget); break;
+    case CLI_SNMP_TRAP_VER:  prompt("Trap version (1/2c)", trapVersionName(currentSettings.trapVersion)); break;
     default: break;
     }
 }
@@ -214,8 +224,9 @@ static void printAccessLog() {
 static void askSnmpConfirm() {
     Serial.println();
     Serial.printf("New SNMP settings: community \"%s\", sysName \"%s\", sysContact \"%s\", sysLocation \"%s\", "
-                  "trap destination \"%s\"\n",
-                  newCommunity, newSysName, newSysContact, newSysLocation, newTrapTarget);
+                  "trap destination \"%s\", trap version %s\n",
+                  newCommunity, newSysName, newSysContact, newSysLocation, newTrapTarget,
+                  newTrapVersion == TRAP_VERSION_V1 ? "v1" : "v2c");
     Serial.print("Save? (y/n): ");
     state = CLI_SNMP_CONFIRM;
 }
@@ -363,10 +374,24 @@ static void handleLine(const char* line) {
 
     case CLI_SNMP_TRAP:
         if (takeTrapTarget(line)) {
-            askSnmpConfirm();
-        } else {
-            promptSnmp();
+            state = CLI_SNMP_TRAP_VER;
         }
+        promptSnmp();
+        break;
+
+    case CLI_SNMP_TRAP_VER:
+        if (line[0] == '\0') {
+            newTrapVersion = currentSettings.trapVersion;
+        } else if (strcmp(line, "1") == 0) {
+            newTrapVersion = TRAP_VERSION_V1;
+        } else if (strcmp(line, "2c") == 0 || strcmp(line, "2C") == 0) {
+            newTrapVersion = TRAP_VERSION_V2C;
+        } else {
+            Serial.println("Enter 1 or 2c");
+            promptSnmp();
+            break;
+        }
+        askSnmpConfirm();
         break;
 
     case CLI_SNMP_CONFIRM:
@@ -378,6 +403,7 @@ static void handleLine(const char* line) {
             strlcpy(currentSettings.sysContact, newSysContact, sizeof(currentSettings.sysContact));
             strlcpy(currentSettings.sysLocation, newSysLocation, sizeof(currentSettings.sysLocation));
             strlcpy(currentSettings.trapTarget, newTrapTarget, sizeof(currentSettings.trapTarget));
+            currentSettings.trapVersion = newTrapVersion;
             // The SNMP agent reads these on every request, so no reboot is needed
             if (saveSettings()) {
                 if (communityChanged) snmpCommunityChanged();
@@ -420,7 +446,7 @@ void cliProcess() {
                 Serial.printf("Input too long (max %u characters), ignored\n", (unsigned)(sizeof(lineBuf) - 1));
                 if (state == CLI_MENU) {
                     Serial.print("> ");
-                } else if (state >= CLI_SNMP_COMMUNITY && state <= CLI_SNMP_TRAP) {
+                } else if (state >= CLI_SNMP_COMMUNITY && state <= CLI_SNMP_TRAP_VER) {
                     promptSnmp();
                 } else {
                     state = CLI_MENU;

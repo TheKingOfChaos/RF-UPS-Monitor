@@ -30,6 +30,13 @@ from snmp_tools import (GET_SYSDESCR, REQUEST_ID_OFFSET, garbage_packets, local_
                         raw_get, response_request_id, send_raw)
 
 ENTERPRISE = "1.3.6.1.4.1.63050"
+
+
+def v3_packet():
+    """The captured v1 GetRequest with its version field set to 3 (SNMPv3)."""
+    pkt = bytearray(GET_SYSDESCR)
+    pkt[4] = 3
+    return bytes(pkt)
 NO_SUCH = r"\(noSuchName\) There is no such variable name in this MIB\.\s+Failed object: "
 
 
@@ -149,11 +156,77 @@ class SnmpAgentTest(unittest.TestCase):
         self.assertIn("Timeout", out)
         self.assertEqual(before + 1, self.snmp_stats()["bad_community"])
 
-    def test_v2c_gets_no_reply_and_is_counted(self):
+    def test_v3_gets_no_reply_and_is_counted(self):
         before = self.snmp_stats()["bad_version"]
-        rc, out = self.snmp("snmpget", "1.3.6.1.2.1.1.1.0", version="2c", timeout=1)
-        self.assertIn("Timeout", out)
+        resp, _ = raw_get(self.ip, 0, timeout=1.0, packet=v3_packet())
+        self.assertIsNone(resp, "SNMPv3 must not be answered")
         self.assertEqual(before + 1, self.snmp_stats()["bad_version"])
+
+    # ---- v2c ----
+
+    def test_v2c_get(self):
+        rc, out = self.snmp("snmpget", "1.3.6.1.2.1.1.1.0", ENTERPRISE + ".1.0", version="2c")
+        self.assertEqual(0, rc, out)
+        self.assertRegex(out, r'1\.1\.0 = STRING: "RF-UPS-Monitor v')
+        self.assertRegex(out, r"63050\.1\.0 = INTEGER: [01]")
+
+    def test_v2c_exceptions_instead_of_errors(self):
+        rc, out = self.snmp("snmpget", "1.3.6.1.2.1.1.5.0", "1.3.6.1.2.1.1.99.0", "1.3.6.1.2.1.1.1.5",
+                            version="2c")
+        self.assertRegex(out, r'1\.5\.0 = STRING: ".*"')
+        self.assertIn("1.99.0 = No Such Object available on this agent at this OID", out)
+        self.assertIn("1.1.5 = No Such Instance currently exists at this OID", out)
+
+    def test_v2c_walk_ends_with_end_of_mib_view(self):
+        rc, out = self.snmp("snmpwalk", ".1", version="2c")
+        self.assertEqual(0, rc, out)
+        oids = [l.split(" = ")[0] for l in out.splitlines() if " = " in l and "No more variables" not in l]
+        expected = [".1.3.6.1.2.1.1.%d.0" % i for i in range(1, 8)] + \
+                   ["." + ENTERPRISE + ".%d.0" % i for i in range(1, 4)]
+        self.assertEqual(expected, oids)
+        self.assertIn("No more variables left in this MIB View", out)
+
+    def test_bulkwalk_returns_the_same_as_walk(self):
+        before = self.dev.status()["getBulkRequests"]
+        rc, bulk = self.snmp("snmpbulkwalk", ".1", version="2c")
+        self.assertEqual(0, rc, bulk)
+        rc, walk = self.snmp("snmpwalk", ".1", version="2c")
+
+        def values(text):
+            # sysUpTime changes between the two walks
+            return [l for l in text.splitlines() if " = " in l and ".1.3.0 = " not in l]
+        self.assertEqual(values(walk), values(bulk))
+        self.assertGreater(self.dev.status()["getBulkRequests"], before)
+
+    def test_bulkget_non_repeaters_and_repetitions(self):
+        rc, out = self.snmp("snmpbulkget", "-Cn1", "-Cr3", "1.3.6.1.2.1.1.3.0", "1.3.6.1.2.1.1", version="2c")
+        self.assertEqual(0, rc, out)
+        oids = [l.split(" = ")[0] for l in out.splitlines() if " = " in l]
+        self.assertEqual([".1.3.6.1.2.1.1.4.0", ".1.3.6.1.2.1.1.1.0", ".1.3.6.1.2.1.1.2.0",
+                          ".1.3.6.1.2.1.1.3.0"], oids)
+
+    def test_bulkget_large_max_repetitions(self):
+        rc, out = self.snmp("snmpbulkget", "-Cn0", "-Cr1000", ".1", version="2c")
+        self.assertEqual(0, rc, out)
+        self.assertIn("No more variables left in this MIB View", out)
+        self.assertEqual(10, sum(1 for l in out.splitlines() if " = " in l and "No more" not in l))
+
+    def test_v2c_set_is_not_writable(self):
+        rc, out = self.snmp("snmpset", "1.3.6.1.2.1.1.5.0", "s", "hacked", version="2c")
+        self.assertNotEqual(0, rc)
+        self.assertRegex(out, r"notWritable[\s\S]*Failed object: \.1\.3\.6\.1\.2\.1\.1\.5\.0")
+        rc, out = self.snmp("snmpget", "1.3.6.1.2.1.1.5.0", version="2c")
+        self.assertNotIn("hacked", out)
+
+    def test_v2c_wrong_community_gets_no_reply(self):
+        rc, out = self.snmp("snmpget", "1.3.6.1.2.1.1.1.0", community="nope", version="2c", timeout=1)
+        self.assertIn("Timeout", out)
+
+    def test_v1_and_v2c_counters(self):
+        before = self.dev.status()["v2cRequests"]
+        self.snmp("snmpget", "1.3.6.1.2.1.1.1.0", version="2c")
+        self.snmp("snmpget", "1.3.6.1.2.1.1.1.0", version="1")
+        self.assertEqual(before + 1, self.dev.status()["v2cRequests"])
 
     # ---- SNMP settings from the serial menu ----
 
@@ -262,7 +335,7 @@ class SnmpAgentTest(unittest.TestCase):
         bad = bytearray(GET_SYSDESCR)
         bad[7:13] = b"wrongc"
         send_raw(self.ip, [bytes(bad)])
-        rc, out = self.snmp("snmpget", "1.3.6.1.2.1.1.1.0", version="2c", timeout=1)
+        send_raw(self.ip, [v3_packet()])
         time.sleep(0.3)
         log = self.dev.access_log()
         events = {(ip, ev) for ip, ev, _ in log}

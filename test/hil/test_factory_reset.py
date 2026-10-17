@@ -98,6 +98,7 @@ class FactoryResetTest(unittest.TestCase):
             self.assertEqual("", st["sysContact"])
             self.assertEqual("", st["sysLocation"])
             self.assertEqual("", st["trapTarget"])
+            self.assertEqual("2c", st["trapVersion"])
             self.assertRegex(st["raw"], r"Stored static IP: 192\.168\.1\.100 / 255\.255\.255\.0, gateway 192\.168\.1\.1")
         finally:
             self._restore()
@@ -105,7 +106,7 @@ class FactoryResetTest(unittest.TestCase):
     def _restore(self):
         d, b = self.dev, self.before
         d.wait_for_menu(timeout=40)
-        d.set_snmp(b["community"], b["sysName"], b["sysContact"], b["sysLocation"], b["trapTarget"])
+        d.set_snmp(b["community"], b["sysName"], b["sysContact"], b["sysLocation"], b["trapTarget"], b["trapVersion"])
         if self.stored_static and not re.search(
                 r"Stored static IP: %s / %s, gateway %s" % tuple(map(re.escape, self.stored_static)),
                 d.status()["raw"]):

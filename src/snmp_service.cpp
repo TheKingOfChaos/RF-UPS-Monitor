@@ -80,6 +80,33 @@ static void logAccess(uint32_t source, AccessEvent event) {
     }
 }
 
+/// request-id of the next v2c trap
+static int32_t nextTrapRequestId = 1;
+
+enum class TrapKind { ColdStart, AuthFailure, Mains };
+
+/**
+ * @brief Encode a trap in the configured version (v1 Trap-PDU or v2c SNMPv2-Trap)
+ */
+static size_t buildTrap(TrapKind kind, const SnmpDeviceState& state) {
+    const char* c = currentSettings.community;
+    if (currentSettings.trapVersion == TRAP_VERSION_V1) {
+        switch (kind) {
+        case TrapKind::ColdStart:   return snmpBuildColdStartTrap(c, agentAddr, state.uptimeTicks, outBuf, sizeof(outBuf));
+        case TrapKind::AuthFailure: return snmpBuildAuthFailureTrap(c, agentAddr, state.uptimeTicks, outBuf, sizeof(outBuf));
+        case TrapKind::Mains:       return snmpBuildMainsTrap(c, agentAddr, state, outBuf, sizeof(outBuf));
+        }
+        return 0;
+    }
+    int32_t id = nextTrapRequestId++;
+    switch (kind) {
+    case TrapKind::ColdStart:   return snmpBuildColdStartTrapV2c(c, state.uptimeTicks, id, outBuf, sizeof(outBuf));
+    case TrapKind::AuthFailure: return snmpBuildAuthFailureTrapV2c(c, state.uptimeTicks, id, outBuf, sizeof(outBuf));
+    case TrapKind::Mains:       return snmpBuildMainsTrapV2c(c, state, id, outBuf, sizeof(outBuf));
+    }
+    return 0;
+}
+
 /**
  * @brief Send an encoded trap to the configured destination, if any
  */
@@ -94,7 +121,8 @@ static void sendTrap(size_t len, const char* what) {
     bool ok = udp.beginPacket(dest, SNMP_TRAP_PORT) == 1 && udp.write(outBuf, len) == len && udp.endPacket() == 1;
     if (ok) {
         serviceStats.trapsSent++;
-        Serial.printf("SNMP trap %s sent to %s\n", what, currentSettings.trapTarget);
+        Serial.printf("SNMP %s trap %s sent to %s\n", currentSettings.trapVersion == TRAP_VERSION_V1 ? "v1" : "v2c",
+                      what, currentSettings.trapTarget);
     } else {
         serviceStats.trapsFailed++;
         Serial.printf("SNMP trap %s to %s failed\n", what, currentSettings.trapTarget);
@@ -113,8 +141,7 @@ void snmpNetworkUp(const IPAddress& localIP) {
     for (int i = 0; i < 4; i++) agentAddr[i] = localIP[i];
     if (!started || coldStartSent) return;
     coldStartSent = true;
-    sendTrap(snmpBuildColdStartTrap(currentSettings.community, agentAddr, uptimeTicks(), outBuf, sizeof(outBuf)),
-             "coldStart");
+    sendTrap(buildTrap(TrapKind::ColdStart, captureState()), "coldStart");
 }
 
 void snmpCommunityChanged() {
@@ -126,8 +153,7 @@ void snmpCommunityChanged() {
 void snmpNotifyMainsChange() {
     if (!started) return;
     SnmpDeviceState state = captureState();
-    sendTrap(snmpBuildMainsTrap(currentSettings.community, agentAddr, state, outBuf, sizeof(outBuf)),
-             state.mainsPresent ? "mainsPowerRestored" : "mainsPowerLost");
+    sendTrap(buildTrap(TrapKind::Mains, state), state.mainsPresent ? "mainsPowerRestored" : "mainsPowerLost");
 }
 
 void snmpPoll() {
@@ -166,9 +192,7 @@ void snmpPoll() {
         case SnmpOutcome::BadCommunity:
             logAccess(source, AccessEvent::BadCommunity);
             if (authTrapThrottle.allow(millis())) {
-                sendTrap(snmpBuildAuthFailureTrap(currentSettings.community, agentAddr, uptimeTicks(), outBuf,
-                                                  sizeof(outBuf)),
-                         "authenticationFailure");
+                sendTrap(buildTrap(TrapKind::AuthFailure, captureState()), "authenticationFailure");
             }
             break;
         case SnmpOutcome::BadVersion:  logAccess(source, AccessEvent::BadVersion); break;

@@ -144,16 +144,22 @@ class Device:
         info["trapsSent"] = int(m.group(2)) if m else None
         m = re.search(r"^SNMP security: (\d+) rate limited, (\d+) access log events", out, re.MULTILINE)
         info["rateLimited"] = int(m.group(1)) if m else None
+        m = re.search(r"^Trap version: (v1|v2c)", out, re.MULTILINE)
+        info["trapVersion"] = {"v1": "1", "v2c": "2c"}[m.group(1)] if m else None
+        m = re.search(r"^SNMP v2c: (\d+) requests, (\d+) getbulk", out, re.MULTILINE)
+        info["v2cRequests"] = int(m.group(1)) if m else None
+        info["getBulkRequests"] = int(m.group(2)) if m else None
         for key, label in (("ip", "IP"), ("subnet", "Subnet"), ("gateway", "Gateway")):
             m = re.search(r"^%s: ([\d.]+)" % label, out, re.MULTILINE)
             info[key] = m.group(1) if m else None
         return info
 
 
-    def set_snmp(self, community, sys_name, sys_contact, sys_location, trap_target=None):
+    def set_snmp(self, community, sys_name, sys_contact, sys_location, trap_target=None, trap_version=None):
         """Set the SNMP settings through menu option 4 and confirm.
 
-        Empty values are cleared with '-'. trap_target=None keeps the current destination.
+        Empty values are cleared with '-'. trap_target / trap_version None keep the current value;
+        trap_version is "1" or "2c".
         """
         def entry(value):
             return value if value else "-"
@@ -162,13 +168,14 @@ class Device:
         self.send(entry(sys_name), expect=r"sysContact \[.*\]: $")
         self.send(entry(sys_contact), expect=r"sysLocation \[.*\]: $")
         self.send(entry(sys_location), expect=r"Trap destination IP \[.*\]: $")
-        self.send("" if trap_target is None else entry(trap_target), expect=r"Save\? \(y/n\): $")
+        self.send("" if trap_target is None else entry(trap_target), expect=r"Trap version \(1/2c\) \[.*\]: $")
+        self.send("" if trap_version is None else trap_version, expect=r"Save\? \(y/n\): $")
         return self.send("y", expect=r"(SNMP settings saved and active|Failed to save)[\s\S]*> $")
 
-    def set_trap_target(self, target):
-        """Change only the trap destination ('' turns traps off)."""
+    def set_trap_target(self, target, version=None):
+        """Change only the trap destination ('' turns traps off) and optionally the trap version."""
         st = self.status()
-        return self.set_snmp(st["community"], st["sysName"], st["sysContact"], st["sysLocation"], target)
+        return self.set_snmp(st["community"], st["sysName"], st["sysContact"], st["sysLocation"], target, version)
 
     def access_log(self):
         """Menu option 5: list of (ip, event, count) tuples, newest first."""

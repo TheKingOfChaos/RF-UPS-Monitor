@@ -1,11 +1,11 @@
 # SNMP MIB
 
-The device runs an SNMPv1 agent on UDP port 161 and sends SNMPv1 traps. Every object is read-only.
+The device runs an SNMP agent on UDP port 161 and sends traps. Every object is read-only.
 
-- **Version:** SNMPv1 only. v2c and v3 requests get no response.
+- **Versions:** SNMPv1 and SNMPv2c. Each request is answered in the version it was sent in. SNMPv3 requests get no response.
 - **Community:** from the settings, default `public`, changed with menu option 4 (active immediately). A request with the wrong community gets no response; it is counted on the status screen.
 - **sysName, sysContact, sysLocation:** set with menu option 4; read-only over SNMP.
-- **Operations:** GetRequest, GetNextRequest (and so `snmpwalk`). SetRequest is answered with `noSuchName`.
+- **Operations:** GetRequest, GetNextRequest (and so `snmpwalk`), and in v2c GetBulkRequest (`snmpbulkwalk`, `snmpbulkget`). SetRequest is rejected (v1 `noSuchName`, v2c `notWritable`/`noCreation`).
 - **Enterprise number:** 63050 (`1.3.6.1.4.1.63050`), assigned to this project.
 - **MIB file:** [mibs/RF-UPS-MONITOR-MIB.txt](../mibs/RF-UPS-MONITOR-MIB.txt) (SMIv2).
 
@@ -26,20 +26,37 @@ The device runs an SNMPv1 agent on UDP port 161 and sends SNMPv1 traps. Every ob
 
 `mainsPowerStatus` is debounced: a change must last 5 ms to count and is reported within 10 ms. To detect an outage between two polls, compare `mainsPowerChanges` with the previous poll; `mainsPowerLastChange` tells you when it happened.
 
+## v1 and v2c differences
+
+The same request gets a different answer depending on its version:
+
+| Situation | v1 | v2c |
+|---|---|---|
+| Get of an OID that does not exist | Whole request fails: `noSuchName`, error-index = position | Request succeeds; that varbind is `noSuchObject` (no such object) or `noSuchInstance` (object exists, e.g. `sysDescr.5` or `sysDescr` without `.0`) |
+| GetNext past the last object | `noSuchName` | `endOfMibView` for that varbind |
+| Set | `noSuchName` | `notWritable` (existing object) or `noCreation` |
+| GetBulk | not available | Non-repeaters once, then up to max-repetitions rows; stops early when every repeater reached `endOfMibView`; returns as many varbinds as fit (max 64) instead of `tooBig` |
+| Response too big | `tooBig` with the request varbinds | `tooBig` with an empty varbind list |
+
+With net-snmp, v2c shows these as `No Such Object available on this agent at this OID`, `No Such Instance currently exists at this OID` and `No more variables left in this MIB View`.
+
 ## Traps
 
-SNMPv1 traps are sent to the trap destination set in menu option 4 (UDP 162, community = the configured community). With no destination set, no traps are sent.
+Traps are sent to the trap destination set in menu option 4 (UDP 162, community = the configured community), in the trap version chosen there: **v2c (default)** or v1. With no destination set, no traps are sent.
 
-| Trap | generic-trap | specific-trap | Variable bindings | When |
+| Trap | v1: generic / specific | v2c: snmpTrapOID.0 | Variable bindings | When |
 |---|---|---|---|---|
-| coldStart | 0 | 0 | none | Once per boot, when the network first comes up |
-| authenticationFailure | 4 | 0 | none | Request with a wrong community; at most one per 10 s |
-| mainsPowerLost | 6 (enterpriseSpecific) | 1 | mainsPowerStatus, mainsPowerChanges, mainsPowerLastChange | Mains lost |
-| mainsPowerRestored | 6 (enterpriseSpecific) | 2 | same | Mains restored |
+| coldStart | 0 / 0 | `1.3.6.1.6.3.1.1.5.1` | none | Once per boot, when the network first comes up |
+| authenticationFailure | 4 / 0 | `1.3.6.1.6.3.1.1.5.5` | none | Request with a wrong community; at most one per 10 s |
+| mainsPowerLost | 6 (enterpriseSpecific) / 1 | `1.3.6.1.4.1.63050.0.1` | mainsPowerStatus, mainsPowerChanges, mainsPowerLastChange | Mains lost |
+| mainsPowerRestored | 6 (enterpriseSpecific) / 2 | `1.3.6.1.4.1.63050.0.2` | same | Mains restored |
 
-All traps carry enterprise `1.3.6.1.4.1.63050` and the device's IP as agent-addr. The time-stamp of a mains trap is the moment of the change (equal to mainsPowerLastChange), not when the trap was sent. In the MIB file the mains traps are the notifications `mainsPowerLost` (`63050.0.1`) and `mainsPowerRestored` (`63050.0.2`), which RFC 3584 maps to the v1 traps above.
+- **v1** traps carry enterprise `1.3.6.1.4.1.63050` and the device's IP as agent-addr.
+- **v2c** traps start with `sysUpTime.0` and `snmpTrapOID.0`, as RFC 3416 requires, then the variable bindings above. Each trap has its own request-id.
+- The time (v1 time-stamp, v2c sysUpTime.0) of a mains trap is the moment of the change, equal to mainsPowerLastChange, not when the trap was sent.
+- In the MIB file the mains traps are the notifications `mainsPowerLost` (`63050.0.1`) and `mainsPowerRestored` (`63050.0.2`); RFC 3584 maps them to the v1 traps above.
 
-Traps are not acknowledged in SNMPv1, so a manager should also poll `mainsPowerChanges`: if it changed between two polls, an outage happened even if its traps were lost.
+Traps are not acknowledged (v2c InformRequest is not used), so a manager should also poll `mainsPowerChanges`: if it changed between two polls, an outage happened even if its traps were lost.
 
 To receive traps on Linux, run `snmptrapd -f -Lo` (package `snmptrapd`). On Windows, allow inbound UDP 162 in the firewall for the receiving program.
 
@@ -66,8 +83,10 @@ Rejected requests are recorded in the access log (menu option 5): wrong communit
 From Linux or WSL with net-snmp (`apt install snmp`):
 
 ```bash
-# Everything
+# Everything (v1, v2c, v2c with GetBulk)
 snmpwalk -v1 -c public 10.10.6.111
+snmpwalk -v2c -c public 10.10.6.111
+snmpbulkwalk -v2c -c public 10.10.6.111
 
 # Mains state
 snmpget -v1 -c public 10.10.6.111 1.3.6.1.4.1.63050.1.0
@@ -93,15 +112,15 @@ This needs the standard IETF MIBs, which Debian/Ubuntu ship separately: `sudo ap
 | Situation | Response |
 |---|---|
 | GetRequest for an OID that is not an object (including non-leaf OIDs such as `1.3.6.1.2.1.1.1`) | `noSuchName`, error-index = position of the first unknown OID |
-| GetNextRequest past the last object | `noSuchName` (net-snmp prints "End of MIB" during a walk) |
-| SetRequest | `noSuchName` for the first varbind |
-| Response would exceed 1472 bytes | `tooBig` |
-| Wrong community, not SNMPv1, malformed, trap or response PDU, more than 16 varbinds | No response (logged in the access log) |
+| GetNextRequest past the last object | v1 `noSuchName` (net-snmp prints "End of MIB" during a walk); v2c `endOfMibView` |
+| SetRequest | v1 `noSuchName`; v2c `notWritable` / `noCreation`; for the first varbind |
+| Response would exceed 1472 bytes | `tooBig` (GetBulk is truncated instead) |
+| Wrong community, SNMPv3, malformed, trap/inform/response PDU, more than 16 varbinds | No response (logged in the access log) |
 | Source over the rate limit | No response (logged) |
 
 ## Limits
 
-- Up to 16 variable bindings per request.
+- Up to 16 variable bindings per request, up to 64 in a GetBulk response.
 - Requests up to 1472 bytes (one Ethernet frame); larger packets are dropped.
 - The network stack queues up to 5 UDP packets. Requests sent in a burst beyond that are dropped; SNMP managers retry, and normal polling or `snmpwalk` sends one request at a time.
 - If the device has not talked to a manager for a few minutes, it first has to look up the manager's MAC address (ARP). lwIP holds one reply during that lookup, so only one request of a burst arriving at that moment is answered.
@@ -114,7 +133,7 @@ This needs the standard IETF MIBs, which Debian/Ubuntu ship separately: `sudo ap
 | BER encoding/decoding, OIDs | `lib/snmp_ber` | `test/native/test_snmp_ber` |
 | Message parsing and responses | `lib/snmp_agent/snmp_message` | `test/native/test_snmp_message` |
 | MIB table, Get/GetNext/Set handling | `lib/snmp_agent/snmp_mib`, `snmp_agent` | `test/native/test_snmp_agent` |
-| Trap encoding, throttle | `lib/snmp_agent/snmp_trap` | `test/native/test_snmp_trap` (byte-exact vs net-snmp `snmptrap`) |
+| Trap encoding (v1 and v2c), throttle | `lib/snmp_agent/snmp_trap` | `test/native/test_snmp_trap` (byte-exact vs net-snmp `snmptrap -v1` and `-v2c`) |
 | Rate limiter, access log | `lib/access_control` | `test/native/test_access_control` |
 | Traps on the device | `src/snmp_service.cpp` | `test/hil/test_snmp_traps.py` |
 | Against real net-snmp, without hardware | `test/host/host_agent.cpp` | `scripts/host_agent_check.sh` |

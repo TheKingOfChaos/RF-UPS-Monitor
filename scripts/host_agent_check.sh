@@ -67,7 +67,33 @@ check "set is rejected"         "${NO_SUCH}\.1\.3\.6\.1\.2\.1\.1\.5\.0" \
       snmpset $SNMP_OPTS $TARGET 1.3.6.1.2.1.1.5.0 s newname
 check "sysName unchanged"       'STRING: "host-agent"' snmpget $SNMP_OPTS $TARGET 1.3.6.1.2.1.1.5.0
 check "wrong community: no reply" 'Timeout' snmpget -v1 -c wrong -r0 -t1 -On -M /dev/null $TARGET 1.3.6.1.2.1.1.1.0
-check "v2c: no reply"           'Timeout' snmpget -v2c -c public -r0 -t1 -On -M /dev/null $TARGET 1.3.6.1.2.1.1.1.0
+V2="-v2c -c public -r0 -t1 -On -M /dev/null"
+check "v2c get sysDescr"        'STRING: "RF-UPS-Monitor v3 host test"' snmpget $V2 $TARGET 1.3.6.1.2.1.1.1.0
+check "v2c noSuchObject"        '1\.99\.0 = No Such Object available on this agent at this OID' \
+      snmpget $V2 $TARGET 1.3.6.1.2.1.1.99.0
+check "v2c noSuchInstance"      '1\.1\.5 = No Such Instance currently exists at this OID' \
+      snmpget $V2 $TARGET 1.3.6.1.2.1.1.1.5
+check "v2c mixed get, no error" '1\.5\.0 = STRING: "host-agent".*1\.99\.0 = No Such Object' \
+      snmpget $V2 $TARGET 1.3.6.1.2.1.1.5.0 1.3.6.1.2.1.1.99.0
+check "v2c getnext past end"    '63050\.3\.0 = No more variables left in this MIB View' \
+      snmpgetnext $V2 $TARGET 1.3.6.1.4.1.63050.3.0
+check "v2c walk all, 10 objects" '^10$' bash -c "snmpwalk $V2 $TARGET .1 | grep ' = ' | grep -vc 'No more variables'"
+check "v2c walk ends at view end" 'No more variables left in this MIB View' snmpwalk $V2 $TARGET .1
+check "v2c walk order"          '1\.1\.0.*1\.7\.0.*63050\.1\.0.*63050\.3\.0' \
+      bash -c "snmpwalk $V2 $TARGET .1 | cut -d' ' -f1 | tr '\n' ' '"
+check "bulkwalk all, 10 objects" '^10$' bash -c "snmpbulkwalk $V2 $TARGET .1 | grep ' = ' | grep -vc 'No more variables'"
+check "bulkwalk = walk"         '^same$' bash -c "diff <(snmpwalk $V2 $TARGET .1 | grep ' = ' | cut -d' ' -f1) <(snmpbulkwalk $V2 $TARGET .1 | cut -d' ' -f1) >/dev/null && echo same"
+check "bulkget n1 r3"           '1\.1\.4\.0 = STRING.*1\.1\.1\.0 = STRING.*1\.1\.2\.0 = OID.*1\.1\.3\.0 = Timeticks' \
+      snmpbulkget $V2 -Cn1 -Cr3 $TARGET 1.3.6.1.2.1.1.3.0 1.3.6.1.2.1.1
+check "bulkget max-rep 100"     '63050\.3\.0 = Timeticks.*No more variables left in this MIB View' \
+      snmpbulkget $V2 -Cn0 -Cr100 $TARGET .1
+check "v2c set notWritable"     'notWritable.*Failed object: \.1\.3\.6\.1\.2\.1\.1\.5\.0' \
+      snmpset $V2 $TARGET 1.3.6.1.2.1.1.5.0 s newname
+check "v2c set noCreation"      'noCreation.*Failed object: \.1\.3\.6\.1\.2\.1\.1\.99\.0' \
+      snmpset $V2 $TARGET 1.3.6.1.2.1.1.99.0 s x
+check "v2c wrong community"     'Timeout' snmpget -v2c -c wrong -r0 -t1 -On -M /dev/null $TARGET 1.3.6.1.2.1.1.1.0
+check "v3: no reply"            'Timeout|No Response' \
+      snmpget -v3 -l noAuthNoPriv -u nobody -r0 -t1 -On -M /dev/null $TARGET 1.3.6.1.2.1.1.1.0
 check "agent still alive"       'STRING' snmpget $SNMP_OPTS $TARGET 1.3.6.1.2.1.1.1.0
 
 # MIB file: needs the standard IETF MIBs (apt install snmp-mibs-downloader)

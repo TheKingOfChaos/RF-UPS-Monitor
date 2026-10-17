@@ -594,6 +594,33 @@ static void test_read_raw_fails_on_truncated_element() {
     TEST_ASSERT_FALSE(r.readRaw(raw, len));
 }
 
+static void test_rollback_discards_a_partly_written_element() {
+    uint8_t buf[16];
+    BerWriter w(buf, sizeof(buf));
+    w.beginSequence();
+    w.writeNull();
+    BerWriter::Mark m = w.mark();
+    w.beginSequence();
+    TEST_ASSERT_FALSE(w.writeOctetString("much too long for this buffer"));
+    TEST_ASSERT_TRUE(w.failed());
+    w.rollback(m);
+    TEST_ASSERT_FALSE(w.failed());
+    TEST_ASSERT_TRUE(w.endSequence());
+    const uint8_t expected[] = {0x30, 0x02, 0x05, 0x00};
+    TEST_ASSERT_EQUAL_size_t(sizeof(expected), w.length());
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, buf, sizeof(expected));
+}
+
+static void test_v2c_exception_values_encode_as_empty_context_tags() {
+    // noSuchObject [0], noSuchInstance [1], endOfMibView [2], all with length 0
+    const uint8_t nso[] = {0x80, 0x00};
+    const uint8_t nsi[] = {0x81, 0x00};
+    const uint8_t eom[] = {0x82, 0x00};
+    ASSERT_ENCODES(nso, writeOctetString(nullptr, 0, BerTag::NoSuchObject));
+    ASSERT_ENCODES(nsi, writeOctetString(nullptr, 0, BerTag::NoSuchInstance));
+    ASSERT_ENCODES(eom, writeOctetString(nullptr, 0, BerTag::EndOfMibView));
+}
+
 static void test_null_and_empty_input() {
     BerReader none(nullptr, 10);
     TEST_ASSERT_TRUE(none.failed());
@@ -681,6 +708,8 @@ int main() {
     RUN_TEST(test_reader_does_not_read_past_child_region);
     RUN_TEST(test_read_raw_returns_whole_element_and_write_raw_copies_it);
     RUN_TEST(test_read_raw_fails_on_truncated_element);
+    RUN_TEST(test_rollback_discards_a_partly_written_element);
+    RUN_TEST(test_v2c_exception_values_encode_as_empty_context_tags);
     RUN_TEST(test_null_and_empty_input);
     RUN_TEST(test_decode_every_single_byte_corruption_is_safe);
     return UNITY_END();

@@ -30,6 +30,10 @@ constexpr size_t COMMUNITY_MAX_LENGTH = 31;
 /// Longest sysName / sysContact / sysLocation
 constexpr size_t SYS_TEXT_MAX_LENGTH = 63;
 
+/// Trap formats
+constexpr uint8_t TRAP_VERSION_V1 = 1;   ///< SNMPv1 Trap-PDU
+constexpr uint8_t TRAP_VERSION_V2C = 2;  ///< SNMPv2-Trap (default)
+
 /**
  * @brief Persistent device settings
  */
@@ -43,6 +47,7 @@ struct Settings {
     char sysContact[SYS_TEXT_MAX_LENGTH + 1];   ///< SNMP sysContact, 0-63 printable characters
     char sysLocation[SYS_TEXT_MAX_LENGTH + 1];  ///< SNMP sysLocation, 0-63 printable characters
     char trapTarget[16];  ///< SNMP trap destination (IPv4, UDP 162), empty = traps off
+    uint8_t trapVersion;  ///< TRAP_VERSION_V1 or TRAP_VERSION_V2C
     uint32_t version;     ///< Layout version, must equal SETTINGS_VERSION
     uint32_t sequence;    ///< Save counter, newest valid copy wins on load
 };
@@ -66,7 +71,8 @@ enum class SettingsParseError : uint8_t {
     BadCommunity,     ///< Community string empty or contains non-printable characters
     BadStaticConfig,  ///< DHCP disabled but static configuration is invalid
     BadSysText,       ///< sysName/sysContact/sysLocation contains non-printable characters
-    BadTrapTarget     ///< trapTarget is neither empty nor an IPv4 address
+    BadTrapTarget,    ///< trapTarget is neither empty nor an IPv4 address
+    BadTrapVersion    ///< trapVersion is not 1 or 2
 };
 
 /**
@@ -92,8 +98,8 @@ size_t settingsToJson(const Settings& s, char* buf, size_t size);
  * @brief Parse and validate a settings document
  *
  * Unknown fields are ignored. "sequence", "sysName", "sysContact",
- * "sysLocation" and "trapTarget" are optional and take their defaults, so
- * files written by older firmware still load.
+ * "sysLocation", "trapTarget" and "trapVersion" are optional and take their
+ * defaults, so files written by older firmware still load.
  *
  * @param json NUL-terminated JSON text
  * @param out  Receives the settings only when the result is None

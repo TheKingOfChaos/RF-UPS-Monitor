@@ -86,6 +86,37 @@ size_t snmpBuildAuthFailureTrap(const char* community, const uint8_t agentAddr[4
 size_t snmpBuildMainsTrap(const char* community, const uint8_t agentAddr[4], const SnmpDeviceState& state,
                           uint8_t* out, size_t capacity);
 
+// ---- SNMPv2-Trap (v2c, RFC 3416 4.2.6) ----
+//
+// SNMPv2-Trap-PDU ::= [7] { request-id, 0, 0, VarBindList }, where the list
+// starts with sysUpTime.0 and snmpTrapOID.0. Trap OIDs (RFC 3418 / RFC 3584):
+//   coldStart              1.3.6.1.6.3.1.1.5.1
+//   authenticationFailure  1.3.6.1.6.3.1.1.5.5
+//   mainsPowerLost         1.3.6.1.4.1.63050.0.1
+//   mainsPowerRestored     1.3.6.1.4.1.63050.0.2
+
+/**
+ * @brief Encode a v2c coldStart trap
+ * @param requestId Any value; unique per trap helps managers spot duplicates
+ */
+size_t snmpBuildColdStartTrapV2c(const char* community, uint32_t uptimeTicks, int32_t requestId,
+                                 uint8_t* out, size_t capacity);
+
+/**
+ * @brief Encode a v2c authenticationFailure trap
+ */
+size_t snmpBuildAuthFailureTrapV2c(const char* community, uint32_t uptimeTicks, int32_t requestId,
+                                   uint8_t* out, size_t capacity);
+
+/**
+ * @brief Encode a v2c mainsPowerLost / mainsPowerRestored trap, chosen by state.mainsPresent
+ *
+ * sysUpTime.0 is state.mainsLastChangeTicks, the moment of the change, as the
+ * v1 time-stamp. The mains objects follow snmpTrapOID.0.
+ */
+size_t snmpBuildMainsTrapV2c(const char* community, const SnmpDeviceState& state, int32_t requestId,
+                             uint8_t* out, size_t capacity);
+
 /**
  * @brief Allows at most one event per interval (wrap-around safe)
  *

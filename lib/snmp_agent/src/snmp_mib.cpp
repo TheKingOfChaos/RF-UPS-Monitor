@@ -68,6 +68,16 @@ const MibEntry* mibFind(const Oid& oid) {
     return nullptr;
 }
 
+bool mibHasObject(const Oid& oid) {
+    for (uint8_t i = 0; i < MIB_SIZE; i++) {
+        // All objects are scalars: the object OID is the entry without its last arc (.0)
+        Oid object = MIB[i].oid;
+        object.length--;
+        if (oidStartsWith(oid, object)) return true;
+    }
+    return false;
+}
+
 const MibEntry* mibNext(const Oid& oid) {
     for (uint8_t i = 0; i < MIB_SIZE; i++) {
         if (oidCompare(MIB[i].oid, oid) > 0) return &MIB[i];

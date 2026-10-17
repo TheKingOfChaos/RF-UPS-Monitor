@@ -27,6 +27,26 @@ static const uint8_t NETSNMP_COLD_START[] = {
     0x08, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x83, 0xec, 0x4a, 0x40, 0x04, 0x0a, 0x0a, 0x06, 0x6f, 0x02,
     0x01, 0x00, 0x02, 0x01, 0x00, 0x43, 0x01, 0x2a, 0x30, 0x00};
 
+// snmptrap -v2c -c public <host> 12345 1.3.6.1.4.1.63050.0.1
+//   1.3.6.1.4.1.63050.1.0 i 0  1.3.6.1.4.1.63050.2.0 c 1  1.3.6.1.4.1.63050.3.0 t 12345   (request-id 0x0453a7ef)
+static const uint8_t NETSNMP_V2C_MAINS_LOST[] = {
+    0x30, 0x79, 0x02, 0x01, 0x01, 0x04, 0x06, 0x70, 0x75, 0x62, 0x6c, 0x69, 0x63, 0xa7, 0x6c, 0x02,
+    0x04, 0x04, 0x53, 0xa7, 0xef, 0x02, 0x01, 0x00, 0x02, 0x01, 0x00, 0x30, 0x5e, 0x30, 0x0e, 0x06,
+    0x08, 0x2b, 0x06, 0x01, 0x02, 0x01, 0x01, 0x03, 0x00, 0x43, 0x02, 0x30, 0x39, 0x30, 0x18, 0x06,
+    0x0a, 0x2b, 0x06, 0x01, 0x06, 0x03, 0x01, 0x01, 0x04, 0x01, 0x00, 0x06, 0x0a, 0x2b, 0x06, 0x01,
+    0x04, 0x01, 0x83, 0xec, 0x4a, 0x00, 0x01, 0x30, 0x0f, 0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01,
+    0x83, 0xec, 0x4a, 0x01, 0x00, 0x02, 0x01, 0x00, 0x30, 0x0f, 0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04,
+    0x01, 0x83, 0xec, 0x4a, 0x02, 0x00, 0x41, 0x01, 0x01, 0x30, 0x10, 0x06, 0x0a, 0x2b, 0x06, 0x01,
+    0x04, 0x01, 0x83, 0xec, 0x4a, 0x03, 0x00, 0x43, 0x02, 0x30, 0x39};
+
+// snmptrap -v2c -c public <host> 42 1.3.6.1.6.3.1.1.5.1   (coldStart, request-id 0x7a9b3ff0)
+static const uint8_t NETSNMP_V2C_COLD_START[] = {
+    0x30, 0x43, 0x02, 0x01, 0x01, 0x04, 0x06, 0x70, 0x75, 0x62, 0x6c, 0x69, 0x63, 0xa7, 0x36, 0x02,
+    0x04, 0x7a, 0x9b, 0x3f, 0xf0, 0x02, 0x01, 0x00, 0x02, 0x01, 0x00, 0x30, 0x28, 0x30, 0x0d, 0x06,
+    0x08, 0x2b, 0x06, 0x01, 0x02, 0x01, 0x01, 0x03, 0x00, 0x43, 0x01, 0x2a, 0x30, 0x17, 0x06, 0x0a,
+    0x2b, 0x06, 0x01, 0x06, 0x03, 0x01, 0x01, 0x04, 0x01, 0x00, 0x06, 0x09, 0x2b, 0x06, 0x01, 0x06,
+    0x03, 0x01, 0x01, 0x05, 0x01};
+
 static SnmpDeviceState mainsState(bool present, uint32_t changes, uint32_t lastChange) {
     SnmpDeviceState s;
     memset(&s, 0, sizeof(s));
@@ -161,6 +181,64 @@ static void test_trap_fails_cleanly() {
     TEST_ASSERT_EQUAL_size_t(0, snmpBuildTrap(t, buf, sizeof(buf)));
 }
 
+// ---- v2c (SNMPv2-Trap) ----
+
+static void test_v2c_mains_lost_trap_matches_netsnmp_byte_for_byte() {
+    uint8_t buf[256];
+    size_t len = snmpBuildMainsTrapV2c("public", mainsState(false, 1, 12345), 0x0453a7ef, buf, sizeof(buf));
+    TEST_ASSERT_EQUAL_size_t(sizeof(NETSNMP_V2C_MAINS_LOST), len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(NETSNMP_V2C_MAINS_LOST, buf, sizeof(NETSNMP_V2C_MAINS_LOST));
+}
+
+static void test_v2c_cold_start_trap_matches_netsnmp_byte_for_byte() {
+    uint8_t buf[128];
+    size_t len = snmpBuildColdStartTrapV2c("public", 42, 0x7a9b3ff0, buf, sizeof(buf));
+    TEST_ASSERT_EQUAL_size_t(sizeof(NETSNMP_V2C_COLD_START), len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(NETSNMP_V2C_COLD_START, buf, sizeof(NETSNMP_V2C_COLD_START));
+}
+
+/// snmpTrapOID.0 value of a v2c trap
+static void assertV2cTrapOid(const uint8_t* buf, size_t len, const char* expected) {
+    BerReader top(buf, len), msg, pdu, list, vb;
+    int32_t n;
+    const uint8_t* s;
+    size_t slen;
+    TEST_ASSERT_TRUE(top.readSequence(BerTag::Sequence, msg));
+    TEST_ASSERT_TRUE(msg.readInteger(n));
+    TEST_ASSERT_EQUAL_INT32(SNMP_VERSION_2C, n);
+    TEST_ASSERT_TRUE(msg.readOctetString(s, slen));
+    TEST_ASSERT_TRUE(msg.readSequence(BerTag::SNMPv2Trap, pdu));
+    TEST_ASSERT_TRUE(pdu.readInteger(n));
+    TEST_ASSERT_TRUE(pdu.readInteger(n));
+    TEST_ASSERT_TRUE(pdu.readInteger(n));
+    TEST_ASSERT_TRUE(pdu.readSequence(BerTag::Sequence, list));
+    TEST_ASSERT_TRUE(list.skip());                       // sysUpTime.0
+    TEST_ASSERT_TRUE(list.readSequence(BerTag::Sequence, vb));
+    Oid name, value;
+    TEST_ASSERT_TRUE(vb.readOid(name));
+    TEST_ASSERT_TRUE(vb.readOid(value));
+    char buf2[64];
+    oidToString(name, buf2, sizeof(buf2));
+    TEST_ASSERT_EQUAL_STRING("1.3.6.1.6.3.1.1.4.1.0", buf2);
+    oidToString(value, buf2, sizeof(buf2));
+    TEST_ASSERT_EQUAL_STRING(expected, buf2);
+}
+
+static void test_v2c_trap_oids() {
+    uint8_t buf[256];
+    assertV2cTrapOid(buf, snmpBuildAuthFailureTrapV2c("public", 1, 1, buf, sizeof(buf)), "1.3.6.1.6.3.1.1.5.5");
+    assertV2cTrapOid(buf, snmpBuildMainsTrapV2c("public", mainsState(true, 2, 9), 1, buf, sizeof(buf)),
+                     "1.3.6.1.4.1.63050.0.2");
+    assertV2cTrapOid(buf, snmpBuildMainsTrapV2c("public", mainsState(false, 1, 9), 1, buf, sizeof(buf)),
+                     "1.3.6.1.4.1.63050.0.1");
+}
+
+static void test_v2c_trap_fails_cleanly() {
+    uint8_t buf[256];
+    TEST_ASSERT_EQUAL_size_t(0, snmpBuildColdStartTrapV2c("public", 1, 1, buf, 30));
+    TEST_ASSERT_EQUAL_size_t(0, snmpBuildColdStartTrapV2c(nullptr, 1, 1, buf, sizeof(buf)));
+}
+
 // ---- throttle ----
 
 static void test_throttle_allows_first_then_one_per_interval() {
@@ -195,6 +273,10 @@ int main() {
     RUN_TEST(test_trap_varbinds_are_the_mib_objects);
     RUN_TEST(test_trap_uses_configured_community);
     RUN_TEST(test_trap_fails_cleanly);
+    RUN_TEST(test_v2c_mains_lost_trap_matches_netsnmp_byte_for_byte);
+    RUN_TEST(test_v2c_cold_start_trap_matches_netsnmp_byte_for_byte);
+    RUN_TEST(test_v2c_trap_oids);
+    RUN_TEST(test_v2c_trap_fails_cleanly);
     RUN_TEST(test_throttle_allows_first_then_one_per_interval);
     RUN_TEST(test_throttle_first_event_at_time_zero_is_allowed);
     RUN_TEST(test_throttle_survives_millis_wraparound);

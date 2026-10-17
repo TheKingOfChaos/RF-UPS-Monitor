@@ -74,15 +74,16 @@ static size_t buildRequest(uint8_t* buf, size_t cap, uint8_t pdu, const char* co
 
 /// A decoded GetResponse
 struct Reply {
+    int32_t version;
     int32_t requestId, errorStatus, errorIndex;
     char community[32];
     uint8_t count;
-    Oid names[SNMP_MAX_VARBINDS];
-    uint8_t tags[SNMP_MAX_VARBINDS];
-    int32_t ints[SNMP_MAX_VARBINDS];
-    uint32_t uints[SNMP_MAX_VARBINDS];
-    char strings[SNMP_MAX_VARBINDS][64];
-    Oid oids[SNMP_MAX_VARBINDS];
+    Oid names[SNMP_MAX_RESPONSE_VARBINDS];
+    uint8_t tags[SNMP_MAX_RESPONSE_VARBINDS];
+    int32_t ints[SNMP_MAX_RESPONSE_VARBINDS];
+    uint32_t uints[SNMP_MAX_RESPONSE_VARBINDS];
+    char strings[SNMP_MAX_RESPONSE_VARBINDS][64];
+    Oid oids[SNMP_MAX_RESPONSE_VARBINDS];
 };
 
 static Reply decode(const uint8_t* buf, size_t len) {
@@ -90,13 +91,11 @@ static Reply decode(const uint8_t* buf, size_t len) {
     memset(&r, 0, sizeof(r));
     TEST_ASSERT_GREATER_THAN_MESSAGE(0, len, "agent sent no response");
     BerReader top(buf, len), msg, pdu, list, vb;
-    int32_t version;
     const uint8_t* c;
     size_t clen;
     TEST_ASSERT_TRUE(top.readSequence(BerTag::Sequence, msg));
     TEST_ASSERT_TRUE(top.atEnd());
-    TEST_ASSERT_TRUE(msg.readInteger(version));
-    TEST_ASSERT_EQUAL_INT32(0, version);
+    TEST_ASSERT_TRUE(msg.readInteger(r.version));
     TEST_ASSERT_TRUE(msg.readOctetString(c, clen));
     memcpy(r.community, c, clen < 31 ? clen : 31);
     TEST_ASSERT_TRUE(msg.readSequence(BerTag::GetResponse, pdu));
@@ -105,6 +104,7 @@ static Reply decode(const uint8_t* buf, size_t len) {
     TEST_ASSERT_TRUE(pdu.readInteger(r.errorIndex));
     TEST_ASSERT_TRUE(pdu.readSequence(BerTag::Sequence, list));
     while (list.remaining() > 0) {
+        TEST_ASSERT_TRUE_MESSAGE(r.count < SNMP_MAX_RESPONSE_VARBINDS, "more varbinds than the agent may send");
         uint8_t i = r.count++;
         TEST_ASSERT_TRUE(list.readSequence(BerTag::Sequence, vb));
         TEST_ASSERT_TRUE(vb.readOid(r.names[i]));
@@ -121,6 +121,12 @@ static Reply decode(const uint8_t* buf, size_t len) {
             memcpy(r.strings[i], s, slen < 63 ? slen : 63);
             break;
         case BerTag::ObjectId: TEST_ASSERT_TRUE(vb.readOid(r.oids[i])); break;
+        case BerTag::NoSuchObject:
+        case BerTag::NoSuchInstance:
+        case BerTag::EndOfMibView:
+            TEST_ASSERT_TRUE(vb.readOctetString(s, slen, r.tags[i]));
+            TEST_ASSERT_EQUAL_size_t_MESSAGE(0, slen, "exception value must be empty");
+            break;
         default: TEST_ASSERT_TRUE(vb.skip()); break;
         }
         TEST_ASSERT_TRUE(vb.atEnd());
@@ -132,6 +138,44 @@ static Reply request(SnmpAgent& agent, uint8_t pdu, const char* const* oids, int
     uint8_t req[1024];
     size_t len = buildRequest(req, sizeof(req), pdu, oids, n);
     return decode(resp, agent.handle(req, len, resp, sizeof(resp), state));
+}
+
+static Reply requestV2c(SnmpAgent& agent, uint8_t pdu, const char* const* oids, int n) {
+    uint8_t req[1024];
+    size_t len = buildRequest(req, sizeof(req), pdu, oids, n, "public", SNMP_VERSION_2C);
+    return decode(resp, agent.handle(req, len, resp, sizeof(resp), state));
+}
+
+/// GetBulkRequest (v2c) with the given non-repeaters and max-repetitions
+static size_t buildBulk(uint8_t* buf, size_t cap, int32_t nonRepeaters, int32_t maxRepetitions,
+                        const char* const* oids, int n) {
+    BerWriter w(buf, cap);
+    w.beginSequence();
+    w.writeInteger(SNMP_VERSION_2C);
+    w.writeOctetString("public");
+    w.beginSequence(BerTag::GetBulkRequest);
+    w.writeInteger(77);
+    w.writeInteger(nonRepeaters);
+    w.writeInteger(maxRepetitions);
+    w.beginSequence();
+    for (int i = 0; i < n; i++) {
+        w.beginSequence();
+        w.writeOid(oid(oids[i]));
+        w.writeNull();
+        w.endSequence();
+    }
+    w.endSequence();
+    w.endSequence();
+    w.endSequence();
+    TEST_ASSERT_FALSE(w.failed());
+    return w.length();
+}
+
+static Reply bulk(SnmpAgent& agent, int32_t nonRepeaters, int32_t maxRepetitions, const char* const* oids, int n,
+                  size_t capacity = sizeof(resp)) {
+    uint8_t req[512];
+    size_t len = buildBulk(req, sizeof(req), nonRepeaters, maxRepetitions, oids, n);
+    return decode(resp, agent.handle(req, len, resp, capacity, state));
 }
 
 // ---- MIB table ----
@@ -338,15 +382,229 @@ static void test_community_follows_the_configured_string() {
     TEST_ASSERT_EQUAL_size_t(0, agent.handle(req, len, resp, sizeof(resp), state));
 }
 
-static void test_v2c_and_v3_get_no_response() {
+static void test_v3_and_unknown_versions_get_no_response() {
     SnmpAgent agent("public");
     uint8_t req[128];
     const char* oids[] = {"1.3.6.1.2.1.1.1.0"};
-    size_t len = buildRequest(req, sizeof(req), BerTag::GetRequest, oids, 1, "public", 1);
+    size_t len = buildRequest(req, sizeof(req), BerTag::GetRequest, oids, 1, "public", 3);
     TEST_ASSERT_EQUAL_size_t(0, agent.handle(req, len, resp, sizeof(resp), state));
-    len = buildRequest(req, sizeof(req), BerTag::GetRequest, oids, 1, "public", 3);
+    len = buildRequest(req, sizeof(req), BerTag::GetRequest, oids, 1, "public", 2);
     TEST_ASSERT_EQUAL_size_t(0, agent.handle(req, len, resp, sizeof(resp), state));
     TEST_ASSERT_EQUAL_UINT32(2, agent.stats().inBadVersions);
+}
+
+// ---- v2c ----
+
+static void test_v2c_get_answers_in_v2c() {
+    SnmpAgent agent("public");
+    const char* oids[] = {"1.3.6.1.2.1.1.1.0", "1.3.6.1.4.1.63050.1.0"};
+    Reply r = requestV2c(agent, BerTag::GetRequest, oids, 2);
+    TEST_ASSERT_EQUAL_INT32(SNMP_VERSION_2C, r.version);
+    TEST_ASSERT_EQUAL_INT32(0, r.errorStatus);
+    TEST_ASSERT_EQUAL_STRING("RF-UPS-Monitor v3", r.strings[0]);
+    TEST_ASSERT_EQUAL_INT32(1, r.ints[1]);
+}
+
+static void test_v2c_get_reports_exceptions_per_varbind_without_error_status() {
+    SnmpAgent agent("public");
+    // existing value, wrong instance of an existing object, an object that does not exist
+    const char* oids[] = {"1.3.6.1.2.1.1.5.0", "1.3.6.1.2.1.1.5.7", "1.3.6.1.2.1.1.99.0", "1.3.6.1.2.1.1.1"};
+    Reply r = requestV2c(agent, BerTag::GetRequest, oids, 4);
+    TEST_ASSERT_EQUAL_INT32(0, r.errorStatus);
+    TEST_ASSERT_EQUAL_INT32(0, r.errorIndex);
+    TEST_ASSERT_EQUAL_UINT8(4, r.count);
+    TEST_ASSERT_EQUAL_STRING("ups-monitor", r.strings[0]);
+    TEST_ASSERT_EQUAL_HEX8(BerTag::NoSuchInstance, r.tags[1]);
+    TEST_ASSERT_EQUAL_HEX8(BerTag::NoSuchObject, r.tags[2]);
+    TEST_ASSERT_EQUAL_HEX8(BerTag::NoSuchInstance, r.tags[3]);   // the object itself, no instance
+    TEST_ASSERT_EQUAL_STRING("1.3.6.1.2.1.1.99.0", str(r.names[2]));
+}
+
+static void test_v2c_getnext_past_end_is_end_of_mib_view() {
+    SnmpAgent agent("public");
+    const char* oids[] = {"1.3.6.1.2.1.1.7.0", "1.3.6.1.4.1.63050.3.0"};
+    Reply r = requestV2c(agent, BerTag::GetNextRequest, oids, 2);
+    TEST_ASSERT_EQUAL_INT32(0, r.errorStatus);
+    TEST_ASSERT_EQUAL_STRING("1.3.6.1.4.1.63050.1.0", str(r.names[0]));
+    TEST_ASSERT_EQUAL_HEX8(BerTag::EndOfMibView, r.tags[1]);
+    TEST_ASSERT_EQUAL_STRING("1.3.6.1.4.1.63050.3.0", str(r.names[1]));
+}
+
+static void test_v2c_walk_ends_with_end_of_mib_view() {
+    SnmpAgent agent("public");
+    char current[128] = "1.3";
+    uint8_t visited = 0;
+    for (;;) {
+        const char* oids[] = {current};
+        Reply r = requestV2c(agent, BerTag::GetNextRequest, oids, 1);
+        TEST_ASSERT_EQUAL_INT32(0, r.errorStatus);
+        if (r.tags[0] == BerTag::EndOfMibView) break;
+        TEST_ASSERT_TRUE_MESSAGE(visited < mibSize(), "walk did not terminate");
+        TEST_ASSERT_EQUAL_STRING(str(mibEntry(visited).oid), str(r.names[0]));
+        strcpy(current, str(r.names[0]));
+        visited++;
+    }
+    TEST_ASSERT_EQUAL_UINT8(mibSize(), visited);
+}
+
+static void test_v2c_set_is_not_writable_or_no_creation() {
+    SnmpAgent agent("public");
+    const char* existing[] = {"1.3.6.1.2.1.1.5.0"};
+    Reply r = requestV2c(agent, BerTag::SetRequest, existing, 1);
+    TEST_ASSERT_EQUAL_INT32((int32_t)SnmpError::NotWritable, r.errorStatus);
+    TEST_ASSERT_EQUAL_INT32(1, r.errorIndex);
+    const char* missing[] = {"1.3.6.1.2.1.1.99.0"};
+    r = requestV2c(agent, BerTag::SetRequest, missing, 1);
+    TEST_ASSERT_EQUAL_INT32((int32_t)SnmpError::NoCreation, r.errorStatus);
+    TEST_ASSERT_EQUAL(SnmpOutcome::SetRejected, agent.lastOutcome());
+}
+
+static void test_v1_behaviour_is_unchanged_for_the_same_requests() {
+    SnmpAgent agent("public");
+    const char* unknown[] = {"1.3.6.1.2.1.1.99.0"};
+    TEST_ASSERT_EQUAL_INT32((int32_t)SnmpError::NoSuchName, request(agent, BerTag::GetRequest, unknown, 1).errorStatus);
+    const char* last[] = {"1.3.6.1.4.1.63050.3.0"};
+    TEST_ASSERT_EQUAL_INT32((int32_t)SnmpError::NoSuchName, request(agent, BerTag::GetNextRequest, last, 1).errorStatus);
+    const char* name[] = {"1.3.6.1.2.1.1.5.0"};
+    Reply r = request(agent, BerTag::SetRequest, name, 1);
+    TEST_ASSERT_EQUAL_INT32((int32_t)SnmpError::NoSuchName, r.errorStatus);
+    TEST_ASSERT_EQUAL_INT32(SNMP_VERSION_1, r.version);
+}
+
+// ---- GetBulk ----
+
+static void test_getbulk_matches_netsnmp_request() {
+    // snmpbulkget -v2c -Cn1 -Cr3 1.3.6.1.2.1.1.3.0 1.3.6.1.2.1.1 (captured from net-snmp)
+    static const uint8_t NETSNMP_BULK[] = {
+        0x30, 0x35, 0x02, 0x01, 0x01, 0x04, 0x06, 0x70, 0x75, 0x62, 0x6c, 0x69, 0x63,
+        0xa5, 0x28, 0x02, 0x04, 0x5d, 0x1b, 0x27, 0x63, 0x02, 0x01, 0x01, 0x02, 0x01, 0x03,
+        0x30, 0x1a, 0x30, 0x0c, 0x06, 0x08, 0x2b, 0x06, 0x01, 0x02, 0x01, 0x01, 0x03, 0x00,
+        0x05, 0x00, 0x30, 0x0a, 0x06, 0x06, 0x2b, 0x06, 0x01, 0x02, 0x01, 0x01, 0x05, 0x00};
+    SnmpAgent agent("public");
+    Reply r = decode(resp, agent.handle(NETSNMP_BULK, sizeof(NETSNMP_BULK), resp, sizeof(resp), state));
+    TEST_ASSERT_EQUAL_INT32(0, r.errorStatus);
+    TEST_ASSERT_EQUAL_UINT8(4, r.count);
+    // non-repeater: next after sysUpTime.0
+    TEST_ASSERT_EQUAL_STRING("1.3.6.1.2.1.1.4.0", str(r.names[0]));
+    // repeater: three objects after 1.3.6.1.2.1.1
+    TEST_ASSERT_EQUAL_STRING("1.3.6.1.2.1.1.1.0", str(r.names[1]));
+    TEST_ASSERT_EQUAL_STRING("1.3.6.1.2.1.1.2.0", str(r.names[2]));
+    TEST_ASSERT_EQUAL_STRING("1.3.6.1.2.1.1.3.0", str(r.names[3]));
+    TEST_ASSERT_EQUAL_UINT32(1, agent.stats().inGetBulkRequests);
+}
+
+static void test_getbulk_interleaves_several_repeaters() {
+    SnmpAgent agent("public");
+    const char* oids[] = {"1.3.6.1.2.1.1.1.0", "1.3.6.1.4.1.63050"};
+    Reply r = bulk(agent, 0, 2, oids, 2);
+    TEST_ASSERT_EQUAL_UINT8(4, r.count);
+    // Row by row: repeater A, repeater B, repeater A, repeater B
+    TEST_ASSERT_EQUAL_STRING("1.3.6.1.2.1.1.2.0", str(r.names[0]));
+    TEST_ASSERT_EQUAL_STRING("1.3.6.1.4.1.63050.1.0", str(r.names[1]));
+    TEST_ASSERT_EQUAL_STRING("1.3.6.1.2.1.1.3.0", str(r.names[2]));
+    TEST_ASSERT_EQUAL_STRING("1.3.6.1.4.1.63050.2.0", str(r.names[3]));
+}
+
+static void test_getbulk_whole_mib_in_one_request_then_end_of_mib_view() {
+    SnmpAgent agent("public");
+    const char* oids[] = {"1.3"};
+    Reply r = bulk(agent, 0, 50, oids, 1);
+    // All 10 objects, then one endOfMibView, then the agent stops early
+    TEST_ASSERT_EQUAL_UINT8(mibSize() + 1, r.count);
+    for (uint8_t i = 0; i < mibSize(); i++) TEST_ASSERT_EQUAL_STRING(str(mibEntry(i).oid), str(r.names[i]));
+    TEST_ASSERT_EQUAL_HEX8(BerTag::EndOfMibView, r.tags[mibSize()]);
+}
+
+static void test_getbulk_zero_and_negative_parameters() {
+    SnmpAgent agent("public");
+    const char* oids[] = {"1.3.6.1.2.1.1.1.0", "1.3.6.1.2.1.1.3.0"};
+    // max-repetitions 0: only the non-repeaters
+    Reply r = bulk(agent, 1, 0, oids, 2);
+    TEST_ASSERT_EQUAL_UINT8(1, r.count);
+    TEST_ASSERT_EQUAL_STRING("1.3.6.1.2.1.1.2.0", str(r.names[0]));
+    // negative values count as 0 (RFC 3416)
+    r = bulk(agent, -5, -5, oids, 2);
+    TEST_ASSERT_EQUAL_INT32(0, r.errorStatus);
+    TEST_ASSERT_EQUAL_UINT8(0, r.count);
+    // non-repeaters larger than the varbind count: all are non-repeaters
+    r = bulk(agent, 99, 10, oids, 2);
+    TEST_ASSERT_EQUAL_UINT8(2, r.count);
+}
+
+static void test_getbulk_huge_max_repetitions_is_bounded() {
+    SnmpAgent agent("public");
+    const char* oids[] = {"1.3", "1.3", "1.3", "1.3"};
+    Reply r = bulk(agent, 0, INT32_MAX, oids, 4);
+    TEST_ASSERT_EQUAL_INT32(0, r.errorStatus);
+    // Stops once every repeater reached endOfMibView: 11 rows of 4
+    TEST_ASSERT_EQUAL_UINT8((mibSize() + 1) * 4 <= SNMP_MAX_RESPONSE_VARBINDS ? (mibSize() + 1) * 4
+                                                                                : SNMP_MAX_RESPONSE_VARBINDS,
+                            r.count);
+}
+
+static void test_getbulk_truncates_to_fit_instead_of_too_big() {
+    SnmpAgent agent("public");
+    const char* oids[] = {"1.3"};
+    uint8_t small[120];
+    uint8_t req[128];
+    size_t len = buildBulk(req, sizeof(req), 0, 50, oids, 1);
+    Reply r = decode(small, agent.handle(req, len, small, sizeof(small), state));
+    TEST_ASSERT_EQUAL_INT32(0, r.errorStatus);
+    TEST_ASSERT_GREATER_THAN(0, r.count);
+    TEST_ASSERT_LESS_THAN(mibSize(), r.count);
+    // What is there is the start of the MIB, in order
+    for (uint8_t i = 0; i < r.count; i++) TEST_ASSERT_EQUAL_STRING(str(mibEntry(i).oid), str(r.names[i]));
+}
+
+static void test_getbulk_too_big_when_not_even_the_non_repeaters_fit() {
+    SnmpAgent agent("public");
+    char longDescr[300];
+    memset(longDescr, 'd', sizeof(longDescr) - 1);
+    longDescr[sizeof(longDescr) - 1] = '\0';
+    state.sysDescr = longDescr;
+    const char* oids[] = {"1.3"};
+    uint8_t small[120];
+    uint8_t req[128];
+    size_t len = buildBulk(req, sizeof(req), 1, 5, oids, 1);
+    Reply r = decode(small, agent.handle(req, len, small, sizeof(small), state));
+    TEST_ASSERT_EQUAL_INT32((int32_t)SnmpError::TooBig, r.errorStatus);
+    TEST_ASSERT_EQUAL_UINT8(0, r.count);   // v2c tooBig carries no varbinds
+}
+
+static void test_v2c_get_too_big_has_empty_varbind_list() {
+    SnmpAgent agent("public");
+    char longDescr[300];
+    memset(longDescr, 'd', sizeof(longDescr) - 1);
+    longDescr[sizeof(longDescr) - 1] = '\0';
+    state.sysDescr = longDescr;
+    uint8_t req[128];
+    const char* oids[] = {"1.3.6.1.2.1.1.1.0"};
+    size_t len = buildRequest(req, sizeof(req), BerTag::GetRequest, oids, 1, "public", SNMP_VERSION_2C);
+    uint8_t small[100];
+    Reply r = decode(small, agent.handle(req, len, small, sizeof(small), state));
+    TEST_ASSERT_EQUAL_INT32((int32_t)SnmpError::TooBig, r.errorStatus);
+    TEST_ASSERT_EQUAL_UINT8(0, r.count);
+}
+
+static void test_getbulk_every_single_byte_corruption_is_handled_safely() {
+    SnmpAgent agent("public");
+    const char* oids[] = {"1.3.6.1.2.1.1.3.0", "1.3.6.1.2.1.1"};
+    uint8_t base[128];
+    size_t n = buildBulk(base, sizeof(base), 1, 3, oids, 2);
+    uint8_t pkt[128];
+    for (size_t i = 0; i < n; i++) {
+        for (int v = 0; v < 256; v++) {
+            memcpy(pkt, base, n);
+            pkt[i] = (uint8_t)v;
+            size_t len = agent.handle(pkt, n, resp, sizeof(resp), state);
+            if (len) {
+                BerReader top(resp, len), msg;
+                TEST_ASSERT_TRUE(top.readSequence(BerTag::Sequence, msg));
+                TEST_ASSERT_TRUE(top.atEnd());
+            }
+        }
+    }
+    TEST_PASS();
 }
 
 static void test_responses_and_traps_get_no_response() {
@@ -463,7 +721,7 @@ static void test_last_outcome_reports_why_a_request_was_dropped() {
     agent.handle(req, len, resp, sizeof(resp), state);
     TEST_ASSERT_EQUAL(SnmpOutcome::BadCommunity, agent.lastOutcome());
 
-    len = buildRequest(req, sizeof(req), BerTag::GetRequest, oids, 1, "public", 1);
+    len = buildRequest(req, sizeof(req), BerTag::GetRequest, oids, 1, "public", 3);  // SNMPv3
     agent.handle(req, len, resp, sizeof(resp), state);
     TEST_ASSERT_EQUAL(SnmpOutcome::BadVersion, agent.lastOutcome());
 
@@ -510,7 +768,22 @@ int main() {
     RUN_TEST(test_set_is_rejected_with_no_such_name);
     RUN_TEST(test_wrong_community_gets_no_response);
     RUN_TEST(test_community_follows_the_configured_string);
-    RUN_TEST(test_v2c_and_v3_get_no_response);
+    RUN_TEST(test_v3_and_unknown_versions_get_no_response);
+    RUN_TEST(test_v2c_get_answers_in_v2c);
+    RUN_TEST(test_v2c_get_reports_exceptions_per_varbind_without_error_status);
+    RUN_TEST(test_v2c_getnext_past_end_is_end_of_mib_view);
+    RUN_TEST(test_v2c_walk_ends_with_end_of_mib_view);
+    RUN_TEST(test_v2c_set_is_not_writable_or_no_creation);
+    RUN_TEST(test_v1_behaviour_is_unchanged_for_the_same_requests);
+    RUN_TEST(test_getbulk_matches_netsnmp_request);
+    RUN_TEST(test_getbulk_interleaves_several_repeaters);
+    RUN_TEST(test_getbulk_whole_mib_in_one_request_then_end_of_mib_view);
+    RUN_TEST(test_getbulk_zero_and_negative_parameters);
+    RUN_TEST(test_getbulk_huge_max_repetitions_is_bounded);
+    RUN_TEST(test_getbulk_truncates_to_fit_instead_of_too_big);
+    RUN_TEST(test_getbulk_too_big_when_not_even_the_non_repeaters_fit);
+    RUN_TEST(test_v2c_get_too_big_has_empty_varbind_list);
+    RUN_TEST(test_getbulk_every_single_byte_corruption_is_handled_safely);
     RUN_TEST(test_responses_and_traps_get_no_response);
     RUN_TEST(test_malformed_packets_get_no_response);
     RUN_TEST(test_response_too_big_for_buffer_is_too_big_error);

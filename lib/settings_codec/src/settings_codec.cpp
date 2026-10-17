@@ -13,7 +13,7 @@ static const char* const DEFAULT_GATEWAY = "192.168.1.1";
 static const char* const DEFAULT_SYS_NAME = "rf-ups-monitor";
 
 // Room for the parsed document: the object, its members and copies of all strings
-static const size_t JSON_DOC_CAPACITY = SETTINGS_JSON_MAX + JSON_OBJECT_SIZE(13);
+static const size_t JSON_DOC_CAPACITY = SETTINGS_JSON_MAX + JSON_OBJECT_SIZE(14);
 
 /**
  * @brief Copy a string into a fixed buffer, failing instead of truncating
@@ -43,13 +43,14 @@ void settingsDefaults(Settings& s) {
     copyField(s.subnetMask, sizeof(s.subnetMask), DEFAULT_SUBNET_MASK);
     copyField(s.gateway, sizeof(s.gateway), DEFAULT_GATEWAY);
     copyField(s.sysName, sizeof(s.sysName), DEFAULT_SYS_NAME);
+    s.trapVersion = TRAP_VERSION_V2C;
     s.version = SETTINGS_VERSION;
     s.sequence = 0;
 }
 
 size_t settingsToJson(const Settings& s, char* buf, size_t size) {
     // Strings are stored by pointer, so the document only needs the object
-    StaticJsonDocument<JSON_OBJECT_SIZE(13)> doc;
+    StaticJsonDocument<JSON_OBJECT_SIZE(14)> doc;
     doc["community"] = (const char*)s.community;
     doc["dhcpEnabled"] = s.dhcpEnabled;
     doc["staticIP"] = (const char*)s.staticIP;
@@ -59,6 +60,7 @@ size_t settingsToJson(const Settings& s, char* buf, size_t size) {
     doc["sysContact"] = (const char*)s.sysContact;
     doc["sysLocation"] = (const char*)s.sysLocation;
     doc["trapTarget"] = (const char*)s.trapTarget;
+    doc["trapVersion"] = s.trapVersion;
     doc["version"] = s.version;
     doc["sequence"] = s.sequence;
 
@@ -120,6 +122,14 @@ SettingsParseError settingsFromJson(const char* json, Settings& out) {
     uint8_t trapAddr[4];
     if (s.trapTarget[0] != '\0' && !parseIPv4(s.trapTarget, trapAddr)) return SettingsParseError::BadTrapTarget;
 
+    JsonVariantConst trapVersion = doc["trapVersion"];
+    if (!trapVersion.isNull()) {
+        if (!trapVersion.is<int>()) return SettingsParseError::BadTrapVersion;
+        int v = trapVersion.as<int>();
+        if (v != TRAP_VERSION_V1 && v != TRAP_VERSION_V2C) return SettingsParseError::BadTrapVersion;
+        s.trapVersion = (uint8_t)v;
+    }
+
     s.dhcpEnabled = doc["dhcpEnabled"];
     if (!s.dhcpEnabled &&
         validateStaticConfig(s.staticIP, s.subnetMask, s.gateway) != StaticConfigError::None) {
@@ -145,6 +155,7 @@ const char* settingsParseErrorMessage(SettingsParseError error) {
     case SettingsParseError::BadStaticConfig: return "invalid static IP configuration";
     case SettingsParseError::BadSysText:      return "invalid sysName/sysContact/sysLocation";
     case SettingsParseError::BadTrapTarget:   return "invalid trap destination";
+    case SettingsParseError::BadTrapVersion:  return "invalid trap version";
     }
     return "unknown error";
 }
@@ -154,7 +165,7 @@ bool settingsEqual(const Settings& a, const Settings& b) {
            strcmp(a.staticIP, b.staticIP) == 0 && strcmp(a.subnetMask, b.subnetMask) == 0 &&
            strcmp(a.gateway, b.gateway) == 0 && strcmp(a.sysName, b.sysName) == 0 &&
            strcmp(a.sysContact, b.sysContact) == 0 && strcmp(a.sysLocation, b.sysLocation) == 0 &&
-           strcmp(a.trapTarget, b.trapTarget) == 0 &&
+           strcmp(a.trapTarget, b.trapTarget) == 0 && a.trapVersion == b.trapVersion &&
            a.version == b.version && a.sequence == b.sequence;
 }
 

@@ -31,12 +31,20 @@ constexpr uint8_t Counter32 = 0x41;
 constexpr uint8_t Gauge32 = 0x42;
 constexpr uint8_t TimeTicks = 0x43;
 constexpr uint8_t Opaque = 0x44;
-// SNMP v1 PDUs (context-specific, constructed)
+// SNMP PDUs (context-specific, constructed)
 constexpr uint8_t GetRequest = 0xA0;
 constexpr uint8_t GetNextRequest = 0xA1;
-constexpr uint8_t GetResponse = 0xA2;
+constexpr uint8_t GetResponse = 0xA2;     ///< "Response" in v2c
 constexpr uint8_t SetRequest = 0xA3;
-constexpr uint8_t Trap = 0xA4;
+constexpr uint8_t Trap = 0xA4;            ///< v1 Trap-PDU
+constexpr uint8_t GetBulkRequest = 0xA5;  ///< v2c only
+constexpr uint8_t InformRequest = 0xA6;   ///< v2c only
+constexpr uint8_t SNMPv2Trap = 0xA7;      ///< v2c only
+constexpr uint8_t Report = 0xA8;          ///< v3 only
+// v2c exception values (context-specific, primitive, empty)
+constexpr uint8_t NoSuchObject = 0x80;
+constexpr uint8_t NoSuchInstance = 0x81;
+constexpr uint8_t EndOfMibView = 0x82;
 }  // namespace BerTag
 
 /// Maximum number of arcs in an OID; longer OIDs are rejected
@@ -199,6 +207,28 @@ public:
 
     /// Copy already-encoded bytes (e.g. an element from BerReader::readRaw)
     bool writeRaw(const uint8_t* data, size_t length);
+
+    /// A position to return to with rollback()
+    struct Mark {
+        size_t length;
+        uint8_t depth;
+    };
+
+    /// Remember the current position
+    Mark mark() const { return {_len, _depth}; }
+
+    /**
+     * @brief Discard everything written after the mark, including a failure
+     *
+     * Used to try adding an element and drop it again if it does not fit
+     * (e.g. truncating a GetBulk response). The mark must come from this
+     * writer, taken while it had not failed.
+     */
+    void rollback(const Mark& m) {
+        _len = m.length;
+        _depth = m.depth;
+        _failed = false;
+    }
 
 private:
     bool fail() { _failed = true; return false; }

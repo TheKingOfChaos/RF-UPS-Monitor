@@ -70,7 +70,7 @@ Every native suite must be listed in `scripts/sanitize.sh`; the script fails if 
 
 ### SNMP agent against net-snmp, without hardware
 
-`scripts/host_agent_check.sh` builds the SNMP agent libraries into a small UDP server (`test/host/host_agent.cpp`, with ASan/UBSan), runs it on 127.0.0.1 in WSL and checks the output of the real `snmpget`, `snmpgetnext`, `snmpwalk` and `snmpset`. Use it after changing `lib/snmp_ber` or `lib/snmp_agent`, before flashing:
+`scripts/host_agent_check.sh` builds the SNMP agent libraries into a small UDP server (`test/host/host_agent.cpp`, with ASan/UBSan), runs it on 127.0.0.1 in WSL and checks the output of the real `snmpget`, `snmpgetnext`, `snmpwalk`, `snmpbulkget`, `snmpbulkwalk` and `snmpset`, in v1 and v2c, and that v3 gets no reply. Use it after changing `lib/snmp_ber` or `lib/snmp_agent`, before flashing:
 
 ```powershell
 wsl -d Ubuntu-24.04 -- bash scripts/host_agent_check.sh
@@ -149,6 +149,12 @@ Flashing an embedded test replaces the firmware, so always reflash with `pio run
 - tooBig when the response does not fit, nothing when even the error does not fit, 16 varbinds fit
 - Statistics, request id echo across the int32 range, every single-byte corruption yields either nothing or a valid response
 
+### v2c in the native suites
+- `test_snmp_message`: net-snmp v2c Get and GetBulk parsed (non-repeaters/max-repetitions), GetBulk refused in v1, Inform/v2-Trap/Report refused, v2c response byte-exact with an exception value, `tryAdd` rollback, every single-byte corruption of a GetBulk request
+- `test_snmp_agent`: v2c Get with noSuchObject/noSuchInstance and no error-status, GetNext endOfMibView, full v2c walk, Set notWritable/noCreation, v1 unchanged for the same requests; GetBulk against the net-snmp request, interleaved repeaters, whole MIB in one request, zero/negative/oversized parameters, INT32_MAX repetitions bounded, truncation, tooBig only when nothing fits, v2c tooBig with empty list, corruption
+- `test_snmp_trap`: v2c coldStart and mainsPowerLost byte-exact against `snmptrap -v2c`, trap OIDs for all four traps
+- `test_settings_codec`: trap version default v2c, round trip, invalid values rejected
+
 ### `test/native/test_snmp_trap`: trap encoding
 - mainsPowerLost and coldStart byte-for-byte identical to net-snmp's `snmptrap` output for the same fields; authenticationFailure differs only in generic-trap
 - mainsPowerRestored fields, varbinds are the MIB objects with the right types, configured community used
@@ -221,7 +227,9 @@ Uses `test/settings_a.json` and `test/settings_b.json`, never the real settings.
 - Access log lists bad community and bad version from this PC, newest first; SetRequests are logged
 - The device must use community `public` for this suite
 
-### `test/hil/test_snmp_traps.py`: traps on the device
+- v2c: get, exceptions instead of errors, walk ending with endOfMibView, `snmpbulkwalk` equal to `snmpwalk`, `snmpbulkget -Cn1 -Cr3` and `-Cr1000`, Set notWritable, wrong community; SNMPv3 gets no reply and is counted; v1/v2c counters
+
+### `test/hil/test_snmp_traps.py`: traps on the device (every test runs with v1 and with v2c traps)
 - coldStart arrives after a reboot (empty ARP table, the trap is the first packet to this PC), exactly once, from the device's address, with a small time-stamp
 - A wrong community sends one authenticationFailure trap; five more within 10 s send none but are counted in the access log
 - No traps when the destination is off; trap counter on the status screen; SNMP keeps answering

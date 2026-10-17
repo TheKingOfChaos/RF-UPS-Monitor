@@ -26,9 +26,14 @@
 ## Core Requirements
 
 1. SNMP Implementation
-   - SNMP v1 only
+   - SNMP v1 and v2c (community-based). No SNMPv3
+   - Each request is answered in the version it was sent in; v1 behaviour
+     must not change when v2c features are added
    - No external SNMP libraries allowed
-   - Must support GetRequest and GetNextRequest operations
+   - Must support GetRequest and GetNextRequest (v1 and v2c) and
+     GetBulkRequest (v2c), with v2c exception values (noSuchObject,
+     noSuchInstance, endOfMibView)
+   - Traps in v1 (Trap-PDU) and v2c (SNMPv2-Trap), version selectable
    - Must implement proper ASN.1/BER encoding
    - Community string must be configurable via CLI
    - Default community string: "public"

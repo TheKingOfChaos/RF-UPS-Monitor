@@ -1,6 +1,6 @@
 # RF-UPS-Monitor v3
 
-A mains power monitor built on a Raspberry Pi Pico with a W5500 Ethernet module. It reports whether mains power is present, and will make that available over SNMP v1. It is configured through a menu on the USB serial port.
+A mains power monitor built on a Raspberry Pi Pico with a W5500 Ethernet module. It reports whether mains power is present over SNMP v1 and v2c, including traps. It is configured through a menu on the USB serial port.
 
 ## Status
 
@@ -11,8 +11,8 @@ A mains power monitor built on a Raspberry Pi Pico with a W5500 Ethernet module.
 | Settings stored in flash, power-cut safe | Working |
 | Factory reset button (GPIO22, 10 s hold, non-blocking, LED feedback) | Implemented; manual test with the real button pending |
 | Mains power monitoring on GPIO27 (core 1, debounced) | Working, verified with real mains loss/restore |
-| SNMP v1 agent (GetRequest, GetNextRequest, walk) | Working, tested with net-snmp |
-| SNMP v1 traps (coldStart, authenticationFailure, mainsPowerLost/Restored) | Working; mains traps with real mains pending |
+| SNMP v1 and v2c agent (Get, GetNext, GetBulk, walk, bulkwalk) | Working, tested with net-snmp |
+| SNMP traps in v1 or v2c (coldStart, authenticationFailure, mainsPowerLost/Restored) | Working; mains traps with real mains pending |
 | SNMP rate limiting and access log | Working |
 
 See [TODO.md](TODO.md) for the detailed plan.
@@ -99,8 +99,9 @@ sysName [rf-ups-monitor]: ups-rack4
 sysContact []: ops@example.com
 sysLocation []: Server room, rack 4
 Trap destination IP []: 10.10.6.65
+Trap version (1/2c) [2c]:
 
-New SNMP settings: community "s3cret", sysName "ups-rack4", sysContact "ops@example.com", sysLocation "Server room, rack 4", trap destination "10.10.6.65"
+New SNMP settings: community "s3cret", sysName "ups-rack4", sysContact "ops@example.com", sysLocation "Server room, rack 4", trap destination "10.10.6.65", trap version v2c
 Save? (y/n): y
 SNMP settings saved and active
 ```
@@ -108,9 +109,10 @@ SNMP settings saved and active
 - Community: 1-31 printable ASCII characters. After saving, requests with the old community get no answer.
 - sysName, sysContact, sysLocation: 0-63 printable ASCII characters.
 - Trap destination: an IPv4 address that receives traps on UDP 162, or empty for no traps.
-- Saved to flash and active immediately, no reboot. A factory reset restores `public`, `rf-ups-monitor`, empty contact and location, and no trap destination.
+- Trap version: `1` (SNMPv1 Trap-PDU) or `2c` (SNMPv2-Trap, default).
+- Saved to flash and active immediately, no reboot. A factory reset restores `public`, `rf-ups-monitor`, empty contact and location, no trap destination and v2c traps.
 
-**5. Access log** lists the most recent rejected SNMP requests, newest first: wrong community, SNMPv2c/v3, malformed packets, rate-limited sources and SetRequests. Repeats from the same source are counted on one line:
+**5. Access log** lists the most recent rejected SNMP requests, newest first: wrong community, SNMPv3, malformed packets, rate-limited sources and SetRequests. Repeats from the same source are counted on one line:
 
 ```
 Access log: 3 entries, 128 events since boot
@@ -216,8 +218,8 @@ lib/settings/               LittleFS storage on top of settings_codec
 lib/power_monitor/          Mains input debouncer, reset button logic (pure C++)
 lib/access_control/         Rate limiter and access log (pure C++)
 lib/mains_input/            GPIO27 sampler on core 1, seqlock hand-over to core 0
-lib/snmp_ber/               ASN.1 BER codec and OIDs for SNMP v1 (pure C++)
-lib/snmp_agent/             SNMP v1 messages, MIB, request handling (pure C++)
+lib/snmp_ber/               ASN.1 BER codec and OIDs for SNMP (pure C++)
+lib/snmp_agent/             SNMP v1/v2c messages, MIB, request handling, traps (pure C++)
 src/snmp_service.cpp        UDP port 161, device state for the MIB
 mibs/                       RF-UPS-MONITOR-MIB
 test/host/                  Host build of the agent for net-snmp checks
@@ -236,7 +238,7 @@ Pure libraries have no Arduino or hardware dependency so they can be unit tested
 
 ## SNMP
 
-An SNMPv1 agent runs on UDP port 161 with community `public` by default (menu option 4 changes it, along with sysName, sysContact and sysLocation). It supports GetRequest and GetNextRequest, so `snmpwalk` works; everything is read-only.
+An SNMP agent runs on UDP port 161 and answers SNMPv1 and SNMPv2c, each request in its own version (SNMPv3 is not supported). The community is `public` by default (menu option 4 changes it, along with sysName, sysContact and sysLocation). It supports Get and GetNext, so `snmpwalk` works, and in v2c GetBulk, so `snmpbulkwalk` works too; everything is read-only.
 
 ```
 .1.3.6.1.2.1.1          system group
@@ -250,13 +252,14 @@ An SNMPv1 agent runs on UDP port 161 with community `public` by default (menu op
 ```
 
 ```bash
-snmpwalk -v1 -c public 10.10.6.111
-snmpget  -v1 -c public 10.10.6.111 1.3.6.1.4.1.63050.1.0
+snmpwalk     -v1  -c public 10.10.6.111
+snmpbulkwalk -v2c -c public 10.10.6.111
+snmpget      -v2c -c public 10.10.6.111 1.3.6.1.4.1.63050.1.0
 ```
 
-**Traps** go to the trap destination set in menu option 4 (UDP 162): `coldStart` at boot, `mainsPowerLost` and `mainsPowerRestored` (enterprise 63050, specific-trap 1 and 2, with the three mains objects), and `authenticationFailure` for a wrong community (at most one per 10 s).
+**Traps** go to the trap destination set in menu option 4 (UDP 162), as v2c (default) or v1: `coldStart` at boot, `mainsPowerLost` and `mainsPowerRestored` (with the three mains objects), and `authenticationFailure` for a wrong community (at most one per 10 s).
 
-**Security:** each source address may send 50 requests per second on average, with bursts of 100. Sources that have not shown the right community share a limit of 100 per second, so faked source addresses cannot get around it or starve your managers; managers that use the community share a separate limit of 200 per second. More is dropped and logged. Change the community from `public` (menu option 4): SNMPv1 has no other authentication. Rejected requests are kept in the access log (menu option 5).
+**Security:** each source address may send 50 requests per second on average, with bursts of 100. Sources that have not shown the right community share a limit of 100 per second, so faked source addresses cannot get around it or starve your managers; managers that use the community share a separate limit of 200 per second. More is dropped and logged. Change the community from `public` (menu option 4): SNMPv1 and v2c have no other authentication. Rejected requests are kept in the access log (menu option 5).
 
 Object details, traps, error behaviour, limits and the MIB file: [docs/MIB.md](docs/MIB.md). The status screen (menu option 1) shows the SNMP counters, rate-limited requests and traps sent.
 

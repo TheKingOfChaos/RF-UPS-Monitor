@@ -48,6 +48,15 @@ An item is only ticked when it is implemented **and** its tests exist and pass (
 - [x] SNMP counters on the status screen
 - [ ] Mains loss/restore over SNMP with real mains — HIL `test_mains_loss_and_restore_visible_over_snmp` (manual, needs you at the switch)
 - [x] Known limit, accepted and documented in docs/MIB.md: the core queues 5 UDP packets (`UdpContext::rxBufMaxDepth`, hard-coded), larger bursts are dropped; one reply is held during an ARP lookup. Managers poll one request at a time and retry
+### 2.7 SNMPv2c (decided 2026-10-17: v1 and v2c, no v3; traps in v1 or v2c)
+- [x] Parse and answer v2c (version 1), each request in its own version; v3 dropped and counted — native + HIL
+- [x] v2c exceptions: noSuchObject / noSuchInstance (Get), endOfMibView (GetNext) — native, net-snmp, HIL
+- [x] GetBulkRequest: non-repeaters, max-repetitions, early stop at endOfMibView, truncation to fit (max 64 varbinds), tooBig only if nothing fits — native, net-snmp `snmpbulkget`/`snmpbulkwalk`, HIL
+- [x] v2c Set: notWritable / noCreation; v2c tooBig with empty varbind list — native, net-snmp
+- [x] v1 behaviour unchanged — native `test_v1_behaviour_is_unchanged_for_the_same_requests`, all v1 tests still pass
+- [x] SNMPv2-Trap (sysUpTime.0, snmpTrapOID.0, objects), byte-exact against `snmptrap -v2c` — native
+- [x] Trap version setting (default v2c), menu option 4, status screen — native + HIL; trap tests run in both versions
+- [x] v2c and GetBulk counters on the status screen
 ### 2.6 Traps — `lib/snmp_agent/snmp_trap`, `test/native/test_snmp_trap`, `test/hil/test_snmp_traps.py`
 - [x] SNMPv1 Trap-PDU encoding, byte-exact against net-snmp `snmptrap`
 - [x] coldStart once per boot when the network comes up — HIL (after reboot, empty ARP table)
@@ -124,6 +133,6 @@ An item is only ticked when it is implemented **and** its tests exist and pass (
 - [ ] CHANGELOG and version tags
 
 ## Notes
-- SNMP must be v1 only and our own code; networking may use libraries
+- SNMP must be v1 and v2c (no v3) and our own code; networking may use libraries
 - Memory limits: 70 % flash, 50 % RAM (now 8 % / 29 %, built with -Os)
 - Core 0 has a 4 KB stack shared with USB/lwIP/W5500 interrupts: keep big buffers static

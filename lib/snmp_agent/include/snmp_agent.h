@@ -2,25 +2,40 @@
 
 /**
  * @file snmp_agent.h
- * @brief SNMP v1 request handling: GetRequest, GetNextRequest, SetRequest (rejected).
+ * @brief SNMP v1 and v2c request handling: Get, GetNext, GetBulk (v2c), Set (rejected).
  *
  * Pure C++, unit tested on the host. The firmware passes each received UDP
- * payload to SnmpAgent::handle() and sends back whatever it returns.
+ * payload to SnmpAgent::handle() and sends back whatever it returns. Each
+ * request is answered in its own version.
  *
- * Behaviour (RFC 1157):
- *   - Not SNMP v1, malformed, wrong community, or not a request: no response
+ * Both versions:
+ *   - Not v1/v2c, malformed, wrong community, or not a request: no response
  *     (counted in SnmpStats)
- *   - GetRequest: every OID must name an object, else noSuchName with the
- *     1-based index of the first unknown varbind
- *   - GetNextRequest: the next object after each OID, noSuchName past the end
- *   - SetRequest: all objects are read-only, answered with noSuchName
- *   - Response larger than the buffer: tooBig
+ *
+ * v1 (RFC 1157):
+ *   - Get: every OID must name an object, else noSuchName with the 1-based
+ *     index of the first unknown varbind
+ *   - GetNext: the next object after each OID, noSuchName past the end
+ *   - Set: all objects are read-only, answered with noSuchName
+ *   - Response larger than the buffer: tooBig with the request varbinds
+ *
+ * v2c (RFC 3416):
+ *   - Get: noSuchObject / noSuchInstance per varbind, error-status stays 0
+ *   - GetNext: endOfMibView per varbind past the end
+ *   - GetBulk: non-repeaters once, then up to max-repetitions rows of the
+ *     repeaters; stops early when every repeater is at endOfMibView, and
+ *     returns as many varbinds as fit instead of tooBig
+ *   - Set: notWritable for existing objects, noCreation for others
+ *   - Response larger than the buffer: tooBig with an empty varbind list
  */
 
 #include "snmp_mib.h"
 
 /// Largest response the agent builds (RFC 1157 requires at least 484)
 constexpr size_t SNMP_MAX_MESSAGE = 1472;
+
+/// Most variable bindings in one GetBulk response, in addition to the size limit
+constexpr uint8_t SNMP_MAX_RESPONSE_VARBINDS = 64;
 
 /**
  * @brief Counters for the status screen
@@ -33,7 +48,9 @@ struct SnmpStats {
     uint32_t inUnsupported;      ///< Response/trap PDUs, too many varbinds
     uint32_t inGetRequests;
     uint32_t inGetNextRequests;
+    uint32_t inGetBulkRequests;
     uint32_t inSetRequests;
+    uint32_t inV2cRequests;      ///< Requests in v2c (included in the counters above)
     uint32_t outResponses;       ///< Responses returned for sending
     uint32_t outNoSuchName;
     uint32_t outTooBig;
@@ -79,9 +96,14 @@ public:
 private:
     bool communityMatches(const SnmpRequest& req) const;
     size_t respondError(const SnmpRequest& req, SnmpError error, uint8_t index, uint8_t* out, size_t cap);
+    size_t handleV1(uint8_t* response, size_t capacity, const SnmpDeviceState& state);
+    size_t handleV2c(uint8_t* response, size_t capacity, const SnmpDeviceState& state);
+    size_t handleGetBulk(uint8_t* response, size_t capacity, const SnmpDeviceState& state);
+    size_t finishResponse(SnmpResponseBuilder& builder, uint8_t* response, size_t capacity);
 
     const char* _community;
     SnmpStats _stats = {};
     SnmpOutcome _outcome = SnmpOutcome::Responded;
-    SnmpRequest _req;  // ~1 KB, kept out of the stack
+    SnmpRequest _req;                   // ~1 KB, kept out of the stack
+    Oid _cursor[SNMP_MAX_VARBINDS];     // GetBulk repeater positions, ~2 KB, kept out of the stack
 };

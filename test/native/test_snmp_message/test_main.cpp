@@ -31,6 +31,21 @@ static const uint8_t GET_TWO_V1[] = {
     0x05, 0x00, 0x30, 0x0e, 0x06, 0x0a, 0x2b, 0x06, 0x01, 0x04, 0x01, 0x83, 0xec, 0x4a,
     0x01, 0x00, 0x05, 0x00};
 
+// net-snmp v2c requests
+// snmpget -v2c -c public 1.3.6.1.2.1.1.1.0
+static const uint8_t GET_V2C[] = {
+    0x30, 0x29, 0x02, 0x01, 0x01, 0x04, 0x06, 0x70, 0x75, 0x62, 0x6c, 0x69, 0x63,
+    0xa0, 0x1c, 0x02, 0x04, 0x4d, 0x40, 0xf4, 0x5f, 0x02, 0x01, 0x00, 0x02, 0x01, 0x00,
+    0x30, 0x0e, 0x30, 0x0c, 0x06, 0x08, 0x2b, 0x06, 0x01, 0x02, 0x01, 0x01, 0x01, 0x00,
+    0x05, 0x00};
+
+// snmpbulkget -v2c -c public -Cn1 -Cr3 1.3.6.1.2.1.1.3.0 1.3.6.1.2.1.1
+static const uint8_t BULK_V2C[] = {
+    0x30, 0x35, 0x02, 0x01, 0x01, 0x04, 0x06, 0x70, 0x75, 0x62, 0x6c, 0x69, 0x63,
+    0xa5, 0x28, 0x02, 0x04, 0x5d, 0x1b, 0x27, 0x63, 0x02, 0x01, 0x01, 0x02, 0x01, 0x03,
+    0x30, 0x1a, 0x30, 0x0c, 0x06, 0x08, 0x2b, 0x06, 0x01, 0x02, 0x01, 0x01, 0x03, 0x00,
+    0x05, 0x00, 0x30, 0x0a, 0x06, 0x06, 0x2b, 0x06, 0x01, 0x02, 0x01, 0x01, 0x05, 0x00};
+
 static Oid oid(const char* text) {
     Oid o;
     TEST_ASSERT_TRUE_MESSAGE(oidFromString(text, o), text);
@@ -139,11 +154,105 @@ static void test_parse_set_request_is_accepted_for_the_agent_to_reject() {
 static void test_parse_rejects_other_versions() {
     uint8_t pkt[sizeof(GET_V1)];
     SnmpRequest req;
-    // version 1 = SNMPv2c, 3 = SNMPv3
+    // 2 is unassigned, 3 = SNMPv3
     TEST_ASSERT_EQUAL(SnmpParseResult::BadVersion,
-                      snmpParseRequest(pkt, patched(pkt, GET_V1, sizeof(GET_V1), 4, 1), req));
+                      snmpParseRequest(pkt, patched(pkt, GET_V1, sizeof(GET_V1), 4, 2), req));
     TEST_ASSERT_EQUAL(SnmpParseResult::BadVersion,
                       snmpParseRequest(pkt, patched(pkt, GET_V1, sizeof(GET_V1), 4, 3), req));
+}
+
+// ---- v2c ----
+
+static void test_parse_netsnmp_v2c_get() {
+    SnmpRequest req;
+    TEST_ASSERT_EQUAL(SnmpParseResult::Ok, snmpParseRequest(GET_V2C, sizeof(GET_V2C), req));
+    TEST_ASSERT_EQUAL_INT32(SNMP_VERSION_2C, req.version);
+    TEST_ASSERT_EQUAL_HEX8(BerTag::GetRequest, req.pduType);
+    assertOid("1.3.6.1.2.1.1.1.0", req.names[0]);
+}
+
+static void test_parse_netsnmp_getbulk() {
+    SnmpRequest req;
+    TEST_ASSERT_EQUAL(SnmpParseResult::Ok, snmpParseRequest(BULK_V2C, sizeof(BULK_V2C), req));
+    TEST_ASSERT_EQUAL_HEX8(BerTag::GetBulkRequest, req.pduType);
+    TEST_ASSERT_EQUAL_INT32(1, req.nonRepeaters);
+    TEST_ASSERT_EQUAL_INT32(3, req.maxRepetitions);
+    TEST_ASSERT_EQUAL_UINT8(2, req.varbindCount);
+    assertOid("1.3.6.1.2.1.1.3.0", req.names[0]);
+    assertOid("1.3.6.1.2.1.1", req.names[1]);
+}
+
+static void test_getbulk_is_not_a_v1_pdu() {
+    uint8_t pkt[sizeof(BULK_V2C)];
+    SnmpRequest req;
+    TEST_ASSERT_EQUAL(SnmpParseResult::UnsupportedPdu,
+                      snmpParseRequest(pkt, patched(pkt, BULK_V2C, sizeof(BULK_V2C), 4, 0), req));
+}
+
+static void test_v2c_rejects_inform_trap_and_report_pdus() {
+    uint8_t pkt[sizeof(GET_V2C)];
+    SnmpRequest req;
+    const uint8_t tags[] = {BerTag::GetResponse, BerTag::InformRequest, BerTag::SNMPv2Trap, BerTag::Report,
+                            BerTag::Trap};
+    for (uint8_t t : tags) {
+        TEST_ASSERT_EQUAL(SnmpParseResult::UnsupportedPdu,
+                          snmpParseRequest(pkt, patched(pkt, GET_V2C, sizeof(GET_V2C), 13, t), req));
+    }
+}
+
+static void test_v2c_response_carries_version_1_and_exceptions() {
+    SnmpRequest req;
+    snmpParseRequest(GET_V2C, sizeof(GET_V2C), req);
+    uint8_t buf[128];
+    SnmpResponseBuilder b(buf, sizeof(buf), req);
+    TEST_ASSERT_TRUE(b.add(req.names[0], SnmpValue::makeException(BerTag::NoSuchObject)));
+    size_t len = b.finish();
+    // Same layout as the request; version 1 is kept, the value is noSuchObject (80 00)
+    const uint8_t expected[] = {
+        0x30, 0x29, 0x02, 0x01, 0x01, 0x04, 0x06, 'p', 'u', 'b', 'l', 'i', 'c',
+        0xa2, 0x1c, 0x02, 0x04, 0x4d, 0x40, 0xf4, 0x5f, 0x02, 0x01, 0x00, 0x02, 0x01, 0x00,
+        0x30, 0x0e, 0x30, 0x0c, 0x06, 0x08, 0x2b, 0x06, 0x01, 0x02, 0x01, 0x01, 0x01, 0x00,
+        0x80, 0x00};
+    TEST_ASSERT_EQUAL_size_t(sizeof(expected), len);
+    TEST_ASSERT_EQUAL_HEX8_ARRAY(expected, buf, sizeof(expected));
+}
+
+static void test_try_add_drops_a_varbind_that_does_not_fit_and_keeps_the_rest() {
+    SnmpRequest req;
+    snmpParseRequest(GET_V2C, sizeof(GET_V2C), req);
+    uint8_t buf[70];
+    SnmpResponseBuilder b(buf, sizeof(buf), req);
+    TEST_ASSERT_TRUE(b.tryAdd(req.names[0], SnmpValue::makeInteger(1)));
+    char big[100];
+    memset(big, 'x', sizeof(big) - 1);
+    big[sizeof(big) - 1] = '\0';
+    TEST_ASSERT_FALSE(b.tryAdd(req.names[0], SnmpValue::makeString(big)));
+    TEST_ASSERT_EQUAL_UINT8(1, b.count());
+    size_t len = b.finish();
+    TEST_ASSERT_GREATER_THAN(0, len);
+    Response r = decodeResponse(buf, len);
+    TEST_ASSERT_EQUAL_UINT8(1, r.count);
+    TEST_ASSERT_EQUAL_INT32(1, r.ints[0]);
+}
+
+static void test_v2c_error_codes() {
+    TEST_ASSERT_EQUAL_INT32(6, (int32_t)SnmpError::NoAccess);
+    TEST_ASSERT_EQUAL_INT32(11, (int32_t)SnmpError::NoCreation);
+    TEST_ASSERT_EQUAL_INT32(17, (int32_t)SnmpError::NotWritable);
+}
+
+static void test_bulk_every_single_byte_corruption_is_safe() {
+    uint8_t pkt[sizeof(BULK_V2C)];
+    SnmpRequest req;
+    for (size_t i = 0; i < sizeof(pkt); i++) {
+        for (int v = 0; v < 256; v++) {
+            if (snmpParseRequest(pkt, patched(pkt, BULK_V2C, sizeof(pkt), i, (uint8_t)v), req) ==
+                SnmpParseResult::Ok) {
+                TEST_ASSERT_TRUE(req.varbindCount <= SNMP_MAX_VARBINDS);
+            }
+        }
+    }
+    TEST_PASS();
 }
 
 static void test_parse_rejects_response_and_trap_pdus() {
@@ -395,6 +504,14 @@ int main() {
     RUN_TEST(test_parse_set_request_is_accepted_for_the_agent_to_reject);
     RUN_TEST(test_parse_rejects_other_versions);
     RUN_TEST(test_parse_rejects_response_and_trap_pdus);
+    RUN_TEST(test_parse_netsnmp_v2c_get);
+    RUN_TEST(test_parse_netsnmp_getbulk);
+    RUN_TEST(test_getbulk_is_not_a_v1_pdu);
+    RUN_TEST(test_v2c_rejects_inform_trap_and_report_pdus);
+    RUN_TEST(test_v2c_response_carries_version_1_and_exceptions);
+    RUN_TEST(test_try_add_drops_a_varbind_that_does_not_fit_and_keeps_the_rest);
+    RUN_TEST(test_v2c_error_codes);
+    RUN_TEST(test_bulk_every_single_byte_corruption_is_safe);
     RUN_TEST(test_parse_rejects_trailing_bytes);
     RUN_TEST(test_parse_rejects_every_truncation);
     RUN_TEST(test_parse_rejects_varbind_without_value);

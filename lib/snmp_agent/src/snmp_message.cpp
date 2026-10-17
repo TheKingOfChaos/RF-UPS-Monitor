@@ -40,6 +40,10 @@ SnmpValue SnmpValue::makeNull() {
     return blankValue(BerTag::Null);
 }
 
+SnmpValue SnmpValue::makeException(uint8_t tag) {
+    return blankValue(tag);
+}
+
 bool snmpWriteValue(BerWriter& w, const SnmpValue& value) {
     switch (value.type) {
     case BerTag::Integer:     return w.writeInteger(value.integer);
@@ -50,6 +54,9 @@ bool snmpWriteValue(BerWriter& w, const SnmpValue& value) {
     case BerTag::ObjectId:    return w.writeOid(value.oid);
     case BerTag::IpAddress:   return w.writeIpAddress(value.ip);
     case BerTag::Null:        return w.writeNull();
+    case BerTag::NoSuchObject:
+    case BerTag::NoSuchInstance:
+    case BerTag::EndOfMibView: return w.writeOctetString(nullptr, 0, value.type);
     default:                  return false;  // Unknown type is a programming error
     }
 }
@@ -63,24 +70,24 @@ SnmpParseResult snmpParseRequest(const uint8_t* packet, size_t length, SnmpReque
 
     int32_t version;
     if (!msg.readInteger(version)) return SnmpParseResult::Malformed;
-    if (version != SNMP_VERSION_1) return SnmpParseResult::BadVersion;
+    if (version != SNMP_VERSION_1 && version != SNMP_VERSION_2C) return SnmpParseResult::BadVersion;
     out.version = version;
 
     if (!msg.readOctetString(out.community, out.communityLength)) return SnmpParseResult::Malformed;
 
-    // Check the PDU type before parsing it: a Trap has a different layout
+    // Check the PDU type before parsing it: a v1 Trap has a different layout
     uint8_t tag;
     if (!msg.peekTag(tag)) return SnmpParseResult::Malformed;
-    if (tag != BerTag::GetRequest && tag != BerTag::GetNextRequest && tag != BerTag::SetRequest) {
-        return SnmpParseResult::UnsupportedPdu;
-    }
+    bool request = tag == BerTag::GetRequest || tag == BerTag::GetNextRequest || tag == BerTag::SetRequest ||
+                   (tag == BerTag::GetBulkRequest && version == SNMP_VERSION_2C);
+    if (!request) return SnmpParseResult::UnsupportedPdu;
     out.pduType = tag;
 
+    // For GetBulk the two integers are non-repeaters and max-repetitions
     BerReader pdu, list;
-    int32_t errorStatus, errorIndex;
     if (!msg.readSequence(tag, pdu) || !msg.atEnd()) return SnmpParseResult::Malformed;
-    if (!pdu.readInteger(out.requestId) || !pdu.readInteger(errorStatus) ||
-        !pdu.readInteger(errorIndex) || !pdu.readSequence(BerTag::Sequence, list) || !pdu.atEnd()) {
+    if (!pdu.readInteger(out.requestId) || !pdu.readInteger(out.nonRepeaters) ||
+        !pdu.readInteger(out.maxRepetitions) || !pdu.readSequence(BerTag::Sequence, list) || !pdu.atEnd()) {
         return SnmpParseResult::Malformed;
     }
 
@@ -107,7 +114,7 @@ SnmpParseResult snmpParseRequest(const uint8_t* packet, size_t length, SnmpReque
  */
 static void beginResponse(BerWriter& w, const SnmpRequest& req, SnmpError error, uint8_t errorIndex) {
     w.beginSequence();
-    w.writeInteger(SNMP_VERSION_1);
+    w.writeInteger(req.version);
     w.writeOctetString(req.community, req.communityLength);
     w.beginSequence(BerTag::GetResponse);
     w.writeInteger(req.requestId);
@@ -127,10 +134,10 @@ static size_t endResponse(BerWriter& w) {
 }
 
 size_t snmpBuildErrorResponse(const SnmpRequest& req, SnmpError error, uint8_t errorIndex,
-                              uint8_t* out, size_t capacity) {
+                              uint8_t* out, size_t capacity, bool echoVarbinds) {
     BerWriter w(out, capacity);
     beginResponse(w, req, error, errorIndex);
-    for (uint8_t i = 0; i < req.varbindCount; i++) {
+    for (uint8_t i = 0; echoVarbinds && i < req.varbindCount; i++) {
         w.beginSequence();
         w.writeOid(req.names[i]);
         w.writeRaw(req.values[i], req.valueLengths[i]);
@@ -149,7 +156,17 @@ bool SnmpResponseBuilder::add(const Oid& name, const SnmpValue& value) {
     _w.writeOid(name);
     if (!snmpWriteValue(_w, value)) return false;  // Leaves a sequence open, so finish() fails too
     _w.endSequence();
-    return !_w.failed();
+    if (_w.failed()) return false;
+    _count++;
+    return true;
+}
+
+bool SnmpResponseBuilder::tryAdd(const Oid& name, const SnmpValue& value) {
+    if (_w.failed()) return false;
+    BerWriter::Mark m = _w.mark();
+    if (add(name, value)) return true;
+    _w.rollback(m);
+    return false;
 }
 
 size_t SnmpResponseBuilder::finish() {

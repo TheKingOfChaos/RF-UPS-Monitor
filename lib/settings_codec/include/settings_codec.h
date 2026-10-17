@@ -17,12 +17,14 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "netconfig.h"
+
 /// Increment only when the JSON layout changes incompatibly
 constexpr uint32_t SETTINGS_VERSION = 1;
 
 /// Largest serialized settings document, including the terminating NUL.
 /// Worst case: every text field at maximum length and fully JSON-escaped.
-constexpr size_t SETTINGS_JSON_MAX = 896;
+constexpr size_t SETTINGS_JSON_MAX = 1024;
 
 /// Longest SNMP community string
 constexpr size_t COMMUNITY_MAX_LENGTH = 31;
@@ -46,6 +48,8 @@ struct Settings {
     char staticIP[16];    ///< Static IP address, dotted quad
     char subnetMask[16];  ///< Static subnet mask, dotted quad
     char gateway[16];     ///< Static gateway, dotted quad
+    char ipv6Address[IPV6_TEXT_MAX];  ///< Static IPv6 address (/64, RFC 5952 text), empty = none; independent of dhcpEnabled
+    char ipv6Gateway[IPV6_TEXT_MAX];  ///< Static IPv6 gateway, empty = routers from router advertisements
     char sysName[SYS_TEXT_MAX_LENGTH + 1];      ///< SNMP sysName, 0-63 printable characters
     char sysContact[SYS_TEXT_MAX_LENGTH + 1];   ///< SNMP sysContact, 0-63 printable characters
     char sysLocation[SYS_TEXT_MAX_LENGTH + 1];  ///< SNMP sysLocation, 0-63 printable characters
@@ -79,7 +83,8 @@ enum class SettingsParseError : uint8_t {
     BadSysText,       ///< sysName/sysContact/sysLocation contains non-printable characters
     BadTrapTarget,    ///< trapTarget is neither empty nor an IPv4 address
     BadTrapVersion,   ///< trapVersion is not 1 or 2
-    BadWebPassword    ///< webPassword is neither empty nor a well-formed salted hash
+    BadWebPassword,   ///< webPassword is neither empty nor a well-formed salted hash
+    BadStaticIPv6     ///< ipv6Address / ipv6Gateway fail validateStaticIPv6()
 };
 
 /**
@@ -105,7 +110,8 @@ size_t settingsToJson(const Settings& s, char* buf, size_t size);
  * @brief Parse and validate a settings document
  *
  * Unknown fields are ignored. "sequence", "sysName", "sysContact",
- * "sysLocation", "trapTarget", "trapVersion", "trapFromDhcp", "webEnabled" and "webPassword" are optional and take their
+ * "sysLocation", "trapTarget", "trapVersion", "trapFromDhcp", "webEnabled", "webPassword", "ipv6Address" and
+ * "ipv6Gateway" are optional and take their
  * defaults, so files written by older firmware still load.
  *
  * @param json NUL-terminated JSON text

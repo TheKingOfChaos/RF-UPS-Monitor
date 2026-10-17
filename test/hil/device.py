@@ -172,6 +172,12 @@ class Device:
         m = re.search(r"^SNMP v2c: (\d+) requests, (\d+) getbulk", out, re.MULTILINE)
         info["v2cRequests"] = int(m.group(1)) if m else None
         info["getBulkRequests"] = int(m.group(2)) if m else None
+        m = re.search(r"^Stored static IPv6: (?:([0-9a-f:]+)/64, gateway (.*?)|none.*?)\r?$", out, re.MULTILINE)
+        info["staticIPv6"] = m.group(1) if m and m.group(1) else ""
+        info["staticIPv6Gateway"] = m.group(2) if m and m.group(1) else ""
+        # Live IPv6 addresses: (lower-case address, flags such as "static", "tentative")
+        info["ipv6"] = [(a.lower(), flags) for a, flags in
+                        re.findall(r"^IPv6: ([0-9A-Fa-f:]+)((?: \([^)]*\))*)\r?$", out, re.MULTILINE)]
         for key, label in (("ip", "IP"), ("subnet", "Subnet"), ("gateway", "Gateway")):
             m = re.search(r"^%s: ([\d.]+)" % label, out, re.MULTILINE)
             info[key] = m.group(1) if m else None
@@ -224,6 +230,17 @@ class Device:
             return ""
         self.send("8", expect=r"Turn it (on|off)\? \(y/n\): $")
         return self.send("y", expect=r"(Web interface (on|off)|Failed)[\s\S]*> $")
+
+    def set_static_ipv6(self, address, gateway=""):
+        """Menu option 9: set (or with address "" remove) the static IPv6 address, save and reboot."""
+        self.send("9", expect=r"Static IPv6 address.*: $")
+        if not address:
+            self.send("-", expect=r"\(y/n\): $")
+        else:
+            self.send(address, expect=r"IPv6 gateway.*: $")
+            self.send(gateway or "-", expect=r"\(y/n\): $")
+        self.send("y", expect=r"Rebooting", timeout=10)
+        self.reconnect_after_reboot()
 
     def access_log(self):
         """Menu option 5: list of (ip, event, count) tuples, newest first."""

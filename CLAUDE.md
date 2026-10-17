@@ -25,7 +25,7 @@ Details and setup are in `docs/TESTING.md`.
 
 ## Build notes
 
-- lwIP is compiled from source with the core's `lwipopts.h` plus our `build_flags`, so lwIP options can be set in `platformio.ini` (IPv6, `MEMP_NUM_SYS_TIMEOUT` and `LWIP_IPV6_FRAG=0` are; the comments there say why).
+- lwIP is compiled from source with the core's `lwipopts.h` plus our `build_flags`, so lwIP options can be set in `platformio.ini` (IPv6, `MEMP_NUM_SYS_TIMEOUT`, `LWIP_IPV6_FRAG=0`, `LWIP_IPV6_NUM_ADDRESSES=4` and the hook file `include/lwip_hooks.h` are; the comments there say why).
 - Each core has its own 8 KB stack (`core1_separate_stack` in `src/main.cpp`); the status screen and a HIL test watch core 0's headroom.
 - A firmware hang takes USB serial with it: use the `RFUPS_DIAG` build (docs/TESTING.md) before asking the user for BOOTSEL.
 
@@ -47,6 +47,6 @@ Details and setup are in `docs/TESTING.md`.
 - `lib/power_monitor` (pure: mains debouncer, reset button) and `lib/mains_input` (GPIO27 on core 1, `setup1()`/`loop1()` in `main.cpp`); `src/factory_reset.cpp` samples GPIO22 on core 1
 - `lib/access_control` (pure): SNMP rate limiter and access log, keyed by `SourceKey` (full IPv4 or IPv6 address, 128 bits; `src/source_key.h`)
 - `lib/dhcp_option` (pure): asks for and reads DHCP option 224 (trap destination) by editing/reading frames in `src/net_stats.cpp`
-- `lib/web_ui` (pure): web page HTTP parser, login/sessions, pages; `src/web_service.cpp` serves it on TCP 80 (non-blocking); `src/stack_watch.cpp` core 0 stack high-water mark; `src/hostname.cpp` hostname (= sysName) for DHCP and mDNS
+- `lib/web_ui` (pure): web page HTTP parser, login/sessions, pages; `src/web_service.cpp` serves it on TCP 80 (non-blocking); `src/stack_watch.cpp` core 0 stack high-water mark; `src/hostname.cpp` hostname (= sysName) for DHCP and mDNS; `src/ipv6_static.cpp` static IPv6 address and gateway (lwIP `LWIP_HOOK_ND6_GET_GW`)
 - CI: `.github/workflows/tests.yml` runs native tests, sanitizers, net-snmp check and the firmware build
 - `test/native`, `test/embedded`, `test/hil`: the three test layers

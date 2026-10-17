@@ -517,8 +517,9 @@ public:
     std::string password = "goodpasswd1";
     bool saveOk = true;
     int passwordChecks = 0, networkSaves = 0, communitySaves = 0, hostnameSaves = 0, reboots = 0, disables = 0;
+    int ipv6Saves = 0;
     bool savedDhcp = false;
-    std::string savedIP, savedMask, savedGateway, savedCommunity, savedHostname;
+    std::string savedIP, savedMask, savedGateway, savedCommunity, savedHostname, savedIPv6, savedIPv6Gateway;
     int failed = 0, locked = 0, loggedIn = 0;
     uint8_t seed = 1;
     WebStatus st;
@@ -555,6 +556,12 @@ public:
         savedIP = ip;
         savedMask = mask;
         savedGateway = gw;
+        return saveOk;
+    }
+    bool saveIPv6(const char* address, const char* gateway) override {
+        ipv6Saves++;
+        savedIPv6 = address;
+        savedIPv6Gateway = gateway;
         return saveOk;
     }
     bool saveCommunity(const char* c) override {
@@ -731,19 +738,22 @@ static void test_ipv6_rows_only_when_the_device_has_ipv6() {
     fb->st.ipv6[0] = fb->st.ipv6LinkLocal[0] = '\0';
     std::string csrf;
     std::string page = get("/", logIn(csrf));
-    TEST_ASSERT_TRUE(page.find("IPv6") == std::string::npos);
+    TEST_ASSERT_TRUE(page.find("IPv6 address</th>") == std::string::npos);
+    TEST_ASSERT_TRUE(page.find("IPv6 link-local</th>") == std::string::npos);
+    TEST_ASSERT_TRUE(page.find("Static IPv6</th>") == std::string::npos);
 }
 
 static void test_actions_need_a_session() {
     webSetUp();
-    const char* paths[] = {"/community", "/network", "/reboot", "/logout", "/hostname", "/disable"};
+    const char* paths[] = {"/community", "/network", "/reboot", "/logout", "/hostname", "/disable", "/ipv6"};
     for (const char* p : paths) {
-        std::string resp = post(p, "community=x&mode=dhcp&hostname=x&confirm=yes&csrf=00");
+        std::string resp = post(p, "community=x&mode=dhcp&hostname=x&confirm=yes&ipv6=fd00::1&ipv6gw=&csrf=00");
         TEST_ASSERT_EQUAL_MESSAGE(403, statusCode(resp), p);
         resp = post(p, "community=x&mode=dhcp", std::string(32, 'a'));
         TEST_ASSERT_EQUAL_MESSAGE(403, statusCode(resp), p);
     }
-    TEST_ASSERT_EQUAL(0, fb->communitySaves + fb->networkSaves + fb->hostnameSaves + fb->reboots + fb->disables);
+    TEST_ASSERT_EQUAL(0, fb->communitySaves + fb->networkSaves + fb->hostnameSaves + fb->reboots + fb->disables +
+                             fb->ipv6Saves);
 }
 
 static void test_actions_need_the_session_csrf_token() {
@@ -1088,10 +1098,92 @@ static void test_longest_values_still_fit_the_page() {
     webSetUp();
     strcpy(fb->st.community, std::string(31, '"').c_str());  // every character escaped to 6
     strcpy(fb->st.hostname, std::string(32, 'h').c_str());
+    strcpy(fb->st.staticIPv6, "fd16:d833:4f0e:3ece:ffff:ffff:ffff:fffe");
+    strcpy(fb->st.ipv6Gateway, "fd16:d833:4f0e:3ece:ffff:ffff:ffff:ffff");
+    strcpy(fb->st.ipv6, "fd16:d833:4f0e:3ece:ffff:ffff:ffff:fffe");
     std::string csrf;
     std::string page = get("/", logIn(csrf));
     TEST_ASSERT_EQUAL(200, statusCode(page));
     TEST_ASSERT_TRUE(page.find("</html>") != std::string::npos);
+}
+
+static void test_ipv6_form_shows_the_stored_static_values() {
+    webSetUp();
+    std::string csrf;
+    std::string page = get("/", logIn(csrf));
+    TEST_ASSERT_TRUE(page.find("action=\"/ipv6\"") != std::string::npos);
+    TEST_ASSERT_EQUAL_STRING("", between(page, "name=\"ipv6\" maxlength=\"39\" value=\"", "\"").c_str());
+    TEST_ASSERT_TRUE(page.find("Static IPv6</th>") == std::string::npos);  // no row without a static address
+    webSetUp();
+    strcpy(fb->st.staticIPv6, "fd16:d833:4f0e:3ece::249");
+    strcpy(fb->st.ipv6Gateway, "fe80::1");
+    page = get("/", logIn(csrf));
+    TEST_ASSERT_EQUAL_STRING("fd16:d833:4f0e:3ece::249",
+                             between(page, "name=\"ipv6\" maxlength=\"39\" value=\"", "\"").c_str());
+    TEST_ASSERT_EQUAL_STRING("fe80::1", between(page, "name=\"ipv6gw\" maxlength=\"39\" value=\"", "\"").c_str());
+    TEST_ASSERT_TRUE(page.find("fd16:d833:4f0e:3ece::249</td>") != std::string::npos);  // status row
+}
+
+static void test_static_ipv6_is_validated_normalized_saved_and_reboots() {
+    webSetUp();
+    std::string csrf;
+    std::string token = logIn(csrf);
+    // Browsers send ':' as %3A; upper case and leading zeros are stored canonically
+    std::string resp = post("/ipv6", "csrf=" + csrf + "&ipv6=FD16%3AD833%3A4F0E%3A3ECE%3A0%3A0%3A0%3A0249&ipv6gw=FE80%3A%3A1",
+                            token);
+    TEST_ASSERT_EQUAL_MESSAGE(200, statusCode(resp), resp.c_str());
+    TEST_ASSERT_EQUAL(1, fb->ipv6Saves);
+    TEST_ASSERT_EQUAL_STRING("fd16:d833:4f0e:3ece::249", fb->savedIPv6.c_str());
+    TEST_ASSERT_EQUAL_STRING("fe80::1", fb->savedIPv6Gateway.c_str());
+    TEST_ASSERT_EQUAL(1, fb->reboots);
+    TEST_ASSERT_TRUE(resp.find("reachable at [fd16:d833:4f0e:3ece::249]") != std::string::npos);
+    TEST_ASSERT_EQUAL(0, fb->networkSaves);  // the IPv4 settings are not touched
+}
+
+static void test_empty_ipv6_form_removes_the_static_address() {
+    webSetUp();
+    strcpy(fb->st.staticIPv6, "fd00::10");
+    std::string csrf;
+    std::string token = logIn(csrf);
+    std::string resp = post("/ipv6", "csrf=" + csrf + "&ipv6=&ipv6gw=", token);
+    TEST_ASSERT_EQUAL(200, statusCode(resp));
+    TEST_ASSERT_EQUAL(1, fb->ipv6Saves);
+    TEST_ASSERT_EQUAL_STRING("", fb->savedIPv6.c_str());
+    TEST_ASSERT_EQUAL_STRING("", fb->savedIPv6Gateway.c_str());
+    TEST_ASSERT_EQUAL(1, fb->reboots);
+}
+
+static void test_invalid_static_ipv6_is_not_saved() {
+    webSetUp();
+    std::string csrf;
+    std::string token = logIn(csrf);
+    const char* bad[] = {
+        "ipv6=fe80%3A%3A10&ipv6gw=",                         // link-local
+        "ipv6=fd00%3A%3A1%2F64&ipv6gw=",                     // with /64
+        "ipv6=fd00%3A%3A1&ipv6gw=fd01%3A%3A1",               // gateway in another /64
+        "ipv6=fd00%3A%3A1&ipv6gw=fd00%3A%3A1",               // gateway = address
+        "ipv6=&ipv6gw=fe80%3A%3A1",                          // gateway without address
+        "ipv6=fd00%3A%3A1",                                  // gateway field missing
+        "ipv6=0000%3A0000%3A0000%3A0000%3A0000%3A0000%3A0000%3A00001&ipv6gw=",  // 40 characters
+        "ipv6=" "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa&ipv6gw=",  // longer than the field
+        "",
+    };
+    for (const char* b : bad) {
+        std::string resp = post("/ipv6", "csrf=" + csrf + "&" + b, token);
+        TEST_ASSERT_EQUAL_MESSAGE(400, statusCode(resp), b);
+        TEST_ASSERT_TRUE_MESSAGE(resp.find("alert alert-danger") != std::string::npos, b);
+    }
+    TEST_ASSERT_EQUAL(0, fb->ipv6Saves);
+    TEST_ASSERT_EQUAL(0, fb->reboots);
+}
+
+static void test_failed_ipv6_save_does_not_reboot() {
+    webSetUp();
+    fb->saveOk = false;
+    std::string csrf;
+    std::string token = logIn(csrf);
+    TEST_ASSERT_EQUAL(500, statusCode(post("/ipv6", "csrf=" + csrf + "&ipv6=fd00%3A%3A1&ipv6gw=", token)));
+    TEST_ASSERT_EQUAL(0, fb->reboots);
 }
 
 int main() {
@@ -1162,5 +1254,10 @@ int main() {
     RUN_TEST(test_session_found_among_many_other_cookies);
     RUN_TEST(test_every_single_byte_corruption_gets_a_well_formed_response);
     RUN_TEST(test_longest_values_still_fit_the_page);
+    RUN_TEST(test_ipv6_form_shows_the_stored_static_values);
+    RUN_TEST(test_static_ipv6_is_validated_normalized_saved_and_reboots);
+    RUN_TEST(test_empty_ipv6_form_removes_the_static_address);
+    RUN_TEST(test_invalid_static_ipv6_is_not_saved);
+    RUN_TEST(test_failed_ipv6_save_does_not_reboot);
     return UNITY_END();
 }

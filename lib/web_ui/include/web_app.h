@@ -12,6 +12,7 @@
  *   POST /network   DHCP or static IP; saves and reboots
  *   POST /community SNMP community; saves, active immediately
  *   POST /hostname  hostname (sysName, DHCP, mDNS); saves, active immediately
+ *   POST /ipv6      static IPv6 address and gateway (empty = none); saves and reboots
  *   POST /reboot
  *   POST /disable   turn the web interface off (asks first; confirm=yes does it)
  *   GET  /favicon.svg  the logo, no login
@@ -23,6 +24,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <access_control.h>
+#include <netconfig.h>
 #include "http_request.h"
 #include "web_auth.h"
 
@@ -46,6 +48,8 @@ struct WebStatus {
     char staticIP[16];    ///< Stored static configuration (form defaults)
     char subnetMask[16];
     char gateway[16];
+    char staticIPv6[IPV6_TEXT_MAX];   ///< Stored static IPv6 address, empty = none
+    char ipv6Gateway[IPV6_TEXT_MAX];  ///< Stored static IPv6 gateway, empty = none
     char community[32];
     char hostname[33];    ///< Valid hostname in use (DHCP, mDNS name.local, sysName)
 };
@@ -64,6 +68,8 @@ public:
     virtual bool checkPassword(const char* password) = 0;
     /// Save the network settings (static values only used when dhcp is false); reboot follows
     virtual bool saveNetwork(bool dhcp, const char* ip, const char* mask, const char* gateway) = 0;
+    /// Save the static IPv6 address and gateway (validated, RFC 5952 text, empty = none); reboot follows
+    virtual bool saveIPv6(const char* address, const char* gateway) = 0;
     /// Save and apply a new SNMP community
     virtual bool saveCommunity(const char* community) = 0;
     /// Save and apply a new hostname (already validated): sysName, DHCP and mDNS
@@ -108,6 +114,7 @@ public:
 private:
     const char* login(const HttpRequest& req, const SourceKey& source, uint32_t nowMs, WebBackend& backend, size_t& len);
     const char* network(const HttpRequest& req, size_t slot, WebBackend& backend, size_t& len);
+    const char* ipv6(const HttpRequest& req, size_t slot, WebBackend& backend, size_t& len);
     const char* community(const HttpRequest& req, size_t slot, WebBackend& backend, size_t& len);
     const char* hostname(const HttpRequest& req, size_t slot, WebBackend& backend, size_t& len);
     const char* disable(const HttpRequest& req, size_t slot, WebBackend& backend, size_t& len);
@@ -121,6 +128,7 @@ private:
     const char* stylesheet(size_t& len);
 
     WebSessions _sessions;
+    WebStatus _status;  // ~340 bytes: a member, not on core 0's stack
     LoginThrottle _throttle;
     char _cookies[WEB_COOKIE_HEADER_MAX];
     char _body[WEB_BODY_MAX];

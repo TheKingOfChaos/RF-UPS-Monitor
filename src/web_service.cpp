@@ -125,6 +125,8 @@ public:
         strlcpy(st.staticIP, currentSettings.staticIP, sizeof(st.staticIP));
         strlcpy(st.subnetMask, currentSettings.subnetMask, sizeof(st.subnetMask));
         strlcpy(st.gateway, currentSettings.gateway, sizeof(st.gateway));
+        strlcpy(st.staticIPv6, currentSettings.ipv6Address, sizeof(st.staticIPv6));
+        strlcpy(st.ipv6Gateway, currentSettings.ipv6Gateway, sizeof(st.ipv6Gateway));
         strlcpy(st.community, currentSettings.community, sizeof(st.community));
         strlcpy(st.hostname, hostnameCurrent(), sizeof(st.hostname));
     }
@@ -144,6 +146,18 @@ public:
         strlcpy(currentSettings.gateway, gateway, sizeof(currentSettings.gateway));
         if (saveSettings()) {
             Serial.printf("\nWeb: network settings saved (%s), rebooting\n", dhcp ? "DHCP" : ip);
+            return true;
+        }
+        currentSettings = settingsBackup;
+        return false;
+    }
+
+    bool saveIPv6(const char* address, const char* gateway) override {
+        settingsBackup = currentSettings;
+        strlcpy(currentSettings.ipv6Address, address, sizeof(currentSettings.ipv6Address));
+        strlcpy(currentSettings.ipv6Gateway, gateway, sizeof(currentSettings.ipv6Gateway));
+        if (saveSettings()) {
+            Serial.printf("\nWeb: static IPv6 saved (%s), rebooting\n", address[0] ? address : "none");
             return true;
         }
         currentSettings = settingsBackup;

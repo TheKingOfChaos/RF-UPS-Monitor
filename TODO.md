@@ -172,7 +172,8 @@ An item is only ticked when it is implemented **and** its tests exist and pass (
 - [x] Each core gets its own 8 KB stack (`core1_separate_stack`): with IPv6 only ~660 bytes of core 0's 4 KB were left after a page-load burst; now ~5.3 KB stay unused — HIL `test_page_load_burst_keeps_snmp_fast_and_stack_headroom`
 - [x] Rate limiter and access log keyed per full IPv4 or IPv6 address (`SourceKey`, 128 bits), ::/32 sources dropped; not per /64, so trust does not pass to other hosts in a manager's /64 — native `test_access_control`, HIL `test_wrong_community_over_ipv6_is_logged_with_the_full_pc_address`
 - [ ] Stage 2: IPv6 trap destination (v2c only)
-- [ ] Stage 3 (if needed): static IPv6 address, DHCPv6
+- [x] Static IPv6 address (/64) and gateway, serial menu option 9 and web page, next to SLAAC (2.4.0) — native `test_netconfig` (parse/format/validate, truncation), `test_settings_codec`, `test_web_ui`; HIL `test_ipv6_static.py` (opt-in `RFUPS_STATIC_IPV6`)
+- [ ] DHCPv6 address assignment (if needed)
 - [ ] Consider a hardware watchdog in normal builds (the IPv6 panic would have recovered by itself)
 - [ ] Simplify with lwIP options now that lwIP is known to compile with our flags: `DHCP_ADD_EXTRA_REQUEST_OPTIONS` + `LWIP_HOOK_DHCP_PARSE_OPTION` instead of editing DHCP frames, `SO_REUSE=1` instead of dropping TIME-WAIT entries
 

@@ -29,7 +29,10 @@ enum CliState {
     CLI_WEB_PASSWORD,   // Entering a new web password (echoed as *)
     CLI_WEB_REPEAT,     // Repeating it
     CLI_WEB_REGENERATE, // Confirming a new default web password
-    CLI_WEB_TOGGLE      // Confirming web interface on/off
+    CLI_WEB_TOGGLE,     // Confirming web interface on/off
+    CLI_IPV6_ADDRESS,   // Entering the static IPv6 address
+    CLI_IPV6_GATEWAY,   // Entering the static IPv6 gateway
+    CLI_IPV6_CONFIRM    // Confirming the IPv6 change, save and reboot
 };
 
 static CliState state = CLI_MENU;
@@ -53,6 +56,10 @@ static char newTrapTarget[16];
 static bool newTrapFromDhcp;
 static uint8_t newTrapVersion;
 
+// Static IPv6 values being entered, applied only on confirm
+static char newIPv6[IPV6_TEXT_MAX];
+static char newIPv6Gateway[IPV6_TEXT_MAX];
+
 // Web password being entered; cleared after use
 static char newWebPassword[WEB_PASSWORD_MAX + 1];
 
@@ -74,6 +81,7 @@ static void printMenu() {
     Serial.println("6. Web password");
     Serial.println("7. New default web password");
     Serial.println("8. Web interface on/off");
+    Serial.println("9. Static IPv6");
     Serial.println("?. Show this menu");
     Serial.print("> ");
 }
@@ -171,6 +179,12 @@ static void printStatus() {
     Serial.printf("Mode: %s\n", currentSettings.dhcpEnabled ? "DHCP" : "Static");
     Serial.printf("Stored static IP: %s / %s, gateway %s\n",
                   currentSettings.staticIP, currentSettings.subnetMask, currentSettings.gateway);
+    if (currentSettings.ipv6Address[0]) {
+        Serial.printf("Stored static IPv6: %s/64, gateway %s\n", currentSettings.ipv6Address,
+                      currentSettings.ipv6Gateway[0] ? currentSettings.ipv6Gateway : "from router advertisements");
+    } else {
+        Serial.println("Stored static IPv6: none (option 9)");
+    }
     Serial.println("Live interface:");
     printNetworkInfo();
 }
@@ -344,6 +358,47 @@ static void askConfirm() {
     state = CLI_CONFIRM;
 }
 
+/**
+ * @brief Accept an IPv6 line: Enter keeps current, "-" clears, else IPv6 text stored in RFC 5952 form
+ * @return true if dest now holds an empty or well-formed value (usability is checked by the caller)
+ */
+static bool takeIPv6(const char* input, const char* current, char* dest) {
+    const char* value = input[0] == '\0' ? current : strcmp(input, "-") == 0 ? "" : input;
+    if (value[0] == '\0') {
+        dest[0] = '\0';
+        return true;
+    }
+    uint8_t bytes[16];
+    if (!parseIPv6(value, bytes)) {
+        Serial.printf("'%s' is not a valid IPv6 address (write it without /64, e.g. fd00::10)\n", value);
+        return false;
+    }
+    formatIPv6(bytes, dest);
+    return true;
+}
+
+static void promptIPv6Address() {
+    prompt("Static IPv6 address, '-' for none", currentSettings.ipv6Address);
+    state = CLI_IPV6_ADDRESS;
+}
+
+static void promptIPv6Gateway() {
+    prompt("IPv6 gateway, '-' for routers that announce themselves", currentSettings.ipv6Gateway);
+    state = CLI_IPV6_GATEWAY;
+}
+
+static void askIPv6Confirm() {
+    Serial.println();
+    if (newIPv6[0]) {
+        Serial.printf("New static IPv6: %s/64, gateway %s\n", newIPv6,
+                      newIPv6Gateway[0] ? newIPv6Gateway : "from router advertisements");
+    } else {
+        Serial.println("New static IPv6: none");
+    }
+    Serial.print("Save and reboot? (y/n): ");
+    state = CLI_IPV6_CONFIRM;
+}
+
 static void promptWebPassword() {
     Serial.printf("New web password (%u-%u characters, no spaces), '-' for the device default, Enter to cancel: ",
                   (unsigned)WEB_PASSWORD_MIN, (unsigned)WEB_PASSWORD_MAX);
@@ -396,11 +451,68 @@ static void handleLine(const char* line) {
             Serial.printf(webEnabled() ? "The web interface is on. Turn it off? (y/n): "
                                        : "The web interface is off. Turn it on? (y/n): ");
             state = CLI_WEB_TOGGLE;
+        } else if (strcmp(line, "9") == 0) {
+            Serial.println("The address is used as a /64 next to the automatic (SLAAC) address.");
+            Serial.println("Press Enter to keep the value in brackets.");
+            promptIPv6Address();
         } else if (line[0] == '\0') {
             Serial.print("> ");
         } else {
             printMenu();
         }
+        break;
+
+    case CLI_IPV6_ADDRESS: {
+        if (!takeIPv6(line, currentSettings.ipv6Address, newIPv6)) {
+            promptIPv6Address();
+            break;
+        }
+        StaticIPv6Error err = validateStaticIPv6(newIPv6, "");
+        if (err != StaticIPv6Error::None) {
+            Serial.println(staticIPv6ErrorMessage(err));
+            promptIPv6Address();
+        } else if (newIPv6[0] == '\0') {
+            newIPv6Gateway[0] = '\0';  // no gateway without an address
+            askIPv6Confirm();
+        } else {
+            promptIPv6Gateway();
+        }
+        break;
+    }
+
+    case CLI_IPV6_GATEWAY: {
+        if (!takeIPv6(line, currentSettings.ipv6Gateway, newIPv6Gateway)) {
+            promptIPv6Gateway();
+            break;
+        }
+        StaticIPv6Error err = validateStaticIPv6(newIPv6, newIPv6Gateway);
+        if (err != StaticIPv6Error::None) {
+            Serial.println(staticIPv6ErrorMessage(err));
+            promptIPv6Gateway();
+        } else {
+            askIPv6Confirm();
+        }
+        break;
+    }
+
+    case CLI_IPV6_CONFIRM:
+        if (line[0] == 'y' || line[0] == 'Y') {
+            settingsBackup = currentSettings;
+            strlcpy(currentSettings.ipv6Address, newIPv6, sizeof(currentSettings.ipv6Address));
+            strlcpy(currentSettings.ipv6Gateway, newIPv6Gateway, sizeof(currentSettings.ipv6Gateway));
+            if (saveSettings()) {
+                Serial.println("Settings saved. Rebooting...");
+                Serial.flush();
+                delay(200);
+                rp2040.reboot();
+            }
+            currentSettings = settingsBackup;
+            Serial.println("Failed to save settings, nothing changed");
+        } else {
+            Serial.println("Cancelled");
+        }
+        state = CLI_MENU;
+        printMenu();
         break;
 
     case CLI_STATIC_IP:

@@ -104,6 +104,8 @@ $env:RFUPS_STATIC_GW = "10.10.0.1"     # optional, default: current DHCP gateway
 $env:RFUPS_MANUAL_MAINS = "1"          # optional, mains off/on tests where you switch mains when asked
 $env:RFUPS_MANUAL_BUTTON = "1"         # optional, interactive factory reset button test
 $env:RFUPS_DHCP_TRAP_TARGET = "10.10.6.65" # optional: the address your DHCP server sends in option 224
+$env:RFUPS_STATIC_IPV6 = "fd16:d833:4f0e:3ece::249" # optional: free address in the device's /64 (static IPv6 test)
+$env:RFUPS_STATIC_IPV6_GATEWAY = "fe80::1"         # optional: gateway for that test (stored and shown only)
 ```
 
 ### Mains tests with a smart plug
@@ -133,6 +135,9 @@ Flashing an embedded test replaces the firmware, so always reflash with `pio run
 - IPv4 parsing: valid addresses, octet range, octet count, stray characters, signs, whitespace, empty and null input, output left untouched on failure
 - Subnet masks: every prefix /1 to /32 accepted, zero and non-contiguous masks rejected
 - Static configuration: first failing field reported, network/broadcast host rejected, /31 and /32 handled, gateway outside the subnet or equal to the host rejected
+- IPv6 parsing: full and compressed forms, `::` at start/middle/end and for one group, upper case, the 39-character maximum; malformed text (`:::`, two `::`, 7 or 9 groups, 5-digit groups, `/64`, `%zone`, IPv4 tails, spaces, 40 characters) refused with the output untouched; every truncation of an address
+- IPv6 formatting (RFC 5952): longest zero run as `::`, first run on a tie, single zero group kept, lower case
+- Static IPv6: empty = none, gateway without address refused; ::/8, link-local, multicast and zero interface id refused; gateway must be unicast, link-local or in the /64, and differ from the address
 
 ### Hostnames in `test/native/test_netconfig`
 - Hostname rules (length 1-32, letters/digits/'-', no leading or trailing '-', one label, ASCII only)
@@ -151,6 +156,7 @@ Flashing an embedded test replaces the firmware, so always reflash with `pio run
 - Static configuration is validated only when DHCP is off
 - Sequence comparison across 32-bit wrap-around, A/B slot selection, and fallback when the newer copy is invalid
 - sysName/sysContact/sysLocation: defaults, round trip with characters JSON escapes, worst-case size fits, older files load with defaults, over-long/non-printable/mistyped values rejected, empty allowed; `settingsTextIsValid` boundaries
+- Static IPv6: empty by default and for files without the fields, round trip and equality, works with DHCP for IPv4, invalid/over-long/mistyped values rejected
 
 ### `test/native/test_snmp_ber`: `lib/snmp_ber`
 - OID text parsing and formatting, X.690 rules for the first two arcs, 32-bit arcs, arc limit
@@ -197,7 +203,7 @@ Flashing an embedded test replaces the firmware, so always reflash with `pio run
 - Sessions: token format, idle expiry, millis wrap, replacement of the least recently used, logout/clear; login throttle: lockout after 5 failures for 30 s, reset on success, wrap
 - HTTP parser: GET/POST, every prefix incomplete, byte-by-byte, header lookup, size limits at the boundary, malformed request lines, chunked, NUL bytes, extra bytes; form and cookie decoding; HTML escaping
 - Stylesheet: served without login with gzip and year-long caching headers, body straight from flash; the embedded data is a gzip file whose trailer matches the CSS size; pages link it; the policy allows it and still no scripts; mains and link badges follow the state
-- Page logic with a fake backend: login form, right/wrong login, lockout, status values escaped, every action needs session and CSRF token, community and network validation, save failure, reboot, logout, idle expiry, 404/405/400/413, security headers and Content-Length on every response, every single-byte corruption of two real requests gives a well-formed response
+- Page logic with a fake backend: login form, right/wrong login, lockout, status values escaped, every action needs session and CSRF token, community, network and IPv6 validation (IPv6 stored in short form, empty removes it), save failure, reboot, logout, idle expiry, 404/405/400/413, security headers and Content-Length on every response, every single-byte corruption of two real requests gives a well-formed response
 
 ### `test/native/test_snmp_trap`: trap encoding
 - mainsPowerLost and coldStart byte-for-byte identical to net-snmp's `snmptrap` output for the same fields; authenticationFailure differs only in generic-trap
@@ -295,6 +301,11 @@ Uses `test/settings_a.json` and `test/settings_b.json`, never the real settings.
 - SNMP get over IPv6, a wrong community over IPv6 logged with the PC's full address, web page at `http://[address]/`, `name.local` resolves to IPv6, IPv4 still answers
 - Four requests sent back to back over IPv4 and over IPv6 are all answered (they crashed the device before `LWIP_IPV6_FRAG=0`)
 - No restart during the run (sysUpTime keeps rising): the first IPv6 build panicked seconds after boot
+
+### `test/hil/test_ipv6_static.py`: static IPv6 address
+- Menu option 9 refuses link-local addresses, `/64` suffixes and gateways outside the /64, shows the address in short form, and `n` changes nothing
+- Opt-in (`RFUPS_STATIC_IPV6`): the address is set, the device restarts, the address passes duplicate detection and is marked `(static)` while the link-local and SLAAC addresses stay; ping6, SNMP and the web page answer on it; then it is removed again
+- The device must start without a static IPv6 address (the suite skips otherwise)
 
 ### `test/hil/test_dhcp_trap.py`: trap destination from DHCP
 - Choosing `dhcp` asks for option 224 in the renewal, the LAN's server still answers (same lease and IP, SNMP answers), the status screen reports the ACK; back to fixed

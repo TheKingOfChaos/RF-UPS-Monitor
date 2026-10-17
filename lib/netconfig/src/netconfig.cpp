@@ -124,3 +124,147 @@ void hostnameFromText(const char* text, char* out) {
         out[HOSTNAME_MAX_LENGTH] = '\0';
     }
 }
+
+// ---- IPv6 ----
+
+/// Value of a hex digit, -1 for anything else
+static int hexValue(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+bool parseIPv6(const char* text, uint8_t out[16]) {
+    if (text == nullptr) return false;
+    size_t len = strnlen(text, IPV6_TEXT_MAX);
+    if (len == 0 || len >= IPV6_TEXT_MAX) return false;
+
+    uint16_t groups[8];
+    int count = 0;
+    int gap = -1;  // index in groups where "::" stands, -1 if there is none
+    const char* p = text;
+    if (p[0] == ':') {
+        if (p[1] != ':') return false;  // a single leading ':'
+        gap = 0;
+        p += 2;
+    }
+    while (*p) {
+        if (count == 8) return false;
+        uint32_t value = 0;
+        int digits = 0;
+        for (int v; (v = hexValue(*p)) >= 0; p++) {
+            if (++digits > 4) return false;
+            value = value * 16 + (uint32_t)v;
+        }
+        if (digits == 0) return false;  // ":::", stray characters, IPv4 dots, '/', '%'
+        groups[count++] = (uint16_t)value;
+        if (*p == '\0') break;
+        if (*p != ':') return false;
+        p++;
+        if (*p == ':') {
+            if (gap >= 0) return false;  // a second "::"
+            gap = count;
+            p++;
+        } else if (*p == '\0') {
+            return false;  // a single trailing ':'
+        }
+    }
+    // Without "::" all eight groups are written; "::" stands for at least one zero group
+    if (gap < 0 ? count != 8 : count > 7) return false;
+
+    uint16_t full[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+    if (gap < 0) {
+        memcpy(full, groups, sizeof(full));
+    } else {
+        for (int i = 0; i < gap; i++) full[i] = groups[i];
+        int tail = count - gap;
+        for (int i = 0; i < tail; i++) full[8 - tail + i] = groups[gap + i];
+    }
+    for (int i = 0; i < 8; i++) {
+        out[2 * i] = (uint8_t)(full[i] >> 8);
+        out[2 * i + 1] = (uint8_t)full[i];
+    }
+    return true;
+}
+
+void formatIPv6(const uint8_t addr[16], char* out) {
+    uint16_t g[8];
+    for (int i = 0; i < 8; i++) g[i] = (uint16_t)(addr[2 * i] << 8 | addr[2 * i + 1]);
+    // The longest run of two or more zero groups (the first if tied) becomes "::"
+    int bestStart = -1, bestLen = 1;
+    for (int i = 0; i < 8;) {
+        if (g[i] != 0) {
+            i++;
+            continue;
+        }
+        int j = i;
+        while (j < 8 && g[j] == 0) j++;
+        if (j - i > bestLen) {
+            bestStart = i;
+            bestLen = j - i;
+        }
+        i = j;
+    }
+    static const char HEX[] = "0123456789abcdef";
+    char* p = out;
+    for (int i = 0; i < 8; i++) {
+        if (i == bestStart) {
+            *p++ = ':';
+            if (i == 0) *p++ = ':';
+            i += bestLen - 1;
+            continue;
+        }
+        bool started = false;
+        for (int shift = 12; shift >= 0; shift -= 4) {
+            int d = g[i] >> shift & 0xF;
+            if (d || started || shift == 0) {
+                *p++ = HEX[d];
+                started = true;
+            }
+        }
+        if (i < 7) *p++ = ':';
+    }
+    *p = '\0';
+}
+
+/// fe80::/10
+static bool isLinkLocal6(const uint8_t a[16]) {
+    return a[0] == 0xFE && (a[1] & 0xC0) == 0x80;
+}
+
+StaticIPv6Error validateStaticIPv6(const char* address, const char* gateway) {
+    bool hasAddress = address != nullptr && address[0] != '\0';
+    bool hasGateway = gateway != nullptr && gateway[0] != '\0';
+    if (!hasAddress) return hasGateway ? StaticIPv6Error::GatewayWithoutAddress : StaticIPv6Error::None;
+
+    uint8_t a[16];
+    if (!parseIPv6(address, a)) return StaticIPv6Error::InvalidAddress;
+    // ::/8 holds unspecified, loopback and IPv4-mapped/compatible addresses; link-local
+    // addresses are made automatically; an all-zero interface id is the subnet-router anycast address
+    bool idIsZero = true;
+    for (int i = 8; i < 16; i++) idIsZero = idIsZero && a[i] == 0;
+    if (a[0] == 0 || a[0] == 0xFF || isLinkLocal6(a) || idIsZero) return StaticIPv6Error::AddressNotUsable;
+    if (!hasGateway) return StaticIPv6Error::None;
+
+    uint8_t g[16];
+    if (!parseIPv6(gateway, g)) return StaticIPv6Error::InvalidGateway;
+    if (g[0] == 0 || g[0] == 0xFF) return StaticIPv6Error::GatewayNotUsable;
+    if (!isLinkLocal6(g) && memcmp(a, g, 8) != 0) return StaticIPv6Error::GatewayNotOnLink;
+    if (memcmp(a, g, 16) == 0) return StaticIPv6Error::GatewayIsHost;
+    return StaticIPv6Error::None;
+}
+
+const char* staticIPv6ErrorMessage(StaticIPv6Error error) {
+    switch (error) {
+    case StaticIPv6Error::None:             return "OK";
+    case StaticIPv6Error::InvalidAddress:   return "IPv6 address is not valid (write it without /64, e.g. fd00::10)";
+    case StaticIPv6Error::AddressNotUsable: return "IPv6 address must be a global or ULA unicast address with a non-zero interface id";
+    case StaticIPv6Error::InvalidGateway:   return "IPv6 gateway is not a valid IPv6 address";
+    case StaticIPv6Error::GatewayNotUsable: return "IPv6 gateway must be a unicast address";
+    case StaticIPv6Error::GatewayNotOnLink: return "IPv6 gateway must be link-local (fe80::...) or in the address's /64";
+    case StaticIPv6Error::GatewayIsHost:    return "IPv6 gateway must differ from the address";
+    case StaticIPv6Error::GatewayWithoutAddress: return "An IPv6 gateway needs a static IPv6 address";
+    }
+    return "Unknown error";
+}

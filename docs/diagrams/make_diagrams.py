@@ -198,7 +198,7 @@ def firmware_architecture():
 
     d.zone("z-pure", 40, 340, 1650, 330, "lib/  pure C++, host tested", ZONE_GREEN, title_at="bottom",
            title_x=760)
-    pure = [("codec", "settings_codec\nJSON, validation,\nA/B selection"), ("netcfg", "netconfig\nIPv4 parse +\nvalidate"),
+    pure = [("codec", "settings_codec\nJSON, validation,\nA/B selection"), ("netcfg", "netconfig\nIPv4/IPv6 parse +\nvalidate"),
             ("agent", "snmp_agent\nMIB, Get / GetNext /\nGetBulk, traps"), ("acl", "access_control\nrate limiter,\naccess log"),
             ("ifst", "if_stats\nframe classes,\nPHYCFGR decode"), ("power", "power_monitor\ndebouncer,\nreset button"),
             ("webui", "web_ui\nHTTP parser, login,\nsessions, pages")]
@@ -314,11 +314,11 @@ def test_layers():
     layers = [
         ("lnms", "LibreNMS in Docker: definitions, sensors, alert on a real mains cut", VIOLET),
         ("mains", "Mains HIL: a Dirigera smart plug switches real mains", RED),
-        ("hil", "HIL (Python): menu, SNMP, traps, web, DHCP option 224, IPv6, reboot", ORANGE),
+        ("hil", "HIL (Python): menu, SNMP, traps, web, DHCP option 224, IPv6 (static too), reboot", ORANGE),
         ("emb", "On-device Unity tests: LittleFS, W5500, GPIO27 sampler", YELLOW),
         ("host", "Host agent vs real net-snmp (WSL): 52 checks, MIB validation", CYAN),
         ("san", "Sanitizers (WSL): every native suite under ASan + UBSan", CYAN),
-        ("native", "Native unit tests: 363 tests of lib/, frames from the device and Kea", GREEN),
+        ("native", "Native unit tests: 384 tests of lib/, frames from the device and Kea", GREEN),
     ]
     for i, (eid, text, bg) in enumerate(layers):
         d.box(eid, 120, 110 + i * 100, 820, 80, text, bg, 18)

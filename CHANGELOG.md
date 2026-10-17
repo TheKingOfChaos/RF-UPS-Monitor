@@ -6,6 +6,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-10-17
+
+### Added
+- **Static IPv6 address and gateway:** serial menu option 9 and an IPv6 card on the web page. One address (/64), added next to the link-local and SLAAC addresses, with duplicate address detection; an optional gateway that becomes the next hop for all off-link IPv6 traffic (lwIP hook `LWIP_HOOK_ND6_GET_GW`, `include/lwip_hooks.h`), otherwise the advertised routers are used. Addresses are checked (no link-local, multicast, ::/8 or zero interface id; gateway link-local or in the /64) and stored in RFC 5952 form. The status screen marks the address `(static)` or `(DUPLICATE ...)` and shows the IPv6 gateway.
+- Settings: optional `ipv6Address` and `ipv6Gateway` fields; files from older firmware load unchanged (empty = none), a factory reset clears them.
+
+### Changed
+- lwIP keeps 4 IPv6 addresses (`LWIP_IPV6_NUM_ADDRESSES=4`, was 3): link-local, static and two advertised prefixes.
+- `SETTINGS_JSON_MAX` 896 -> 1024 bytes for the two new fields.
+- The web page's status data (~340 bytes) is a member of the page object instead of a local variable, keeping it off core 0's stack.
+- IPv6 text parsing and RFC 5952 formatting live in `lib/netconfig` (`parseIPv6`, `formatIPv6`); the access log uses the same formatter.
+
 ## [2.3.0] - 2026-10-17
 
 ### Added

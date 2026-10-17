@@ -31,7 +31,7 @@ declare -A SUITES=(
     [test_snmp_trap]="snmp_agent snmp_ber if_stats"
     [test_if_stats]="if_stats"
     [test_dhcp_option]="dhcp_option"
-    [test_access_control]="access_control"
+    [test_access_control]="access_control netconfig"
     [test_web_ui]="web_ui settings_codec netconfig access_control"
 )
 

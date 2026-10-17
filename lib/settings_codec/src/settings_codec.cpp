@@ -13,7 +13,8 @@ static const char* const DEFAULT_GATEWAY = "192.168.1.1";
 static const char* const DEFAULT_SYS_NAME = "rf-ups-monitor";
 
 // Room for the parsed document: the object, its members and copies of all strings
-static const size_t JSON_DOC_CAPACITY = SETTINGS_JSON_MAX + JSON_OBJECT_SIZE(16);
+static const size_t JSON_FIELDS = 20;  // 17 used, room for a few more
+static const size_t JSON_DOC_CAPACITY = SETTINGS_JSON_MAX + JSON_OBJECT_SIZE(JSON_FIELDS);
 
 /**
  * @brief Copy a string into a fixed buffer, failing instead of truncating
@@ -52,12 +53,14 @@ void settingsDefaults(Settings& s) {
 
 size_t settingsToJson(const Settings& s, char* buf, size_t size) {
     // Strings are stored by pointer, so the document only needs the object
-    StaticJsonDocument<JSON_OBJECT_SIZE(16)> doc;
+    StaticJsonDocument<JSON_OBJECT_SIZE(JSON_FIELDS)> doc;
     doc["community"] = (const char*)s.community;
     doc["dhcpEnabled"] = s.dhcpEnabled;
     doc["staticIP"] = (const char*)s.staticIP;
     doc["subnetMask"] = (const char*)s.subnetMask;
     doc["gateway"] = (const char*)s.gateway;
+    doc["ipv6Address"] = (const char*)s.ipv6Address;
+    doc["ipv6Gateway"] = (const char*)s.ipv6Gateway;
     doc["sysName"] = (const char*)s.sysName;
     doc["sysContact"] = (const char*)s.sysContact;
     doc["sysLocation"] = (const char*)s.sysLocation;
@@ -136,11 +139,14 @@ SettingsParseError settingsFromJson(const char* json, Settings& out) {
     if ((err = readOptionalText(doc["sysName"], s.sysName, sizeof(s.sysName))) != SettingsParseError::None ||
         (err = readOptionalText(doc["sysContact"], s.sysContact, sizeof(s.sysContact))) != SettingsParseError::None ||
         (err = readOptionalText(doc["sysLocation"], s.sysLocation, sizeof(s.sysLocation))) != SettingsParseError::None ||
-        (err = readOptionalText(doc["trapTarget"], s.trapTarget, sizeof(s.trapTarget))) != SettingsParseError::None) {
+        (err = readOptionalText(doc["trapTarget"], s.trapTarget, sizeof(s.trapTarget))) != SettingsParseError::None ||
+        (err = readOptionalText(doc["ipv6Address"], s.ipv6Address, sizeof(s.ipv6Address))) != SettingsParseError::None ||
+        (err = readOptionalText(doc["ipv6Gateway"], s.ipv6Gateway, sizeof(s.ipv6Gateway))) != SettingsParseError::None) {
         return err;
     }
     uint8_t trapAddr[4];
     if (s.trapTarget[0] != '\0' && !parseIPv4(s.trapTarget, trapAddr)) return SettingsParseError::BadTrapTarget;
+    if (validateStaticIPv6(s.ipv6Address, s.ipv6Gateway) != StaticIPv6Error::None) return SettingsParseError::BadStaticIPv6;
 
     JsonVariantConst webPassword = doc["webPassword"];
     if (!webPassword.isNull()) {
@@ -191,6 +197,7 @@ const char* settingsParseErrorMessage(SettingsParseError error) {
     case SettingsParseError::BadTrapTarget:   return "invalid trap destination";
     case SettingsParseError::BadTrapVersion:  return "invalid trap version";
     case SettingsParseError::BadWebPassword:  return "invalid web password hash";
+    case SettingsParseError::BadStaticIPv6:   return "invalid static IPv6 configuration";
     }
     return "unknown error";
 }
@@ -198,7 +205,8 @@ const char* settingsParseErrorMessage(SettingsParseError error) {
 bool settingsEqual(const Settings& a, const Settings& b) {
     return strcmp(a.community, b.community) == 0 && a.dhcpEnabled == b.dhcpEnabled &&
            strcmp(a.staticIP, b.staticIP) == 0 && strcmp(a.subnetMask, b.subnetMask) == 0 &&
-           strcmp(a.gateway, b.gateway) == 0 && strcmp(a.sysName, b.sysName) == 0 &&
+           strcmp(a.gateway, b.gateway) == 0 && strcmp(a.ipv6Address, b.ipv6Address) == 0 &&
+           strcmp(a.ipv6Gateway, b.ipv6Gateway) == 0 && strcmp(a.sysName, b.sysName) == 0 &&
            strcmp(a.sysContact, b.sysContact) == 0 && strcmp(a.sysLocation, b.sysLocation) == 0 &&
            strcmp(a.trapTarget, b.trapTarget) == 0 && a.trapVersion == b.trapVersion &&
            a.trapFromDhcp == b.trapFromDhcp && a.webEnabled == b.webEnabled &&

@@ -190,7 +190,7 @@ const char* WebApp::redirect(const char* extraHeaders, size_t& len) {
 
 const char* WebApp::mainPage(int code, const char* reason, size_t slot, WebBackend& backend, const char* text,
                              bool error, size_t& len) {
-    WebStatus st;
+    WebStatus& st = _status;
     memset(&st, 0, sizeof(st));
     backend.status(st);
     const char* csrf = _sessions.csrf(slot);
@@ -255,6 +255,7 @@ const char* WebApp::mainPage(int code, const char* reason, size_t slot, WebBacke
     if (st.ipv6LinkLocal[0] && strcmp(st.ipv6LinkLocal, st.ipv6) != 0) row(b, "IPv6 link-local", st.ipv6LinkLocal);
     row(b, "MAC address", st.mac);
     row(b, "Network mode", st.dhcp ? "DHCP" : "static");
+    if (st.staticIPv6[0]) row(b, "Static IPv6", st.staticIPv6);
     b.add("</tbody></table></div>");
 
     b.add("<div class=\"card shadow-sm mt-4\"><div class=\"card-body d-flex justify-content-between "
@@ -290,6 +291,18 @@ const char* WebApp::mainPage(int code, const char* reason, size_t slot, WebBacke
     textInput(b, "Subnet mask", "mask", st.subnetMask, 15);
     b.add("</div><div class=\"col-sm-4\">");
     textInput(b, "Gateway", "gateway", st.gateway, 15);
+    b.add("</div></div><button class=\"btn btn-primary\" type=\"submit\">Save and restart</button>"
+          "<span class=\"form-text ms-2\">Saving restarts the device.</span></form></div></div>");
+
+    cardStart(b, "IPv6", "mt-4");
+    b.add("<div class=\"card-body\"><form method=\"post\" action=\"/ipv6\">");
+    csrfField(b, csrf);
+    b.add("<div class=\"row g-2\"><div class=\"col-sm-7\">");
+    textInput(b, "Static IPv6 address", "ipv6", st.staticIPv6, IPV6_TEXT_MAX - 1,
+              "Always /64, e.g. fd00::10. Empty: none. Added next to the automatic (SLAAC) address.");
+    b.add("</div><div class=\"col-sm-5\">");
+    textInput(b, "IPv6 gateway", "ipv6gw", st.ipv6Gateway, IPV6_TEXT_MAX - 1,
+              "Optional; empty: routers that announce themselves.");
     b.add("</div></div><button class=\"btn btn-primary\" type=\"submit\">Save and restart</button>"
           "<span class=\"form-text ms-2\">Saving restarts the device.</span></form></div></div>");
 
@@ -358,7 +371,7 @@ const char* WebApp::network(const HttpRequest& req, size_t slot, WebBackend& bac
     char ip[16], mask[16], gateway[16];
     if (strcmp(mode, "dhcp") == 0) {
         // Keep the stored static values for a later switch back
-        WebStatus st;
+        WebStatus& st = _status;
         memset(&st, 0, sizeof(st));
         backend.status(st);
         ok = backend.saveNetwork(true, st.staticIP, st.subnetMask, st.gateway);
@@ -386,6 +399,36 @@ const char* WebApp::network(const HttpRequest& req, size_t slot, WebBackend& bac
     } else {
         t.add("The settings are saved and the device restarts now with DHCP. Find its new address in your "
               "DHCP server or on the serial status screen.");
+    }
+    return notice(200, "OK", "Restarting", text, len);
+}
+
+const char* WebApp::ipv6(const HttpRequest& req, size_t slot, WebBackend& backend, size_t& len) {
+    char address[IPV6_TEXT_MAX + 1], gateway[IPV6_TEXT_MAX + 1];
+    if (!formValue(req.body(), req.bodyLength(), "ipv6", address, sizeof(address)) ||
+        !formValue(req.body(), req.bodyLength(), "ipv6gw", gateway, sizeof(gateway))) {
+        return mainPage(400, "Bad Request", slot, backend, "Enter IPv6 addresses such as fd00::10.", true, len);
+    }
+    StaticIPv6Error err = validateStaticIPv6(address, gateway);
+    if (err != StaticIPv6Error::None) {
+        return mainPage(400, "Bad Request", slot, backend, staticIPv6ErrorMessage(err), true, len);
+    }
+    // Store the canonical form, so "FD00:0::10" and "fd00::10" are the same setting
+    uint8_t bytes[16];
+    if (address[0] && parseIPv6(address, bytes)) formatIPv6(bytes, address);
+    if (gateway[0] && parseIPv6(gateway, bytes)) formatIPv6(bytes, gateway);
+    if (!backend.saveIPv6(address, gateway)) {
+        return mainPage(500, "Internal Server Error", slot, backend, "Saving failed, nothing changed.", true, len);
+    }
+    backend.requestReboot();
+    char text[160];
+    TextBuffer t(text, sizeof(text));
+    if (address[0]) {
+        t.add("The settings are saved and the device restarts now. It will also be reachable at [");
+        t.add(address);
+        t.add("] in a few seconds.");
+    } else {
+        t.add("The static IPv6 address is removed and the device restarts now.");
     }
     return notice(200, "OK", "Restarting", text, len);
 }
@@ -501,7 +544,7 @@ const char* WebApp::handle(const HttpRequest& req, const SourceKey& sourceIP, ui
 
     bool action = strcmp(path, "/logout") == 0 || strcmp(path, "/network") == 0 ||
                   strcmp(path, "/community") == 0 || strcmp(path, "/reboot") == 0 ||
-                  strcmp(path, "/hostname") == 0 || strcmp(path, "/disable") == 0;
+                  strcmp(path, "/hostname") == 0 || strcmp(path, "/disable") == 0 || strcmp(path, "/ipv6") == 0;
     if (!action) return notice(404, "Not Found", "Not found", "There is no such page.", len);
     if (!post) return notice(405, "Method Not Allowed", "Not allowed", "Use the buttons on the start page.", len);
     if (slot < 0) {
@@ -518,6 +561,7 @@ const char* WebApp::handle(const HttpRequest& req, const SourceKey& sourceIP, ui
         return redirect("Set-Cookie: sid=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict\r\n", len);
     }
     if (strcmp(path, "/network") == 0) return network(req, (size_t)slot, backend, len);
+    if (strcmp(path, "/ipv6") == 0) return ipv6(req, (size_t)slot, backend, len);
     if (strcmp(path, "/community") == 0) return community(req, (size_t)slot, backend, len);
     if (strcmp(path, "/hostname") == 0) return hostname(req, (size_t)slot, backend, len);
     if (strcmp(path, "/disable") == 0) return disable(req, (size_t)slot, backend, len);

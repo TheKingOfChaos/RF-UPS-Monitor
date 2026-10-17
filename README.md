@@ -2,7 +2,7 @@
 
 A mains power monitor built on a Raspberry Pi Pico with a W5500 Ethernet module. It reports whether mains power is present over SNMP v1 and v2c, including traps, together with standard interface statistics (IF-MIB) and the board temperature, so it can be monitored by LibreNMS or any other SNMP manager. It is configured through a menu on the USB serial port.
 
-Current version: **2.3.0** (see [CHANGELOG.md](CHANGELOG.md)).
+Current version: **2.4.0** (see [CHANGELOG.md](CHANGELOG.md)).
 
 ## Overview
 
@@ -31,6 +31,7 @@ More diagrams (firmware architecture, SNMP request flow, mains flow, settings, t
 | Hostname for SNMP sysName, DHCP and mDNS (`name.local`) | Working |
 | Web interface can be turned off (serial menu or the page itself) | Working |
 | IPv6 (dual stack): SNMP, web page and mDNS over IPv6, SLAAC, per-address rate limiting | Working |
+| Static IPv6 address and gateway (serial menu or web page), next to SLAAC | Working |
 | SNMP trap destination from DHCP option 224 | Working, tested with Kea 2.2.0; in your network once the DHCP server has option 224 |
 | Interface statistics (IF-MIB ifTable/ifXTable, 64-bit counters) | Working, counted by the firmware |
 | Board temperature (RP2040 internal sensor) | Working |
@@ -88,6 +89,7 @@ Connect to the Pico's USB serial port (`COM16` here) at **115200 baud, 8N1**, wi
 6. Web password
 7. New default web password
 8. Web interface on/off
+9. Static IPv6
 ?. Show this menu
 >
 ```
@@ -117,6 +119,7 @@ Web login: user admin, default password "k7wqz3mtd9" (change with option 6)
 Core 0 stack: 2520 bytes never used
 Mode: DHCP
 Stored static IP: 10.10.6.249 / 255.255.0.0, gateway 10.10.0.1
+Stored static IPv6: fd16:d833:4f0e:3ece::249/64, gateway from router advertisements
 Live interface:
 State: connected
 MAC: 1E:B2:CF:4E:A2:2C
@@ -124,7 +127,9 @@ IP: 10.10.6.111
 Subnet: 255.255.0.0
 Gateway: 10.10.0.1
 IPv6: FE80::1CB2:CFFF:FE4E:A22C
+IPv6: FD16:D833:4F0E:3ECE::249 (static)
 IPv6: FD16:D833:4F0E:3ECE:1CB2:CFFF:FE4E:A22C
+IPv6 gateway: from router advertisements
 DNS: 10.10.0.1
 ```
 
@@ -204,6 +209,24 @@ Each new entry is also printed on the serial port when it happens (`SNMP access:
 
 **8. Web interface on/off** switches the web page on or off after you confirm with `y`. Off closes TCP port 80, logs every browser out and stops announcing the page over mDNS; SNMP and the serial menu are not affected. The setting is kept across restarts; a factory reset turns the web interface on again. Turning it on takes effect at once; the status screen shows `Web interface: on (TCP port 80)`.
 
+**9. Static IPv6** asks for a static IPv6 address and an optional IPv6 gateway. Enter keeps the value in brackets, `-` removes it. The address is always a /64 and is added next to the link-local and SLAAC addresses; it is independent of DHCP/static IPv4.
+
+```
+> 9
+The address is used as a /64 next to the automatic (SLAAC) address.
+Press Enter to keep the value in brackets.
+Static IPv6 address, '-' for none []: fd16:d833:4f0e:3ece::249
+IPv6 gateway, '-' for routers that announce themselves []:
+
+New static IPv6: fd16:d833:4f0e:3ece::249/64, gateway from router advertisements
+Save and reboot? (y/n): y
+Settings saved. Rebooting...
+```
+
+- Address: a global (`2001:db8:...`) or ULA (`fd..`) unicast address, written without `/64`; not link-local (`fe80::`, made automatically), multicast, `::1`, IPv4-mapped, or with an all-zero interface id (`prefix::`). It is stored in the short form (`FD16:0:0:0:0:0:0:249` becomes `fd16::249`).
+- Gateway: optional. Empty: the device uses the routers that announce themselves (router advertisements). Set: every off-link IPv6 destination goes through it; it must be link-local (`fe80::1`, usual for routers) or in the address's /64.
+- Saved to flash; the device reboots to apply it. A factory reset removes it.
+
 If you lock yourself out with a wrong static address, use the serial menu to switch back to DHCP, or do a factory reset.
 
 ## Web page
@@ -215,6 +238,7 @@ The device serves a small configuration page on **http://&lt;device IP&gt;/** (p
 - **Status:** mains power (green or red badge) and change count, uptime, board temperature, Ethernet link, hostname and `.local` name, IP and MAC address, network mode, firmware version.
 - **Device name:** the hostname (also SNMP sysName and mDNS name), active immediately.
 - **Network:** DHCP or static IP (address, mask and gateway are checked as in the serial menu). Saving restarts the device; the page tells you the new address.
+- **IPv6:** static IPv6 address and gateway, checked as in the serial menu (option 9); empty fields remove them. Saving restarts the device.
 - **SNMP community:** active immediately, no restart.
 - **Restart device** and **Log out** buttons.
 - **Web interface: Turn off…** asks for confirmation, then turns the web page off. Only serial menu option 8 (or a factory reset) turns it on again.
@@ -253,13 +277,14 @@ A sysName set with older firmware may contain spaces or other characters; it is 
 
 The device runs IPv4 and IPv6 side by side (dual stack):
 
-- **Addresses:** a link-local address (`fe80::`, from the MAC as EUI-64) always, and a global or ULA address from the router's advertisement (SLAAC) when the LAN has an IPv6 router. The status screen lists them (`IPv6: FD16:D833:4F0E:3ECE:1CB2:CFFF:FE4E:A22C`), the web page shows them in the status table.
+- **Addresses:** a link-local address (`fe80::`, from the MAC as EUI-64) always, a global or ULA address from the router's advertisement (SLAAC) when the LAN has an IPv6 router, and optionally a static address (below). The status screen lists them (`IPv6: FD16:D833:4F0E:3ECE:1CB2:CFFF:FE4E:A22C`), the web page shows them in the status table.
+- **Static address:** serial menu option 9 or the web page set one static IPv6 address (always /64) and an optional gateway. It is added next to SLAAC, not instead of it, and goes through duplicate address detection: if another host already uses it, the status screen says `(DUPLICATE: another host uses it, not in use)`. With a gateway set, all off-link IPv6 traffic goes through it (it overrides routers from advertisements); without one, the advertised routers are used. Takes effect after the restart that saving triggers.
 - **SNMP** answers over IPv6 on UDP 161 like over IPv4 (replies up to 1452 bytes, one Ethernet frame: the device does not fragment IPv6 packets), e.g. `snmpget -v2c -c public udp6:[fd16:d833:4f0e:3ece:1cb2:cfff:fe4e:a22c] 1.3.6.1.2.1.1.1.0`. LibreNMS can poll the device by its IPv6 address.
 - **Web page:** `http://[<IPv6 address>]/`; **mDNS:** `rf-ups-monitor.local` resolves to the IPv6 address too.
 - **Rate limiting and access log:** per full source address, as for IPv4; the access log shows the address (`fd16:d833:4f0e:3ece:9000:9aaa:490a:3189`). Not per /64: on a LAN every host shares one /64, and a manager's trust must not pass to its neighbours. A host that rotates through many IPv6 addresses is held by the shared limit for untrusted sources, like faked IPv4 addresses.
-- **Still IPv4 only:** traps (the trap destination is an IPv4 address; v1 traps cannot carry an IPv6 agent address anyway), the static IP settings, DHCP option 224, and the IP and IF tables in the MIB stay as they are.
+- **Still IPv4 only:** traps (the trap destination is an IPv4 address; v1 traps cannot carry an IPv6 agent address anyway), DHCP option 224, and the IP and IF tables in the MIB stay as they are. There is no DHCPv6 address assignment.
 
-There are no IPv6 settings: the device takes the addresses the network offers. Turning IPv6 off needs a firmware build without `PIO_FRAMEWORK_ARDUINO_ENABLE_IPV6` in `platformio.ini`.
+Turning IPv6 off needs a firmware build without `PIO_FRAMEWORK_ARDUINO_ENABLE_IPV6` in `platformio.ini`.
 
 ## Mains power monitoring
 
@@ -356,6 +381,7 @@ src/web_service.cpp         Web page on TCP 80: non-blocking connection handling
 src/stack_watch.cpp         Core 0 stack high-water mark for the status screen
 src/hostname.cpp            Hostname for DHCP and mDNS (name.local), applied without restart
 src/source_key.h            Source address -> rate-limit key (full IPv4 or IPv6 address)
+src/ipv6_static.cpp         Static IPv6 address and gateway (lwIP hook in include/lwip_hooks.h)
 src/diag.cpp                Hang diagnosis build (-DRFUPS_DIAG): watchdog, crash and panic capture
 lib/netconfig/              IPv4 parsing and validation (pure C++)
 lib/settings_codec/         Settings JSON, validation, A/B selection (pure C++)

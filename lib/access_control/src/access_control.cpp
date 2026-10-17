@@ -1,6 +1,6 @@
 #include "access_control.h"
 
-#include <stdio.h>
+#include <netconfig.h>
 
 // ---- RateLimiter ----
 
@@ -173,36 +173,10 @@ void formatSource(const SourceKey& key, char* buf) {
         formatIPv4(key.ipv4(), buf);
         return;
     }
-    uint16_t g[8];
-    for (int i = 0; i < 4; i++) {
-        g[i] = (uint16_t)(key.hi >> (48 - 16 * i));
-        g[4 + i] = (uint16_t)(key.lo >> (48 - 16 * i));
-    }
-    // RFC 5952: the longest run of two or more zero groups (the first if tied) becomes ::
-    int bestStart = -1, bestLen = 1;
-    for (int i = 0; i < 8;) {
-        if (g[i] != 0) {
-            i++;
-            continue;
-        }
-        int j = i;
-        while (j < 8 && g[j] == 0) j++;
-        if (j - i > bestLen) {
-            bestStart = i;
-            bestLen = j - i;
-        }
-        i = j;
-    }
-    char* p = buf;
+    uint8_t bytes[16];
     for (int i = 0; i < 8; i++) {
-        if (i == bestStart) {
-            *p++ = ':';
-            if (i == 0) *p++ = ':';
-            i += bestLen - 1;
-            continue;
-        }
-        p += snprintf(p, 5, "%x", (unsigned)g[i]);
-        if (i < 7) *p++ = ':';
+        bytes[i] = (uint8_t)(key.hi >> (56 - 8 * i));
+        bytes[8 + i] = (uint8_t)(key.lo >> (56 - 8 * i));
     }
-    *p = '\0';
+    formatIPv6(bytes, buf);
 }

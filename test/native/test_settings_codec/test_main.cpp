@@ -210,6 +210,8 @@ static void test_worst_case_escaped_settings_fit_and_round_trip() {
     strcpy(in.subnetMask, "255.255.255.254");
     strcpy(in.gateway, "255.255.255.255");
     strcpy(in.webPassword, WEB_HASH_EXAMPLE);
+    strcpy(in.ipv6Address, "fd16:d833:4f0e:3ece:ffff:ffff:ffff:fffe");
+    strcpy(in.ipv6Gateway, "fd16:d833:4f0e:3ece:ffff:ffff:ffff:ffff");
     in.sequence = 0xFFFFFFFFu;
 
     char json[SETTINGS_JSON_MAX];
@@ -435,7 +437,7 @@ static void test_rejects_invalid_trap_version() {
 }
 
 static void test_every_parse_error_has_a_message() {
-    for (uint8_t e = 0; e <= (uint8_t)SettingsParseError::BadTrapVersion; e++) {
+    for (uint8_t e = 0; e <= (uint8_t)SettingsParseError::BadStaticIPv6; e++) {
         TEST_ASSERT_TRUE_MESSAGE(strcmp("unknown error", settingsParseErrorMessage((SettingsParseError)e)) != 0,
                                  "error code has no message");
     }
@@ -501,6 +503,64 @@ static void test_next_write_slot_alternates() {
     TEST_ASSERT_EQUAL(SettingsSlot::A, nextWriteSlot(SettingsSlot::None));
 }
 
+// ---- static IPv6 ----
+
+static void test_static_ipv6_defaults_to_none_and_old_files_load() {
+    Settings s;
+    settingsDefaults(s);
+    TEST_ASSERT_EQUAL_STRING("", s.ipv6Address);
+    TEST_ASSERT_EQUAL_STRING("", s.ipv6Gateway);
+    strcpy(s.ipv6Address, "fd00::1");  // the file has no IPv6 fields: they must come back empty
+    TEST_ASSERT_EQUAL(SettingsParseError::None, settingsFromJson(LEGACY_V1_JSON, s));
+    TEST_ASSERT_EQUAL_STRING("", s.ipv6Address);
+    TEST_ASSERT_EQUAL_STRING("", s.ipv6Gateway);
+}
+
+static void test_static_ipv6_round_trips_and_is_compared() {
+    Settings in = staticSettings(), out;
+    strcpy(in.ipv6Address, "fd16:d833:4f0e:3ece::249");
+    strcpy(in.ipv6Gateway, "fe80::1");
+    char json[SETTINGS_JSON_MAX];
+    TEST_ASSERT_GREATER_THAN(0, settingsToJson(in, json, sizeof(json)));
+    TEST_ASSERT_EQUAL(SettingsParseError::None, settingsFromJson(json, out));
+    TEST_ASSERT_EQUAL_STRING("fd16:d833:4f0e:3ece::249", out.ipv6Address);
+    TEST_ASSERT_EQUAL_STRING("fe80::1", out.ipv6Gateway);
+    TEST_ASSERT_TRUE(settingsEqual(in, out));
+    strcpy(out.ipv6Gateway, "fe80::2");
+    TEST_ASSERT_FALSE(settingsEqual(in, out));
+    strcpy(out.ipv6Gateway, "fe80::1");
+    strcpy(out.ipv6Address, "fd16:d833:4f0e:3ece::250");
+    TEST_ASSERT_FALSE(settingsEqual(in, out));
+}
+
+static void test_static_ipv6_works_with_dhcp_for_ipv4() {
+    Settings in, out;
+    settingsDefaults(in);  // DHCP
+    strcpy(in.ipv6Address, "2001:db8:1:2::10");
+    char json[SETTINGS_JSON_MAX];
+    TEST_ASSERT_GREATER_THAN(0, settingsToJson(in, json, sizeof(json)));
+    TEST_ASSERT_EQUAL(SettingsParseError::None, settingsFromJson(json, out));
+    TEST_ASSERT_TRUE(out.dhcpEnabled);
+    TEST_ASSERT_EQUAL_STRING("2001:db8:1:2::10", out.ipv6Address);
+}
+
+static void test_rejects_invalid_static_ipv6() {
+    char json[SETTINGS_JSON_MAX];
+    Settings s;
+    withField(json, sizeof(json), "\"ipv6Address\":\"fe80::10\"");
+    TEST_ASSERT_EQUAL(SettingsParseError::BadStaticIPv6, settingsFromJson(json, s));
+    withField(json, sizeof(json), "\"ipv6Address\":\"fd00::1/64\"");
+    TEST_ASSERT_EQUAL(SettingsParseError::BadStaticIPv6, settingsFromJson(json, s));
+    withField(json, sizeof(json), "\"ipv6Gateway\":\"fe80::1\"");  // gateway without address
+    TEST_ASSERT_EQUAL(SettingsParseError::BadStaticIPv6, settingsFromJson(json, s));
+    withField(json, sizeof(json), "\"ipv6Address\":\"ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff:1\"");
+    TEST_ASSERT_EQUAL(SettingsParseError::FieldTooLong, settingsFromJson(json, s));
+    withField(json, sizeof(json), "\"ipv6Address\":7");
+    TEST_ASSERT_EQUAL(SettingsParseError::MissingField, settingsFromJson(json, s));
+    withField(json, sizeof(json), "\"ipv6Address\":\"\"");
+    TEST_ASSERT_EQUAL(SettingsParseError::None, settingsFromJson(json, s));
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_defaults_are_dhcp_and_public);
@@ -541,5 +601,9 @@ int main() {
     RUN_TEST(test_choose_falls_back_to_the_only_valid_slot);
     RUN_TEST(test_tie_prefers_slot_a);
     RUN_TEST(test_next_write_slot_alternates);
+    RUN_TEST(test_static_ipv6_defaults_to_none_and_old_files_load);
+    RUN_TEST(test_static_ipv6_round_trips_and_is_compared);
+    RUN_TEST(test_static_ipv6_works_with_dhcp_for_ipv4);
+    RUN_TEST(test_rejects_invalid_static_ipv6);
     return UNITY_END();
 }

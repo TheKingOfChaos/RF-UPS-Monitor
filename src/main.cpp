@@ -8,6 +8,7 @@
 #include "board_temp.h"
 #include "factory_reset.h"
 #include "hostname.h"
+#include "ipv6_static.h"
 #include "net_stats.h"
 #include "pins.h"
 #include "snmp_service.h"
@@ -54,17 +55,27 @@ void printNetworkInfo() {
     Serial.print("Subnet: ");  Serial.println(eth.subnetMask());
     Serial.print("Gateway: "); Serial.println(eth.gatewayIP());
 #if LWIP_IPV6
-    // Link-local and router-advertised (SLAAC) addresses; "tentative" while duplicate detection runs
+    // Link-local, router-advertised (SLAAC) and static addresses; "tentative" while duplicate detection runs
     netif* nif = eth.getNetIf();
     bool any = false;
     for (int i = 0; i < LWIP_IPV6_NUM_ADDRESSES; i++) {
         u8_t state = netif_ip6_addr_state(nif, i);
         if (ip6_addr_isinvalid(state)) continue;
         any = true;
-        Serial.printf("IPv6: %s%s\n", ip6addr_ntoa(netif_ip6_addr(nif, i)),
-                      ip6_addr_istentative(state) ? " (tentative)" : ip6_addr_isdeprecated(state) ? " (deprecated)" : "");
+        Serial.printf("IPv6: %s%s%s\n", ip6addr_ntoa(netif_ip6_addr(nif, i)), ipv6StaticIsSlot(i) ? " (static)" : "",
+                      ip6_addr_istentative(state)    ? " (tentative)"
+                      : ip6_addr_isdeprecated(state) ? " (deprecated)"
+                      : ip6_addr_isduplicated(state) ? " (DUPLICATE: another host uses it, not in use)"
+                                                     : "");
     }
     if (!any) Serial.println("IPv6: none");
+    if (ipv6StaticProblem()[0]) {
+        Serial.printf("IPv6: static %s not in use (%s)\n", currentSettings.ipv6Address, ipv6StaticProblem());
+    }
+    if (currentSettings.ipv6Address[0]) {
+        Serial.printf("IPv6 gateway: %s\n", currentSettings.ipv6Gateway[0] ? currentSettings.ipv6Gateway
+                                                                          : "from router advertisements");
+    }
 #endif
     Serial.print("DNS: ");     Serial.println(eth.dnsIP());
 }
@@ -194,6 +205,7 @@ void setup() {
     // Bring up Ethernet and the SNMP agent
     if (startEthernet()) {
         netStatsBegin(eth.getNetIf());
+        ipv6StaticBegin(eth.getNetIf());
         netStatsRequestDhcpTrapTarget(currentSettings.trapFromDhcp);  // before the first DISCOVER
         snmpBegin();
         webBegin();

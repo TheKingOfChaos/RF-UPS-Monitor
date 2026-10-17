@@ -92,3 +92,55 @@ bool hostnameIsValid(const char* name);
  * @param out At least HOSTNAME_MAX_LENGTH + 1 bytes
  */
 void hostnameFromText(const char* text, char* out);
+
+// ---- IPv6 ----
+
+/// Longest IPv6 text accepted or produced, including the NUL ("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")
+static const size_t IPV6_TEXT_MAX = 40;
+
+/**
+ * @brief Parse an IPv6 address in RFC 4291 text form, e.g. "fd16:d833:4f0e:3ece::249"
+ *
+ * Eight groups of 1-4 hex digits (either case) separated by ':', with at most
+ * one "::" standing for one or more zero groups. Rejects a prefix length
+ * ("/64"), a zone ("%eth0"), an embedded IPv4 tail ("::ffff:1.2.3.4"),
+ * spaces and anything longer than IPV6_TEXT_MAX - 1 characters.
+ *
+ * @param text NUL-terminated input, may be nullptr
+ * @param out  Receives the 16 bytes (network order) on success, untouched on failure
+ */
+bool parseIPv6(const char* text, uint8_t out[16]);
+
+/**
+ * @brief Format an IPv6 address the RFC 5952 way: lower case, no leading zeros,
+ *        the longest run of two or more zero groups (the first if tied) as "::"
+ * @param out At least IPV6_TEXT_MAX bytes
+ */
+void formatIPv6(const uint8_t addr[16], char* out);
+
+/**
+ * @brief Result of validating a static IPv6 configuration
+ */
+enum class StaticIPv6Error : uint8_t {
+    None = 0,             ///< Valid (or both empty: no static IPv6)
+    InvalidAddress,       ///< Address is not IPv6 text (see parseIPv6)
+    AddressNotUsable,     ///< Address is in ::/8, link-local, multicast, or its interface id is zero
+    InvalidGateway,       ///< Gateway is not IPv6 text
+    GatewayNotUsable,     ///< Gateway is in ::/8 or multicast
+    GatewayNotOnLink,     ///< Gateway is neither link-local nor in the address's /64
+    GatewayIsHost,        ///< Gateway equals the address
+    GatewayWithoutAddress ///< A gateway was given without a static address
+};
+
+/**
+ * @brief Validate a static IPv6 address (always /64) and optional gateway
+ *
+ * Empty address and empty gateway mean "no static IPv6". The checks run in
+ * the order of StaticIPv6Error and the first failure is returned.
+ */
+StaticIPv6Error validateStaticIPv6(const char* address, const char* gateway);
+
+/**
+ * @brief Human-readable message for a static IPv6 error, for the serial menu and web page
+ */
+const char* staticIPv6ErrorMessage(StaticIPv6Error error);

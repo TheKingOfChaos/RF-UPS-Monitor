@@ -209,6 +209,139 @@ static void test_every_printable_text_gives_a_valid_hostname() {
     }
 }
 
+// ---- IPv6 ----
+
+static const uint8_t DEVICE_ULA[16] = {0xfd, 0x16, 0xd8, 0x33, 0x4f, 0x0e, 0x3e, 0xce,  // fd16:d833:4f0e:3ece::249
+                                       0, 0, 0, 0, 0, 0, 0x02, 0x49};
+
+static void test_parse_ipv6_compressed_and_full_forms() {
+    uint8_t a[16];
+    TEST_ASSERT_TRUE(parseIPv6("fd16:d833:4f0e:3ece::249", a));
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(DEVICE_ULA, a, 16);
+    TEST_ASSERT_TRUE(parseIPv6("FD16:D833:4F0E:3ECE:0000:0000:0000:0249", a));  // upper case, leading zeros
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(DEVICE_ULA, a, 16);
+    TEST_ASSERT_TRUE(parseIPv6("fd16:d833:4f0e:3ece:0:0:0:249", a));
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(DEVICE_ULA, a, 16);
+}
+
+static void test_parse_ipv6_double_colon_at_start_middle_end() {
+    uint8_t a[16];
+    const uint8_t loopback[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1};
+    TEST_ASSERT_TRUE(parseIPv6("::1", a));
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(loopback, a, 16);
+    const uint8_t zero[16] = {0};
+    TEST_ASSERT_TRUE(parseIPv6("::", a));
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(zero, a, 16);
+    const uint8_t prefix[16] = {0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    TEST_ASSERT_TRUE(parseIPv6("2001:db8::", a));
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(prefix, a, 16);
+    // "::" for exactly one group
+    const uint8_t one[16] = {0, 1, 0, 2, 0, 3, 0, 4, 0, 5, 0, 6, 0, 0, 0, 8};
+    TEST_ASSERT_TRUE(parseIPv6("1:2:3:4:5:6::8", a));
+    TEST_ASSERT_EQUAL_UINT8_ARRAY(one, a, 16);
+}
+
+static void test_parse_ipv6_rejects_malformed_text() {
+    uint8_t a[16];
+    const char* bad[] = {
+        "", ":", ":::", "1::2::3", "1:::2", ":1:2:3:4:5:6:7", "1:2:3:4:5:6:7:", "1:2:3:4:5:6:7",
+        "1:2:3:4:5:6:7:8:9", "1:2:3:4:5:6:7:8::", "::1:2:3:4:5:6:7:8", "12345::1", "g::1", "fd00::1/64",
+        "fe80::1%eth0", "::ffff:10.10.6.65", " ::1", "::1 ", "fd00: :1", "fd00::-1", "10.10.6.65",
+        "0000:0000:0000:0000:0000:0000:0000:00001",  // 40 characters
+    };
+    for (const char* text : bad) TEST_ASSERT_FALSE_MESSAGE(parseIPv6(text, a), text);
+    TEST_ASSERT_FALSE(parseIPv6(nullptr, a));
+}
+
+static void test_parse_ipv6_longest_text_is_accepted() {
+    uint8_t a[16];
+    TEST_ASSERT_TRUE(parseIPv6("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", a));  // 39 characters
+    for (int i = 0; i < 16; i++) TEST_ASSERT_EQUAL_HEX8(0xFF, a[i]);
+}
+
+static void test_parse_ipv6_leaves_output_untouched_on_failure() {
+    uint8_t a[16];
+    memset(a, 0xAB, sizeof(a));
+    TEST_ASSERT_FALSE(parseIPv6("1:2:3:4:5:6:7:8:9", a));  // fails after parsing eight groups
+    for (int i = 0; i < 16; i++) TEST_ASSERT_EQUAL_HEX8(0xAB, a[i]);
+}
+
+static void test_parse_ipv6_survives_every_truncation() {
+    // Every prefix of a valid address either parses or is refused, never read past its end
+    const char* full = "fd16:d833:4f0e:3ece:1cb2:cfff:fe4e:a22c";
+    char buf[IPV6_TEXT_MAX];
+    uint8_t a[16];
+    size_t accepted = 0;
+    for (size_t n = 0; n <= strlen(full); n++) {
+        memcpy(buf, full, n);
+        buf[n] = '\0';
+        if (parseIPv6(buf, a)) accepted++;
+    }
+    // The complete text, and the three cut inside the last group ("...:a" is a valid address)
+    TEST_ASSERT_EQUAL_size_t(4, accepted);
+}
+
+static void test_format_ipv6_rfc5952() {
+    char t[IPV6_TEXT_MAX];
+    formatIPv6(DEVICE_ULA, t);
+    TEST_ASSERT_EQUAL_STRING("fd16:d833:4f0e:3ece::249", t);
+    uint8_t a[16];
+    const struct { const char* in; const char* out; } cases[] = {
+        {"::", "::"},
+        {"::1", "::1"},
+        {"2001:db8::", "2001:db8::"},
+        {"2001:0db8:0:0:1:0:0:1", "2001:db8::1:0:0:1"},      // tie: the first run
+        {"2001:0:0:1:0:0:0:1", "2001:0:0:1::1"},             // the longer run
+        {"2001:db8:0:1:1:1:1:1", "2001:db8:0:1:1:1:1:1"},    // one zero group stays
+        {"FE80::1CB2:CFFF:FE4E:A22C", "fe80::1cb2:cfff:fe4e:a22c"},
+        {"ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff"},
+    };
+    for (const auto& c : cases) {
+        TEST_ASSERT_TRUE_MESSAGE(parseIPv6(c.in, a), c.in);
+        formatIPv6(a, t);
+        TEST_ASSERT_EQUAL_STRING_MESSAGE(c.out, t, c.in);
+        TEST_ASSERT_TRUE(strlen(t) < IPV6_TEXT_MAX);
+    }
+}
+
+static void test_validate_ipv6_empty_means_none() {
+    TEST_ASSERT_EQUAL(StaticIPv6Error::None, validateStaticIPv6("", ""));
+    TEST_ASSERT_EQUAL(StaticIPv6Error::None, validateStaticIPv6(nullptr, nullptr));
+    TEST_ASSERT_EQUAL(StaticIPv6Error::GatewayWithoutAddress, validateStaticIPv6("", "fe80::1"));
+}
+
+static void test_validate_ipv6_accepts_ula_and_global_with_or_without_gateway() {
+    TEST_ASSERT_EQUAL(StaticIPv6Error::None, validateStaticIPv6("fd16:d833:4f0e:3ece::249", ""));
+    TEST_ASSERT_EQUAL(StaticIPv6Error::None, validateStaticIPv6("2001:db8:1:2::10", "fe80::1"));
+    TEST_ASSERT_EQUAL(StaticIPv6Error::None, validateStaticIPv6("2001:db8:1:2::10", "2001:db8:1:2::1"));
+}
+
+static void test_validate_ipv6_rejects_unusable_addresses() {
+    TEST_ASSERT_EQUAL(StaticIPv6Error::InvalidAddress, validateStaticIPv6("fd00::1/64", ""));
+    const char* unusable[] = {"::1", "::ffff:a0a:641", "::a0a:641", "fe80::10", "febf::10", "ff02::1",
+                              "fd16:d833:4f0e:3ece::"};
+    for (const char* a : unusable) {
+        TEST_ASSERT_EQUAL_MESSAGE(StaticIPv6Error::AddressNotUsable, validateStaticIPv6(a, ""), a);
+    }
+    TEST_ASSERT_EQUAL(StaticIPv6Error::None, validateStaticIPv6("fec0::10", ""));  // just outside fe80::/10
+}
+
+static void test_validate_ipv6_gateway_rules() {
+    const char* addr = "fd16:d833:4f0e:3ece::249";
+    TEST_ASSERT_EQUAL(StaticIPv6Error::InvalidGateway, validateStaticIPv6(addr, "router"));
+    TEST_ASSERT_EQUAL(StaticIPv6Error::GatewayNotUsable, validateStaticIPv6(addr, "ff02::2"));
+    TEST_ASSERT_EQUAL(StaticIPv6Error::GatewayNotUsable, validateStaticIPv6(addr, "::"));
+    TEST_ASSERT_EQUAL(StaticIPv6Error::GatewayNotOnLink, validateStaticIPv6(addr, "fd16:d833:4f0e:3ecf::1"));
+    TEST_ASSERT_EQUAL(StaticIPv6Error::GatewayIsHost, validateStaticIPv6(addr, "fd16:d833:4f0e:3ece:0::249"));
+    TEST_ASSERT_EQUAL(StaticIPv6Error::None, validateStaticIPv6(addr, "fd16:d833:4f0e:3ece::1"));
+}
+
+static void test_every_ipv6_error_has_a_message() {
+    for (uint8_t e = 0; e <= (uint8_t)StaticIPv6Error::GatewayWithoutAddress; e++) {
+        TEST_ASSERT_TRUE(strcmp("Unknown error", staticIPv6ErrorMessage((StaticIPv6Error)e)) != 0);
+    }
+}
+
 int main() {
     UNITY_BEGIN();
     RUN_TEST(test_parse_valid_addresses);
@@ -232,5 +365,17 @@ int main() {
     RUN_TEST(test_hostname_rules);
     RUN_TEST(test_hostname_from_free_text);
     RUN_TEST(test_every_printable_text_gives_a_valid_hostname);
+    RUN_TEST(test_parse_ipv6_compressed_and_full_forms);
+    RUN_TEST(test_parse_ipv6_double_colon_at_start_middle_end);
+    RUN_TEST(test_parse_ipv6_rejects_malformed_text);
+    RUN_TEST(test_parse_ipv6_longest_text_is_accepted);
+    RUN_TEST(test_parse_ipv6_leaves_output_untouched_on_failure);
+    RUN_TEST(test_parse_ipv6_survives_every_truncation);
+    RUN_TEST(test_format_ipv6_rfc5952);
+    RUN_TEST(test_validate_ipv6_empty_means_none);
+    RUN_TEST(test_validate_ipv6_accepts_ula_and_global_with_or_without_gateway);
+    RUN_TEST(test_validate_ipv6_rejects_unusable_addresses);
+    RUN_TEST(test_validate_ipv6_gateway_rules);
+    RUN_TEST(test_every_ipv6_error_has_a_message);
     return UNITY_END();
 }

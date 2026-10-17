@@ -69,6 +69,7 @@ struct SnmpValue {
     uint8_t type;              ///< BerTag of the value
     int32_t integer;           ///< Integer
     uint32_t unsigned32;       ///< Counter32, Gauge32, TimeTicks
+    uint64_t unsigned64;       ///< Counter64 (v2c only)
     const uint8_t* data;       ///< OctetString (must stay valid until encoded)
     size_t length;
     Oid oid;                   ///< ObjectId
@@ -76,6 +77,9 @@ struct SnmpValue {
 
     static SnmpValue makeInteger(int32_t v);
     static SnmpValue makeUnsigned(uint8_t type, uint32_t v);
+    static SnmpValue makeCounter64(uint64_t v);
+    /// OCTET STRING with binary content (e.g. a MAC address); data must stay valid until encoded
+    static SnmpValue makeBytes(const uint8_t* data, size_t length);
     static SnmpValue makeString(const char* s);
     static SnmpValue makeOid(const Oid& o);
     static SnmpValue makeNull();

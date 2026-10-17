@@ -1,0 +1,58 @@
+# LibreNMS
+
+The device works in LibreNMS as a plain SNMP device out of the box: it answers SNMPv2c, has the system group and the standard IF-MIB, so LibreNMS discovers it, graphs the Ethernet port's traffic and shows its uptime. To also get the mains power state and the board temperature as sensors, and the device recognised as an RF-UPS-Monitor, add the definitions in [librenms/](../librenms/) to your LibreNMS installation.
+
+> **Status:** the definition files are validated against LibreNMS's own JSON schemas, the MIB names they use resolve with `snmptranslate`, and the version/hardware pattern matches the device's sysDescr. They have not yet been tried in a running LibreNMS; please report what you see.
+
+## What you get
+
+| In LibreNMS | From |
+|---|---|
+| OS "RF-UPS-Monitor", type power, version (`1.0.0`) and hardware (`RP2040, W5500`) | sysObjectID `1.3.6.1.4.1.63050`, sysDescr |
+| Port `eth0` with traffic, packets, speed and status | IF-MIB (64-bit counters over v2c) |
+| State sensor "Mains power": present (OK) / lost (critical) | `mainsPowerStatus` |
+| Temperature sensor "Board (RP2040 die)", warning at 60 °C, critical at 70 °C | `boardTemperature` / 10 |
+| Count sensor "Mains power changes since boot" | `mainsPowerChanges` |
+| Uptime, reboot detection | sysUpTime |
+
+A mains outage turns the state sensor critical, so LibreNMS's default "Sensor over limit / state critical" alert rules fire on it. Polling runs every 5 minutes by default; a short outage between two polls still shows up as a step in "Mains power changes". For immediate notice, send the device's traps to LibreNMS's snmptrapd (below).
+
+## Install
+
+On the LibreNMS server, as the `librenms` user, with LibreNMS in `/opt/librenms`:
+
+```bash
+cd /opt/librenms
+# OS detection and discovery
+cp <this repo>/librenms/os_detection/rfupsmonitor.yaml resources/definitions/os_detection/
+cp <this repo>/librenms/os_discovery/rfupsmonitor.yaml resources/definitions/os_discovery/
+# MIB, in the directory named by mib_dir in the detection file
+mkdir -p mibs/rfupsmonitor
+cp <this repo>/mibs/RF-UPS-MONITOR-MIB.txt mibs/rfupsmonitor/RF-UPS-MONITOR-MIB
+```
+
+Then add the device with SNMP v2c and its community (menu option 4 on the device; change it from `public`):
+
+```bash
+./lnms device:add --v2c -c <community> <device ip>
+```
+
+or in the web interface: Devices → Add Device, SNMP version v2c. Use v2c, not v1: the 64-bit interface counters exist only in v2c.
+
+If the device was added before the files were copied, rediscover it (device → Settings → Rediscover, or `./discovery.php -h <device ip>`) so it is detected as RF-UPS-Monitor.
+
+LibreNMS's daily update and `validate.php` may complain about these extra files, since they are not part of the LibreNMS repository. Keep a copy, and copy them again if an update removes them.
+
+## Traps
+
+Set the device's trap destination (menu option 4) to the LibreNMS server and the trap version to `2c`, and set up snmptrapd on the server as described in the LibreNMS documentation (SNMP Trap Handler). Without trap handlers for the RF-UPS-MONITOR-MIB notifications, LibreNMS logs `mainsPowerLost` / `mainsPowerRestored` in the device's event log as unhandled traps; the sensors still change on the next poll.
+
+## Files
+
+| File | Purpose |
+|---|---|
+| [librenms/os_detection/rfupsmonitor.yaml](../librenms/os_detection/rfupsmonitor.yaml) | Matches sysObjectID `.1.3.6.1.4.1.63050`; OS name, type, icon, MIB directory, overview graphs |
+| [librenms/os_discovery/rfupsmonitor.yaml](../librenms/os_discovery/rfupsmonitor.yaml) | Version and hardware from sysDescr; the state, temperature and count sensors |
+| [mibs/RF-UPS-MONITOR-MIB.txt](../mibs/RF-UPS-MONITOR-MIB.txt) | Lets LibreNMS resolve the `RF-UPS-MONITOR-MIB::` names |
+
+If you change the MIB, keep the object names used in the discovery file. The temperature sensor's divisor (10) matches the MIB's units of 0.1 °C.

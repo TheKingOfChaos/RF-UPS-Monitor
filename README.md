@@ -1,6 +1,8 @@
 # RF-UPS-Monitor v3
 
-A mains power monitor built on a Raspberry Pi Pico with a W5500 Ethernet module. It reports whether mains power is present over SNMP v1 and v2c, including traps. It is configured through a menu on the USB serial port.
+A mains power monitor built on a Raspberry Pi Pico with a W5500 Ethernet module. It reports whether mains power is present over SNMP v1 and v2c, including traps, together with standard interface statistics (IF-MIB) and the board temperature, so it can be monitored by LibreNMS or any other SNMP manager. It is configured through a menu on the USB serial port.
+
+Current version: **1.0.0** (see [CHANGELOG.md](CHANGELOG.md)).
 
 ## Status
 
@@ -14,6 +16,9 @@ A mains power monitor built on a Raspberry Pi Pico with a W5500 Ethernet module.
 | SNMP v1 and v2c agent (Get, GetNext, GetBulk, walk, bulkwalk) | Working, tested with net-snmp |
 | SNMP traps in v1 or v2c (coldStart, authenticationFailure, mainsPowerLost/Restored) | Working; mains traps with real mains pending |
 | SNMP rate limiting and access log | Working |
+| Interface statistics (IF-MIB ifTable/ifXTable, 64-bit counters) | Working, counted by the firmware |
+| Board temperature (RP2040 internal sensor) | Working |
+| LibreNMS OS definition | Validated against the LibreNMS schema; not yet tried in a running LibreNMS |
 
 See [TODO.md](TODO.md) for the detailed plan.
 
@@ -56,7 +61,7 @@ Connect to the Pico's USB serial port (`COM16` here) at **115200 baud, 8N1**, wi
 >
 ```
 
-**1. Show status** prints the mains power state, the SNMP counters and settings (community, sysName, sysContact, sysLocation), the configured network mode, the stored static settings, and the live interface: state, MAC, IP, subnet, gateway and DNS. The interface state line is one of:
+**1. Show status** prints the mains power state, the board temperature, the Ethernet link speed and traffic counters, the SNMP counters and settings (community, sysName, sysContact, sysLocation), the configured network mode, the stored static settings, and the live interface: state, MAC, IP, subnet, gateway and DNS. The interface state line is one of:
 
 | State | Meaning |
 |---|---|
@@ -220,8 +225,12 @@ lib/access_control/         Rate limiter and access log (pure C++)
 lib/mains_input/            GPIO27 sampler on core 1, seqlock hand-over to core 0
 lib/snmp_ber/               ASN.1 BER codec and OIDs for SNMP (pure C++)
 lib/snmp_agent/             SNMP v1/v2c messages, MIB, request handling, traps (pure C++)
+lib/if_stats/               Ethernet frame counting and W5500 PHY status decoding (pure C++)
 src/snmp_service.cpp        UDP port 161, device state for the MIB
+src/net_stats.cpp           Counts frames at the lwIP driver, reads the W5500 PHY register
+src/board_temp.cpp          RP2040 die temperature, averaged
 mibs/                       RF-UPS-MONITOR-MIB
+librenms/                   LibreNMS OS detection and discovery definitions
 test/host/                  Host build of the agent for net-snmp checks
 test/native/                Unit tests, run on the PC
 test/embedded/              Unity tests, run on the Pico
@@ -231,6 +240,8 @@ scripts/sanitize.sh         Native tests under ASan/UBSan (run in WSL)
 scripts/host_agent_check.sh Agent against real net-snmp tools, no hardware (run in WSL)
 docs/TESTING.md             Test guide
 docs/MIB.md                 SNMP objects, traps, errors, limits
+docs/LIBRENMS.md            Adding the device to LibreNMS
+CHANGELOG.md                Release history
 .github/workflows/tests.yml CI: unit tests, sanitizers, net-snmp check, firmware build
 ```
 
@@ -245,11 +256,18 @@ An SNMP agent runs on UDP port 161 and answers SNMPv1 and SNMPv2c, each request 
   .1.0  sysDescr        .2.0  sysObjectID     .3.0  sysUpTime
   .4.0  sysContact      .5.0  sysName         .6.0  sysLocation
   .7.0  sysServices
+.1.3.6.1.2.1.2          IF-MIB interfaces: ifNumber and ifTable for the Ethernet port (index 1)
+.1.3.6.1.2.1.31.1.1     IF-MIB ifXTable: ifName, 64-bit ifHC* counters (v2c only), ifHighSpeed
 .1.3.6.1.4.1.63050      RF-UPS-MONITOR-MIB (enterprise 63050)
   .1.0  mainsPowerStatus      INTEGER 1 = present, 0 = lost
   .2.0  mainsPowerChanges     Counter32
   .3.0  mainsPowerLastChange  TimeTicks
+  .4.0  boardTemperature      Integer32, 0.1 degrees Celsius
 ```
+
+The interface counters are kept by the firmware: every Ethernet frame the W5500 receives or sends is counted (octets, unicast, multicast, broadcast), since the W5500 in MAC-raw mode has no counters of its own. Link state and speed come from the W5500 PHY register. The board temperature is the RP2040's internal sensor, which reads the chip temperature: a few degrees above the air around it.
+
+To monitor the device with LibreNMS see [docs/LIBRENMS.md](docs/LIBRENMS.md).
 
 ```bash
 snmpwalk     -v1  -c public 10.10.6.111
@@ -258,6 +276,8 @@ snmpget      -v2c -c public 10.10.6.111 1.3.6.1.4.1.63050.1.0
 ```
 
 **Traps** go to the trap destination set in menu option 4 (UDP 162), as v2c (default) or v1: `coldStart` at boot, `mainsPowerLost` and `mainsPowerRestored` (with the three mains objects), and `authenticationFailure` for a wrong community (at most one per 10 s).
+
+GetBulk replies hold at most 16 objects, so a small request cannot be used to reflect a large reply at a faked source address.
 
 **Security:** each source address may send 50 requests per second on average, with bursts of 100. Sources that have not shown the right community share a limit of 100 per second, so faked source addresses cannot get around it or starve your managers; managers that use the community share a separate limit of 200 per second. More is dropped and logged. Change the community from `public` (menu option 4): SNMPv1 and v2c have no other authentication. Rejected requests are kept in the access log (menu option 5).
 

@@ -5,6 +5,7 @@ The device runs an SNMP agent on UDP port 161 and sends traps. Every object is r
 - **Versions:** SNMPv1 and SNMPv2c. Each request is answered in the version it was sent in. SNMPv3 requests get no response.
 - **Community:** from the settings, default `public`, changed with menu option 4 (active immediately). A request with the wrong community gets no response; it is counted on the status screen.
 - **sysName, sysContact, sysLocation:** set with menu option 4; read-only over SNMP.
+- **Interfaces:** the standard IF-MIB (`ifTable`, `ifXTable`) for the one Ethernet port, so generic managers such as LibreNMS graph its traffic.
 - **Operations:** GetRequest, GetNextRequest (and so `snmpwalk`), and in v2c GetBulkRequest (`snmpbulkwalk`, `snmpbulkget`). SetRequest is rejected (v1 `noSuchName`, v2c `notWritable`/`noCreation`).
 - **Enterprise number:** 63050 (`1.3.6.1.4.1.63050`), assigned to this project.
 - **MIB file:** [mibs/RF-UPS-MONITOR-MIB.txt](../mibs/RF-UPS-MONITOR-MIB.txt) (SMIv2).
@@ -13,7 +14,7 @@ The device runs an SNMP agent on UDP port 161 and sends traps. Every object is r
 
 | OID | Name | Type | Value |
 |---|---|---|---|
-| `1.3.6.1.2.1.1.1.0` | sysDescr | OCTET STRING | `RF-UPS-Monitor v3.1.0 mains power monitor (RP2040, W5500)` |
+| `1.3.6.1.2.1.1.1.0` | sysDescr | OCTET STRING | `RF-UPS-Monitor 1.0.0 mains power monitor (RP2040, W5500)` (with the firmware version) |
 | `1.3.6.1.2.1.1.2.0` | sysObjectID | OBJECT IDENTIFIER | `1.3.6.1.4.1.63050` |
 | `1.3.6.1.2.1.1.3.0` | sysUpTime | TimeTicks | Hundredths of a second since boot |
 | `1.3.6.1.2.1.1.4.0` | sysContact | OCTET STRING | From the settings (menu option 4), default empty |
@@ -23,8 +24,55 @@ The device runs an SNMP agent on UDP port 161 and sends traps. Every object is r
 | `1.3.6.1.4.1.63050.1.0` | mainsPowerStatus | INTEGER | `1` = present, `0` = lost |
 | `1.3.6.1.4.1.63050.2.0` | mainsPowerChanges | Counter32 | Mains changes since boot (2 per outage) |
 | `1.3.6.1.4.1.63050.3.0` | mainsPowerLastChange | TimeTicks | sysUpTime at the last change, 0 if none |
+| `1.3.6.1.4.1.63050.4.0` | boardTemperature | Integer32 | RP2040 die temperature in 0.1 °C (`392` = 39.2 °C), average of 8 readings, updated every 2 s |
+
+`boardTemperature` comes from the RP2040's internal sensor. It measures the chip, which runs a few degrees above the air around it, and the sensor is only accurate to a few degrees: use it to spot an overheating enclosure, not as a room thermometer.
 
 `mainsPowerStatus` is debounced: a change must last 5 ms to count and is reported within 10 ms. To detect an outage between two polls, compare `mainsPowerChanges` with the previous poll; `mainsPowerLastChange` tells you when it happened.
+
+## Interfaces (IF-MIB)
+
+The device has one interface, index 1: the W5500 Ethernet port. `ifNumber.0` (`1.3.6.1.2.1.2.1.0`) is 1.
+
+**ifTable** `1.3.6.1.2.1.2.2.1.<column>.1`
+
+| Column | Name | Type | Value |
+|---|---|---|---|
+| 1 | ifIndex | INTEGER | 1 |
+| 2 | ifDescr | OCTET STRING | `W5500 10/100 Ethernet` |
+| 3 | ifType | INTEGER | 6 (ethernetCsmacd) |
+| 4 | ifMtu | INTEGER | 1500 |
+| 5 | ifSpeed | Gauge32 | 10000000 or 100000000 from the PHY, 0 when the link is down |
+| 6 | ifPhysAddress | OCTET STRING | The MAC address (6 bytes) |
+| 7 | ifAdminStatus | INTEGER | 1 (up) |
+| 8 | ifOperStatus | INTEGER | 1 (up) or 2 (down), from the PHY link bit |
+| 9 | ifLastChange | TimeTicks | sysUpTime when the link last changed |
+| 10, 16 | ifInOctets, ifOutOctets | Counter32 | Low 32 bits of the 64-bit counters |
+| 11, 17 | ifInUcastPkts, ifOutUcastPkts | Counter32 | Unicast frames |
+| 12, 18 | ifInNUcastPkts, ifOutNUcastPkts | Counter32 | Multicast + broadcast frames |
+| 13, 14, 15 | ifInDiscards, ifInErrors, ifInUnknownProtos | Counter32 | 0 (not visible to the firmware) |
+| 19 | ifOutDiscards | Counter32 | 0 |
+| 20 | ifOutErrors | Counter32 | Frames the driver failed to send |
+| 21 | ifOutQLen | Gauge32 | 0 |
+| 22 | ifSpecific | OBJECT IDENTIFIER | `0.0` |
+
+**ifXTable** `1.3.6.1.2.1.31.1.1.1.<column>.1`
+
+| Column | Name | Type | Value |
+|---|---|---|---|
+| 1 | ifName | OCTET STRING | `eth0` |
+| 2-5 | ifInMulticastPkts, ifInBroadcastPkts, ifOutMulticastPkts, ifOutBroadcastPkts | Counter32 | |
+| 6-13 | ifHCInOctets, ifHCInUcastPkts, ifHCInMulticastPkts, ifHCInBroadcastPkts, ifHCOutOctets, ifHCOutUcastPkts, ifHCOutMulticastPkts, ifHCOutBroadcastPkts | Counter64 | **v2c only** |
+| 14 | ifLinkUpDownTrapEnable | INTEGER | 2 (disabled) |
+| 15 | ifHighSpeed | Gauge32 | 10 or 100 (Mbit/s), 0 when down |
+| 16 | ifPromiscuousMode | INTEGER | 2 (false) |
+| 17 | ifConnectorPresent | INTEGER | 1 (true) |
+| 18 | ifAlias | OCTET STRING | empty |
+| 19 | ifCounterDiscontinuityTime | TimeTicks | 0 (counters start at boot) |
+
+The W5500 runs in MAC-raw mode for lwIP and has no traffic counters of its own, so the firmware counts every frame passed between the W5500 and lwIP: octets are whole Ethernet frames without the FCS, and frames are sorted into unicast, multicast and broadcast by their destination MAC. The counters are 64-bit internally and start at 0 at boot. Link state and speed are read from the W5500 PHY register (`PHYCFGR`) every 500 ms; a link change is logged on the serial port.
+
+SNMPv1 has no Counter64 type, so a v1 request does not see the eight `ifHC*` columns at all (RFC 3584): a v1 Get of one is `noSuchName` and a v1 walk skips them. A v1 walk returns 45 objects, a v2c walk 53.
 
 ## v1 and v2c differences
 
@@ -32,10 +80,11 @@ The same request gets a different answer depending on its version:
 
 | Situation | v1 | v2c |
 |---|---|---|
+| Counter64 objects (`ifHC*`) | Do not exist (`noSuchName`, skipped by GetNext) | Normal objects |
 | Get of an OID that does not exist | Whole request fails: `noSuchName`, error-index = position | Request succeeds; that varbind is `noSuchObject` (no such object) or `noSuchInstance` (object exists, e.g. `sysDescr.5` or `sysDescr` without `.0`) |
 | GetNext past the last object | `noSuchName` | `endOfMibView` for that varbind |
 | Set | `noSuchName` | `notWritable` (existing object) or `noCreation` |
-| GetBulk | not available | Non-repeaters once, then up to max-repetitions rows; stops early when every repeater reached `endOfMibView`; returns as many varbinds as fit (max 64) instead of `tooBig` |
+| GetBulk | not available | Non-repeaters once, then up to max-repetitions rows; stops early when every repeater reached `endOfMibView`; returns at most 16 varbinds (fewer if they do not fit) instead of `tooBig` |
 | Response too big | `tooBig` with the request varbinds | `tooBig` with an empty varbind list |
 
 With net-snmp, v2c shows these as `No Such Object available on this agent at this OID`, `No Such Instance currently exists at this OID` and `No more variables left in this MIB View`.
@@ -120,7 +169,7 @@ This needs the standard IETF MIBs, which Debian/Ubuntu ship separately: `sudo ap
 
 ## Limits
 
-- Up to 16 variable bindings per request, up to 64 in a GetBulk response.
+- Up to 16 variable bindings per request and at most 16 in a GetBulk response. A larger GetBulk reply would let a small request with a faked source address make the device send a much larger packet to a victim (reflection); a bulk walk simply takes more requests (4 for the 53 objects). A GetBulk request also does not make its source trusted for the rate limiter.
 - Requests up to 1472 bytes (one Ethernet frame); larger packets are dropped.
 - The network stack queues up to 5 UDP packets. Requests sent in a burst beyond that are dropped; SNMP managers retry, and normal polling or `snmpwalk` sends one request at a time.
 - If the device has not talked to a manager for a few minutes, it first has to look up the manager's MAC address (ARP). lwIP holds one reply during that lookup, so only one request of a burst arriving at that moment is answered.
@@ -133,6 +182,9 @@ This needs the standard IETF MIBs, which Debian/Ubuntu ship separately: `sudo ap
 | BER encoding/decoding, OIDs | `lib/snmp_ber` | `test/native/test_snmp_ber` |
 | Message parsing and responses | `lib/snmp_agent/snmp_message` | `test/native/test_snmp_message` |
 | MIB table, Get/GetNext/Set handling | `lib/snmp_agent/snmp_mib`, `snmp_agent` | `test/native/test_snmp_agent` |
+| Frame counting, PHY decoding | `lib/if_stats` | `test/native/test_if_stats` |
+| Counters and PHY on the device | `src/net_stats.cpp` | `test/hil/test_snmp.py` |
+| Board temperature | `src/board_temp.cpp` | `test/hil/test_snmp.py` |
 | Trap encoding (v1 and v2c), throttle | `lib/snmp_agent/snmp_trap` | `test/native/test_snmp_trap` (byte-exact vs net-snmp `snmptrap -v1` and `-v2c`) |
 | Rate limiter, access log | `lib/access_control` | `test/native/test_access_control` |
 | Traps on the device | `src/snmp_service.cpp` | `test/hil/test_snmp_traps.py` |

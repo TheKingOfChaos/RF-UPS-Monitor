@@ -6,12 +6,14 @@
 #include <netconfig.h>
 #include <settings.h>
 #include <snmp_trap.h>
+#include "board_temp.h"
+#include "net_stats.h"
 #include "version.h"
 
 // Requests handled per snmpPoll() call, so a flood cannot starve the menu
 const uint8_t MAX_PACKETS_PER_POLL = 4;
 
-static const char* const SYS_DESCR = "RF-UPS-Monitor v" FIRMWARE_VERSION " mains power monitor (RP2040, W5500)";
+static const char* const SYS_DESCR = "RF-UPS-Monitor " FIRMWARE_VERSION " mains power monitor (RP2040, W5500)";
 
 static WiFiUDP udp;
 static bool started = false;
@@ -48,6 +50,8 @@ static SnmpDeviceState captureState() {
     s.sysContact = currentSettings.sysContact;
     s.sysName = currentSettings.sysName;
     s.sysLocation = currentSettings.sysLocation;
+    netStatsCapture(s.iface);
+    s.boardTempDeciC = boardTempDeciC();
 
     MainsSnapshot mains;
     if (mainsRead(mains)) {
@@ -189,6 +193,9 @@ void snmpPoll() {
             // Right community: exempt from the shared bucket, so spoofed floods cannot starve it
             limiter.markTrusted(source);
             break;
+        case SnmpOutcome::RespondedBulk:
+            // A GetBulk with a spoofed source must not give that address the larger trusted budget
+            break;
         case SnmpOutcome::BadCommunity:
             logAccess(source, AccessEvent::BadCommunity);
             if (authTrapThrottle.allow(millis())) {
@@ -209,6 +216,10 @@ void snmpPoll() {
         udp.write(outBuf, len);
         udp.endPacket();
     }
+}
+
+uint32_t snmpUptimeTicks() {
+    return uptimeTicks();
 }
 
 const SnmpStats& snmpStats() {

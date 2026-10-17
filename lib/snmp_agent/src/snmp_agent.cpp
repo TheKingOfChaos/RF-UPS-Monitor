@@ -85,6 +85,20 @@ size_t SnmpAgent::handle(const uint8_t* request, size_t length, uint8_t* respons
 
 // ---- v1 (RFC 1157) ----
 
+/**
+ * @brief Counter64 objects do not exist for v1 (RFC 3584 4.2.2.1): v1 cannot encode them
+ */
+static bool v1Visible(const MibEntry* e, const SnmpDeviceState& state) {
+    return e != nullptr && e->get(state).type != BerTag::Counter64;
+}
+
+/// Next object after oid that v1 may see
+static const MibEntry* mibNextV1(const Oid& oid, const SnmpDeviceState& state) {
+    const MibEntry* e = mibNext(oid);
+    while (e != nullptr && !v1Visible(e, state)) e = mibNext(e->oid);
+    return e;
+}
+
 size_t SnmpAgent::handleV1(uint8_t* response, size_t capacity, const SnmpDeviceState& state) {
     if (_req.pduType == BerTag::SetRequest) {
         _outcome = SnmpOutcome::SetRejected;
@@ -98,8 +112,10 @@ size_t SnmpAgent::handleV1(uint8_t* response, size_t capacity, const SnmpDeviceS
     // Resolve every varbind first, so errors are reported before anything is built
     const MibEntry* entries[SNMP_MAX_VARBINDS];
     for (uint8_t i = 0; i < _req.varbindCount; i++) {
-        entries[i] = getNext ? mibNext(_req.names[i]) : mibFind(_req.names[i]);
-        if (entries[i] == nullptr) return respondError(_req, SnmpError::NoSuchName, i + 1, response, capacity);
+        entries[i] = getNext ? mibNextV1(_req.names[i], state) : mibFind(_req.names[i]);
+        if (!v1Visible(entries[i], state)) {
+            return respondError(_req, SnmpError::NoSuchName, i + 1, response, capacity);
+        }
     }
 
     SnmpResponseBuilder builder(response, capacity, _req);
@@ -147,6 +163,7 @@ size_t SnmpAgent::handleV2c(uint8_t* response, size_t capacity, const SnmpDevice
 }
 
 size_t SnmpAgent::handleGetBulk(uint8_t* response, size_t capacity, const SnmpDeviceState& state) {
+    _outcome = SnmpOutcome::RespondedBulk;
     // RFC 3416 4.2.3: negative values count as 0, non-repeaters is capped at the varbind count
     uint8_t n = _req.varbindCount;
     uint8_t nonRepeaters = _req.nonRepeaters <= 0 ? 0 : (_req.nonRepeaters >= n ? n : (uint8_t)_req.nonRepeaters);
@@ -158,6 +175,10 @@ size_t SnmpAgent::handleGetBulk(uint8_t* response, size_t capacity, const SnmpDe
 
     // Each non-repeater once, like GetNext
     for (uint8_t i = 0; i < nonRepeaters && !full; i++) {
+        if (builder.count() >= SNMP_MAX_BULK_VARBINDS) {
+            full = true;
+            break;
+        }
         const MibEntry* e = mibNext(_req.names[i]);
         bool added = e ? builder.tryAdd(e->oid, e->get(state))
                        : builder.tryAdd(_req.names[i], SnmpValue::makeException(BerTag::EndOfMibView));
@@ -169,7 +190,7 @@ size_t SnmpAgent::handleGetBulk(uint8_t* response, size_t capacity, const SnmpDe
     for (uint32_t row = 0; row < maxRepetitions && repeaters > 0 && !full; row++) {
         bool allEnded = true;
         for (uint8_t j = 0; j < repeaters && !full; j++) {
-            if (builder.count() >= SNMP_MAX_RESPONSE_VARBINDS) {
+            if (builder.count() >= SNMP_MAX_BULK_VARBINDS) {
                 full = true;
                 break;
             }

@@ -24,7 +24,8 @@
  *   - GetNext: endOfMibView per varbind past the end
  *   - GetBulk: non-repeaters once, then up to max-repetitions rows of the
  *     repeaters; stops early when every repeater is at endOfMibView, and
- *     returns as many varbinds as fit instead of tooBig
+ *     returns as many varbinds as fit (at most SNMP_MAX_BULK_VARBINDS, to
+ *     limit reflection) instead of tooBig
  *   - Set: notWritable for existing objects, noCreation for others
  *   - Response larger than the buffer: tooBig with an empty varbind list
  */
@@ -34,8 +35,13 @@
 /// Largest response the agent builds (RFC 1157 requires at least 484)
 constexpr size_t SNMP_MAX_MESSAGE = 1472;
 
-/// Most variable bindings in one GetBulk response, in addition to the size limit
+/// Most variable bindings in one response (decoders size their buffers by this)
 constexpr uint8_t SNMP_MAX_RESPONSE_VARBINDS = 64;
+
+/// Most variable bindings in one GetBulk response. Kept small so a short
+/// request (possibly with a spoofed source) cannot be turned into a large
+/// reflected reply; managers simply send more GetBulk requests.
+constexpr uint8_t SNMP_MAX_BULK_VARBINDS = 16;
 
 /**
  * @brief Counters for the status screen
@@ -61,6 +67,7 @@ struct SnmpStats {
  */
 enum class SnmpOutcome : uint8_t {
     Responded,     ///< Get/GetNext answered (including noSuchName / tooBig errors)
+    RespondedBulk, ///< GetBulk answered; does not prove a round trip, so it earns no trust
     SetRejected,   ///< SetRequest answered with an error (all objects are read-only)
     ParseError,    ///< Dropped: malformed
     BadVersion,    ///< Dropped: not SNMPv1

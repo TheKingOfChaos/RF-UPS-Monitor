@@ -74,6 +74,11 @@ void snmpCommunityChanged();
 void snmpNotifyMainsChange();
 
 /**
+ * @brief sysUpTime: hundredths of a second since boot
+ */
+uint32_t snmpUptimeTicks();
+
+/**
  * @brief Request and error counters for the status screen
  */
 const SnmpStats& snmpStats();

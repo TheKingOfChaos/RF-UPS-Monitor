@@ -32,6 +32,16 @@ from snmp_tools import (GET_SYSDESCR, REQUEST_ID_OFFSET, garbage_packets, local_
 ENTERPRISE = "1.3.6.1.4.1.63050"
 
 
+def all_oids(v1):
+    """Every object of the MIB in walk order; v1 does not see the eight Counter64 ifHC* columns."""
+    oids = [".1.3.6.1.2.1.1.%d.0" % i for i in range(1, 8)]
+    oids += [".1.3.6.1.2.1.2.1.0"]
+    oids += [".1.3.6.1.2.1.2.2.1.%d.1" % i for i in range(1, 23)]
+    oids += [".1.3.6.1.2.1.31.1.1.1.%d.1" % i for i in range(1, 20) if not (v1 and 6 <= i <= 13)]
+    oids += ["." + ENTERPRISE + ".%d.0" % i for i in range(1, 5)]
+    return oids
+
+
 def v3_packet():
     """The captured v1 GetRequest with its version field set to 3 (SNMPv3)."""
     pkt = bytearray(GET_SYSDESCR)
@@ -76,7 +86,7 @@ class SnmpAgentTest(unittest.TestCase):
     def test_get_sysdescr(self):
         rc, out = self.snmp("snmpget", "1.3.6.1.2.1.1.1.0")
         self.assertEqual(0, rc, out)
-        self.assertRegex(out, r'\.1\.3\.6\.1\.2\.1\.1\.1\.0 = STRING: "RF-UPS-Monitor v\d+\.\d+\.\d+ ')
+        self.assertRegex(out, r'\.1\.3\.6\.1\.2\.1\.1\.1\.0 = STRING: "RF-UPS-Monitor \d+\.\d+\.\d+ ')
 
     def test_get_sysobjectid_is_enterprise(self):
         rc, out = self.snmp("snmpget", "1.3.6.1.2.1.1.2.0")
@@ -124,22 +134,20 @@ class SnmpAgentTest(unittest.TestCase):
         rc, out = self.snmp("snmpwalk", ".1")
         self.assertEqual(0, rc, out)
         oids = [l.split(" = ")[0] for l in out.splitlines() if " = " in l]
-        expected = [".1.3.6.1.2.1.1.%d.0" % i for i in range(1, 8)] + \
-                   ["." + ENTERPRISE + ".%d.0" % i for i in range(1, 4)]
-        self.assertEqual(expected, oids)
+        self.assertEqual(all_oids(v1=True), oids)
         self.assertIn("End of MIB", out)
 
     def test_walk_enterprise_subtree(self):
         rc, out = self.snmp("snmpwalk", ENTERPRISE)
-        self.assertEqual(3, sum(1 for l in out.splitlines() if " = " in l), out)
+        self.assertEqual(4, sum(1 for l in out.splitlines() if " = " in l), out)
 
     def test_walk_system_group(self):
         rc, out = self.snmp("snmpwalk", "1.3.6.1.2.1.1")
         self.assertEqual(7, sum(1 for l in out.splitlines() if " = " in l), out)
 
     def test_getnext_past_end(self):
-        rc, out = self.snmp("snmpgetnext", ENTERPRISE + ".3.0")
-        self.assertRegex(out, NO_SUCH + r"\." + ENTERPRISE.replace(".", r"\.") + r"\.3\.0")
+        rc, out = self.snmp("snmpgetnext", ENTERPRISE + ".4.0")
+        self.assertRegex(out, NO_SUCH + r"\." + ENTERPRISE.replace(".", r"\.") + r"\.4\.0")
 
     # ---- rejected requests ----
 
@@ -167,7 +175,7 @@ class SnmpAgentTest(unittest.TestCase):
     def test_v2c_get(self):
         rc, out = self.snmp("snmpget", "1.3.6.1.2.1.1.1.0", ENTERPRISE + ".1.0", version="2c")
         self.assertEqual(0, rc, out)
-        self.assertRegex(out, r'1\.1\.0 = STRING: "RF-UPS-Monitor v')
+        self.assertRegex(out, r'1\.1\.0 = STRING: "RF-UPS-Monitor \d+\.\d+\.\d+ ')
         self.assertRegex(out, r"63050\.1\.0 = INTEGER: [01]")
 
     def test_v2c_exceptions_instead_of_errors(self):
@@ -181,22 +189,23 @@ class SnmpAgentTest(unittest.TestCase):
         rc, out = self.snmp("snmpwalk", ".1", version="2c")
         self.assertEqual(0, rc, out)
         oids = [l.split(" = ")[0] for l in out.splitlines() if " = " in l and "No more variables" not in l]
-        expected = [".1.3.6.1.2.1.1.%d.0" % i for i in range(1, 8)] + \
-                   ["." + ENTERPRISE + ".%d.0" % i for i in range(1, 4)]
-        self.assertEqual(expected, oids)
+        self.assertEqual(all_oids(v1=False), oids)
         self.assertIn("No more variables left in this MIB View", out)
 
-    def test_bulkwalk_returns_the_same_as_walk(self):
+    def test_bulkwalk_returns_the_same_objects_as_walk(self):
         before = self.dev.status()["getBulkRequests"]
         rc, bulk = self.snmp("snmpbulkwalk", ".1", version="2c")
         self.assertEqual(0, rc, bulk)
         rc, walk = self.snmp("snmpwalk", ".1", version="2c")
 
-        def values(text):
-            # sysUpTime changes between the two walks
-            return [l for l in text.splitlines() if " = " in l and ".1.3.0 = " not in l]
-        self.assertEqual(values(walk), values(bulk))
-        self.assertGreater(self.dev.status()["getBulkRequests"], before)
+        def oids(text):
+            # Compare names and types only: uptime and traffic counters change between the walks
+            return [(l.split(" = ")[0], l.split(" = ")[1].split(":")[0]) for l in text.splitlines()
+                    if " = " in l and "No more" not in l]
+        self.assertEqual(oids(walk), oids(bulk))
+        self.assertEqual(len(all_oids(v1=False)), len(oids(bulk)))
+        # 53 objects at most 16 per GetBulk: at least 4 requests
+        self.assertGreaterEqual(self.dev.status()["getBulkRequests"] - before, 4)
 
     def test_bulkget_non_repeaters_and_repetitions(self):
         rc, out = self.snmp("snmpbulkget", "-Cn1", "-Cr3", "1.3.6.1.2.1.1.3.0", "1.3.6.1.2.1.1", version="2c")
@@ -205,11 +214,92 @@ class SnmpAgentTest(unittest.TestCase):
         self.assertEqual([".1.3.6.1.2.1.1.4.0", ".1.3.6.1.2.1.1.1.0", ".1.3.6.1.2.1.1.2.0",
                           ".1.3.6.1.2.1.1.3.0"], oids)
 
-    def test_bulkget_large_max_repetitions(self):
+    def test_bulkget_is_capped_at_16_varbinds(self):
+        # Limits reflection: a short request never gets a huge reply
         rc, out = self.snmp("snmpbulkget", "-Cn0", "-Cr1000", ".1", version="2c")
         self.assertEqual(0, rc, out)
+        self.assertEqual(16, sum(1 for l in out.splitlines() if " = " in l))
+
+    def test_bulkget_reaches_end_of_mib_view(self):
+        rc, out = self.snmp("snmpbulkget", "-Cn0", "-Cr1000", ENTERPRISE, version="2c")
+        self.assertEqual(0, rc, out)
         self.assertIn("No more variables left in this MIB View", out)
-        self.assertEqual(10, sum(1 for l in out.splitlines() if " = " in l and "No more" not in l))
+        self.assertEqual(4, sum(1 for l in out.splitlines() if " = " in l and "No more" not in l))
+
+    # ---- IF-MIB ----
+
+    IF_OIDS = {"ifDescr": "2.2.1.2", "ifType": "2.2.1.3", "ifMtu": "2.2.1.4", "ifSpeed": "2.2.1.5",
+               "ifPhysAddress": "2.2.1.6", "ifAdminStatus": "2.2.1.7", "ifOperStatus": "2.2.1.8",
+               "ifInOctets": "2.2.1.10", "ifName": "31.1.1.1.1", "ifHCInOctets": "31.1.1.1.6",
+               "ifHCInUcastPkts": "31.1.1.1.7", "ifHCOutOctets": "31.1.1.1.10",
+               "ifHCOutUcastPkts": "31.1.1.1.11", "ifHighSpeed": "31.1.1.1.15"}
+
+    def ifmib(self, *names, version="2c"):
+        """One snmpget for IF-MIB columns of interface 1; returns ({name: value text}, output)."""
+        oids = {".1.3.6.1.2.1.%s.1" % self.IF_OIDS[n]: n for n in names}
+        rc, out = self.snmp("snmpget", *oids, version=version)
+        values = {}
+        for line in out.splitlines():
+            oid, sep, value = line.partition(" = ")
+            if sep and oid in oids:
+                values[oids[oid]] = value.strip()
+        return values, out
+
+    def test_if_table_describes_the_ethernet_port(self):
+        v, out = self.ifmib("ifDescr", "ifType", "ifMtu", "ifAdminStatus", "ifOperStatus", "ifName")
+        self.assertEqual('STRING: "W5500 10/100 Ethernet"', v.get("ifDescr"), out)
+        self.assertEqual("INTEGER: 6", v.get("ifType"))
+        self.assertEqual("INTEGER: 1500", v.get("ifMtu"))
+        self.assertEqual("INTEGER: 1", v.get("ifAdminStatus"))
+        self.assertEqual("INTEGER: 1", v.get("ifOperStatus"))
+        self.assertEqual('STRING: "eth0"', v.get("ifName"))
+
+    def test_if_speed_and_mac_match_the_device(self):
+        st = self.dev.status()
+        v, out = self.ifmib("ifSpeed", "ifHighSpeed", "ifPhysAddress")
+        self.assertTrue(st["linkUp"])
+        self.assertIn(st["linkMbps"], (10, 100))
+        self.assertEqual("Gauge32: %d" % (st["linkMbps"] * 1000000), v.get("ifSpeed"), out)
+        self.assertEqual("Gauge32: %d" % st["linkMbps"], v.get("ifHighSpeed"))
+        # Without a MIB net-snmp prints the six raw bytes as Hex-STRING: 1E B2 ...
+        self.assertEqual("Hex-STRING: " + st["mac"].replace(":", " "), v.get("ifPhysAddress"))
+
+    def test_traffic_counters_count_real_packets(self):
+        names = ("ifHCInUcastPkts", "ifHCOutUcastPkts", "ifHCInOctets", "ifHCOutOctets")
+
+        def read():
+            v, out = self.ifmib(*names)
+            return {n: int(re.search(r"Counter64: (\d+)", v[n]).group(1)) for n in names}
+        before = read()
+        for i in range(20):
+            self.assertIsNotNone(raw_get(self.ip, 9000 + i)[0])
+        after = read()
+        # 20 requests and 20 replies, plus the second snmpget itself
+        self.assertGreaterEqual(after["ifHCInUcastPkts"] - before["ifHCInUcastPkts"], 21)
+        self.assertGreaterEqual(after["ifHCOutUcastPkts"] - before["ifHCOutUcastPkts"], 20)
+        self.assertGreaterEqual(after["ifHCInOctets"] - before["ifHCInOctets"], 20 * len(GET_SYSDESCR))
+        self.assertGreater(after["ifHCOutOctets"], before["ifHCOutOctets"])
+
+    def test_32_bit_counters_follow_64_bit_ones(self):
+        v, out = self.ifmib("ifInOctets", "ifHCInOctets")
+        c32 = int(re.search(r"Counter32: (\d+)", v["ifInOctets"]).group(1))
+        c64 = int(re.search(r"Counter64: (\d+)", v["ifHCInOctets"]).group(1))
+        # Read in one request: the 32-bit value is the low half of the 64-bit one
+        self.assertEqual(c64 & 0xFFFFFFFF, c32, out)
+
+    def test_counter64_not_available_in_v1(self):
+        rc, out = self.snmp("snmpget", "1.3.6.1.2.1.31.1.1.1.6.1")
+        self.assertRegex(out, NO_SUCH + r"\.1\.3\.6\.1\.2\.1\.31\.1\.1\.1\.6\.1")
+
+    # ---- board temperature ----
+
+    def test_board_temperature_is_plausible_and_matches_status(self):
+        rc, out = self.snmp("snmpget", ENTERPRISE + ".4.0", version="2c")
+        deci = int(re.search(r"63050\.4\.0 = INTEGER: (-?\d+)", out).group(1))
+        self.assertGreater(deci, 100, "below 10 C")
+        self.assertLess(deci, 850, "above 85 C")
+        status_c = self.dev.status()["boardTempC"]
+        self.assertAlmostEqual(deci / 10.0, status_c, delta=2.0)
 
     def test_v2c_set_is_not_writable(self):
         rc, out = self.snmp("snmpset", "1.3.6.1.2.1.1.5.0", "s", "hacked", version="2c")

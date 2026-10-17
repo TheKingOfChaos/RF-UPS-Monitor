@@ -4,7 +4,9 @@
 #include <W5500lwIP.h>
 #include <mains_input.h>
 #include "cli.h"
+#include "board_temp.h"
 #include "factory_reset.h"
+#include "net_stats.h"
 #include "pins.h"
 #include "snmp_service.h"
 #include "version.h"
@@ -122,7 +124,8 @@ void setup() {
     // Wait briefly for a terminal, but don't block boot when none is attached
     uint32_t serialWait = millis();
     while (!Serial && millis() - serialWait < 3000) delay(10);
-    Serial.println("\nRF-UPS-Monitor v" FIRMWARE_VERSION " starting...");
+    Serial.println("\nRF-UPS-Monitor " FIRMWARE_VERSION " starting...");
+    boardTempBegin();
 
     // Initialize pins (POWER_PIN and FACTORY_RESET_PIN are configured on core 1)
     pinMode(LED_PIN, OUTPUT);
@@ -160,6 +163,7 @@ void setup() {
 
     // Bring up Ethernet and the SNMP agent
     if (startEthernet()) {
+        netStatsBegin(eth.getNetIf());
         snmpBegin();
     }
 
@@ -191,6 +195,10 @@ void loop() {
                       (unsigned long)mains.lastChangeMs);
         snmpNotifyMainsChange();
     }
+
+    // Link state for IF-MIB, board temperature
+    netStatsPoll(snmpUptimeTicks());
+    boardTempPoll();
 
     // SNMP requests
     snmpPoll();

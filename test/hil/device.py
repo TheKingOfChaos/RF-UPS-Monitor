@@ -146,6 +146,14 @@ class Device:
         info["rateLimited"] = int(m.group(1)) if m else None
         m = re.search(r"^Trap version: (v1|v2c)", out, re.MULTILINE)
         info["trapVersion"] = {"v1": "1", "v2c": "2c"}[m.group(1)] if m else None
+        m = re.search(r"^Board temperature: (-?\d+)\.(\d) C", out, re.MULTILINE)
+        info["boardTempC"] = (int(m.group(1)) + (1 if not m.group(1).startswith("-") else -1) * int(m.group(2)) / 10.0
+                              if m else None)
+        m = re.search(r"^Ethernet: link (up|down), (\d+) Mbit/s", out, re.MULTILINE)
+        info["linkUp"] = (m.group(1) == "up") if m else None
+        info["linkMbps"] = int(m.group(2)) if m else None
+        m = re.search(r"^MAC: ([0-9A-F:]+)", out, re.MULTILINE)
+        info["mac"] = m.group(1) if m else None
         m = re.search(r"^SNMP v2c: (\d+) requests, (\d+) getbulk", out, re.MULTILINE)
         info["v2cRequests"] = int(m.group(1)) if m else None
         info["getBulkRequests"] = int(m.group(2)) if m else None

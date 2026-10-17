@@ -130,6 +130,7 @@ Flashing an embedded test replaces the firmware, so always reflash with `pio run
 - Byte-exact encode and decode of requests captured from net-snmp (`snmpget`, two varbinds)
 - Strict decoding: truncation at every length, lengths beyond the buffer, indefinite/oversized lengths, multi-byte tags, wrong tags, bad INTEGER/unsigned/NULL/OID encodings, child readers confined to their region, sticky errors
 - Every single-byte corruption of a real request (~15 000 packets) decodes safely; run `scripts/sanitize.sh` to check this under AddressSanitizer
+- Counter64: minimal encoding from 0 to 2^64-1 (leading 0x00 when the top bit is set), round trip, oversized values rejected
 
 ### `test/native/test_snmp_message`: `lib/snmp_agent` message layer
 - net-snmp Get, GetNext and two-varbind requests parsed exactly; SetRequest accepted for the agent to reject
@@ -154,6 +155,11 @@ Flashing an embedded test replaces the firmware, so always reflash with `pio run
 - `test_snmp_agent`: v2c Get with noSuchObject/noSuchInstance and no error-status, GetNext endOfMibView, full v2c walk, Set notWritable/noCreation, v1 unchanged for the same requests; GetBulk against the net-snmp request, interleaved repeaters, whole MIB in one request, zero/negative/oversized parameters, INT32_MAX repetitions bounded, truncation, tooBig only when nothing fits, v2c tooBig with empty list, corruption
 - `test_snmp_trap`: v2c coldStart and mainsPowerLost byte-exact against `snmptrap -v2c`, trap OIDs for all four traps
 - `test_settings_codec`: trap version default v2c, round trip, invalid values rejected
+
+### IF-MIB and board temperature in the native suites
+- `test_if_stats` (`lib/if_stats`): frame classification (unicast, multicast, broadcast, runt frames), octet and packet counting, 64-bit counters past 2^32, W5500 PHYCFGR decoding (link, 10/100, duplex) and speed in bit/s
+- `test_snmp_agent`: ifTable and ifXTable values from the device state, ifPhysAddress is the MAC, Counter64 values, link down shows `down` and speed 0, no such instance for interface 2, Counter64 objects do not exist for v1 (Get and walk, RFC 3584), a v1 walk returns every other object, board temperature
+- `test_snmp_agent` GetBulk: a walk returns the whole MIB then endOfMibView, replies are capped at 16 varbinds (no amplification), a GetBulk does not make its source trusted
 
 ### `test/native/test_snmp_trap`: trap encoding
 - mainsPowerLost and coldStart byte-for-byte identical to net-snmp's `snmptrap` output for the same fields; authenticationFailure differs only in generic-trap
@@ -219,7 +225,9 @@ Uses `test/settings_a.json` and `test/settings_b.json`, never the real settings.
 ### `test/hil/test_snmp.py`: the SNMP agent on the device
 - `snmpget` of sysDescr, sysObjectID, several varbinds in order; sysUpTime advances ~100 ticks per second
 - Mains objects present and consistent with the serial status screen
-- `snmpwalk` of everything (10 objects in order, End of MIB), the system group (7) and the enterprise subtree (3)
+- `snmpwalk` of everything (45 objects in v1 in order, End of MIB; v1 does not see the eight Counter64 columns), the system group (7) and the enterprise subtree (4)
+- IF-MIB: ifDescr, ifType, ifMtu, admin/oper status, ifName; ifSpeed, ifHighSpeed and ifPhysAddress match the status screen; 20 requests raise the 64-bit packet and octet counters; ifInOctets is the low half of ifHCInOctets; Counter64 is noSuchName in v1
+- boardTemperature between 10 and 85 °C and within 2 °C of the status screen
 - noSuchName for unknown OIDs and past the end; `snmpset` rejected and nothing changed
 - Wrong community and v2c get no reply and are counted on the status screen
 - SNMP settings set from the menu show up in `snmpget` immediately (no reboot), the old community is refused, and they survive a reboot; the originals are restored afterwards
@@ -227,7 +235,7 @@ Uses `test/settings_a.json` and `test/settings_b.json`, never the real settings.
 - Access log lists bad community and bad version from this PC, newest first; SetRequests are logged
 - The device must use community `public` for this suite
 
-- v2c: get, exceptions instead of errors, walk ending with endOfMibView, `snmpbulkwalk` equal to `snmpwalk`, `snmpbulkget -Cn1 -Cr3` and `-Cr1000`, Set notWritable, wrong community; SNMPv3 gets no reply and is counted; v1/v2c counters
+- v2c: get, exceptions instead of errors, walk of all 53 objects ending with endOfMibView, `snmpbulkwalk` returns the same objects as `snmpwalk`, `snmpbulkget -Cn1 -Cr3`, `-Cr1000` capped at 16 varbinds and reaching endOfMibView, Set notWritable, wrong community; SNMPv3 gets no reply and is counted; v1/v2c counters
 
 ### `test/hil/test_snmp_traps.py`: traps on the device (every test runs with v1 and with v2c traps)
 - coldStart arrives after a reboot (empty ARP table, the trap is the first packet to this PC), exactly once, from the device's address, with a small time-stamp

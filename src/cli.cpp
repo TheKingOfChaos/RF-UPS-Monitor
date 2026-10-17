@@ -3,6 +3,8 @@
 #include <mains_input.h>
 #include <netconfig.h>
 #include <settings.h>
+#include "board_temp.h"
+#include "net_stats.h"
 #include "snmp_service.h"
 
 // Menu state machine
@@ -85,6 +87,19 @@ static void printStatus() {
                   (unsigned long)snmp.inBadVersions, (unsigned long)snmp.inParseErrors);
     Serial.printf("SNMP v2c: %lu requests, %lu getbulk\n", (unsigned long)snmp.inV2cRequests,
                   (unsigned long)snmp.inGetBulkRequests);
+
+    int32_t t = boardTempDeciC();
+    Serial.printf("Board temperature: %ld.%ld C\n", (long)(t / 10), (long)abs(t % 10));
+    SnmpInterfaceState ifs;
+    netStatsCapture(ifs);
+    Serial.printf("Ethernet: link %s, %lu Mbit/s, in %llu bytes / %llu packets, out %llu bytes / %llu packets\n",
+                  ifs.linkUp ? "up" : "down", (unsigned long)(ifs.speedBps / 1000000),
+                  (unsigned long long)ifs.counters.inOctets,
+                  (unsigned long long)(ifs.counters.inUcastPkts + ifs.counters.inMulticastPkts +
+                                       ifs.counters.inBroadcastPkts),
+                  (unsigned long long)ifs.counters.outOctets,
+                  (unsigned long long)(ifs.counters.outUcastPkts + ifs.counters.outMulticastPkts +
+                                       ifs.counters.outBroadcastPkts));
     const SnmpServiceStats& svc = snmpServiceStats();
     Serial.printf("SNMP security: %lu rate limited, %lu access log events\n",
                   (unsigned long)svc.rateLimited, (unsigned long)snmpAccessLog().total());

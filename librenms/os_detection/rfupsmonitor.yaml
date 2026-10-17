@@ -1,0 +1,13 @@
+os: rfupsmonitor
+text: 'RF-UPS-Monitor'
+type: power
+icon: generic
+mib_dir: rfupsmonitor
+over:
+    - { graph: device_bits, text: 'Device Traffic' }
+    - { graph: device_state, text: 'Mains Power' }
+    - { graph: device_temperature, text: 'Temperature' }
+discovery:
+    -
+        sysObjectID:
+            - .1.3.6.1.4.1.63050

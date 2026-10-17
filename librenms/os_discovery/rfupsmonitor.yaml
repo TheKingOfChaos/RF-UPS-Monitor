@@ -1,0 +1,32 @@
+modules:
+    os:
+        sysDescr_regex: '/^RF-UPS-Monitor (?<version>[0-9][0-9.]*) .*\((?<hardware>[^)]+)\)/'
+    sensors:
+        state:
+            data:
+                -
+                    oid: RF-UPS-MONITOR-MIB::mainsPowerStatus
+                    num_oid: '.1.3.6.1.4.1.63050.1.{{ $index }}'
+                    descr: 'Mains power'
+                    index: 'mainsPowerStatus.{{ $index }}'
+                    state_name: mainsPowerStatus
+                    states:
+                        - { descr: lost, value: 0, generic: 2 }
+                        - { descr: present, value: 1, generic: 0 }
+        temperature:
+            data:
+                -
+                    oid: RF-UPS-MONITOR-MIB::boardTemperature
+                    num_oid: '.1.3.6.1.4.1.63050.4.{{ $index }}'
+                    descr: 'Board (RP2040 die)'
+                    index: 'boardTemperature.{{ $index }}'
+                    divisor: 10
+                    warn_limit: 60
+                    high_limit: 70
+        count:
+            data:
+                -
+                    oid: RF-UPS-MONITOR-MIB::mainsPowerChanges
+                    num_oid: '.1.3.6.1.4.1.63050.2.{{ $index }}'
+                    descr: 'Mains power changes since boot'
+                    index: 'mainsPowerChanges.{{ $index }}'

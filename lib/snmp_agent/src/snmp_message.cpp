@@ -23,6 +23,19 @@ SnmpValue SnmpValue::makeUnsigned(uint8_t type, uint32_t u) {
     return v;
 }
 
+SnmpValue SnmpValue::makeCounter64(uint64_t u) {
+    SnmpValue v = blankValue(BerTag::Counter64);
+    v.unsigned64 = u;
+    return v;
+}
+
+SnmpValue SnmpValue::makeBytes(const uint8_t* data, size_t length) {
+    SnmpValue v = blankValue(BerTag::OctetString);
+    v.data = data;
+    v.length = data ? length : 0;
+    return v;
+}
+
 SnmpValue SnmpValue::makeString(const char* s) {
     SnmpValue v = blankValue(BerTag::OctetString);
     v.data = (const uint8_t*)(s ? s : "");
@@ -50,6 +63,7 @@ bool snmpWriteValue(BerWriter& w, const SnmpValue& value) {
     case BerTag::Counter32:
     case BerTag::Gauge32:
     case BerTag::TimeTicks:   return w.writeUnsigned(value.type, value.unsigned32);
+    case BerTag::Counter64:   return w.writeUnsigned64(value.type, value.unsigned64);
     case BerTag::OctetString: return w.writeOctetString(value.data, value.length);
     case BerTag::ObjectId:    return w.writeOid(value.oid);
     case BerTag::IpAddress:   return w.writeIpAddress(value.ip);

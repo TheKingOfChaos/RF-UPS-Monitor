@@ -1,0 +1,58 @@
+#pragma once
+
+/**
+ * @file if_stats.h
+ * @brief Ethernet interface counters and W5500 PHY status, for IF-MIB.
+ *
+ * Pure C++, unit tested on the host. The W5500 (in the MACRAW mode used by
+ * lwIP) has no traffic counters, so the firmware counts every frame passing
+ * between lwIP and the driver with ifCountFrame(). The PHY register gives
+ * link, speed and duplex.
+ */
+
+#include <stddef.h>
+#include <stdint.h>
+
+/**
+ * @brief Traffic counters of one interface (64-bit, for ifHC* objects)
+ */
+struct IfCounters {
+    uint64_t inOctets, inUcastPkts, inMulticastPkts, inBroadcastPkts;
+    uint64_t outOctets, outUcastPkts, outMulticastPkts, outBroadcastPkts;
+    uint32_t outErrors;  ///< Frames the driver failed to send
+};
+
+/// How a frame was addressed
+enum class FrameKind : uint8_t { Unicast, Multicast, Broadcast };
+
+/**
+ * @brief Classify a frame by its destination MAC address (the first 6 bytes)
+ *
+ * ff:ff:ff:ff:ff:ff is broadcast, any other address with the group bit set
+ * (lowest bit of the first byte) is multicast. Frames shorter than 6 bytes
+ * count as unicast.
+ */
+FrameKind classifyFrame(const uint8_t* frame, size_t length);
+
+/**
+ * @brief Count one frame
+ * @param frame   Ethernet frame starting with the destination MAC
+ * @param length  Frame length in bytes (counted in in/outOctets)
+ * @param outbound true for a frame sent, false for one received
+ */
+void ifCountFrame(IfCounters& c, const uint8_t* frame, size_t length, bool outbound);
+
+/**
+ * @brief Link state decoded from the W5500 PHYCFGR register (0x002E)
+ */
+struct PhyStatus {
+    bool linkUp;
+    bool speed100;     ///< 100 Mbit/s, else 10 Mbit/s
+    bool fullDuplex;
+};
+
+/// Decode PHYCFGR: bit 0 link, bit 1 speed (1 = 100M), bit 2 duplex (1 = full)
+PhyStatus decodePhyCfgr(uint8_t reg);
+
+/// ifSpeed in bit/s: 10 or 100 Mbit/s with link, 0 without
+uint32_t phySpeedBps(const PhyStatus& phy);

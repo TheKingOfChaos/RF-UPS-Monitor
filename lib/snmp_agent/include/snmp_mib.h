@@ -13,18 +13,39 @@
  *   1.3.6.1.2.1.1.5.0      sysName               OCTET STRING
  *   1.3.6.1.2.1.1.6.0      sysLocation           OCTET STRING
  *   1.3.6.1.2.1.1.7.0      sysServices           INTEGER (72)
+ *   1.3.6.1.2.1.2.1.0      ifNumber              INTEGER (1)
+ *   1.3.6.1.2.1.2.2.1.x.1  ifTable, columns 1-22 for interface 1 (IF-MIB)
+ *   1.3.6.1.2.1.31.1.1.1.x.1  ifXTable, columns 1-19 for interface 1 (IF-MIB)
  *   1.3.6.1.4.1.63050.1.0  mainsPowerStatus      INTEGER 0 = lost, 1 = present
  *   1.3.6.1.4.1.63050.2.0  mainsPowerChanges     Counter32
  *   1.3.6.1.4.1.63050.3.0  mainsPowerLastChange  TimeTicks (sysUpTime at the last change)
+ *   1.3.6.1.4.1.63050.4.0  boardTemperature      INTEGER, tenths of a degree Celsius (RP2040 die)
+ *
+ * The ifHC* columns are Counter64. SNMPv1 cannot carry Counter64, so in v1
+ * they do not exist (RFC 3584 4.2.2): Get returns noSuchName and GetNext
+ * skips them.
  *
  * Pure C++: values come from an SnmpDeviceState snapshot that the firmware
  * fills in, so the MIB is unit tested on the host.
  */
 
+#include <if_stats.h>
+
 #include "snmp_message.h"
 
 /// Enterprise number assigned to this project
 constexpr uint32_t ENTERPRISE_NUMBER = 63050;
+
+/**
+ * @brief State of the one Ethernet interface (ifIndex 1)
+ */
+struct SnmpInterfaceState {
+    bool linkUp;               ///< ifOperStatus up(1) / down(2)
+    uint32_t speedBps;         ///< ifSpeed; 0 without link
+    uint8_t mac[6];            ///< ifPhysAddress
+    uint32_t lastChangeTicks;  ///< ifLastChange: sysUpTime when the link last changed, 0 if never
+    IfCounters counters;       ///< Traffic since boot
+};
 
 /**
  * @brief Everything the MIB reports, captured once per request
@@ -38,6 +59,8 @@ struct SnmpDeviceState {
     const char* sysContact;
     const char* sysName;
     const char* sysLocation;
+    SnmpInterfaceState iface;      ///< IF-MIB data
+    int32_t boardTempDeciC;        ///< RP2040 die temperature, tenths of a degree Celsius
 };
 
 /**

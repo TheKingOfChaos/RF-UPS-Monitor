@@ -621,6 +621,37 @@ static void test_v2c_exception_values_encode_as_empty_context_tags() {
     ASSERT_ENCODES(eom, writeOctetString(nullptr, 0, BerTag::EndOfMibView));
 }
 
+static void test_counter64_encoding() {
+    const uint8_t zero[] = {0x46, 0x01, 0x00};
+    const uint8_t big[] = {0x46, 0x05, 0x01, 0x00, 0x00, 0x00, 0x00};               // 2^32
+    const uint8_t max[] = {0x46, 0x09, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    ASSERT_ENCODES(zero, writeUnsigned64(BerTag::Counter64, 0));
+    ASSERT_ENCODES(big, writeUnsigned64(BerTag::Counter64, 0x100000000ull));
+    ASSERT_ENCODES(max, writeUnsigned64(BerTag::Counter64, 0xFFFFFFFFFFFFFFFFull));
+}
+
+static void test_counter64_round_trip_and_rejects() {
+    const uint64_t values[] = {0, 1, 0x7F, 0x80, 0xFFFFFFFFull, 0x100000000ull, 0x8000000000000000ull,
+                               0xFFFFFFFFFFFFFFFFull};
+    for (uint64_t v : values) {
+        uint8_t buf[16];
+        BerWriter w(buf, sizeof(buf));
+        TEST_ASSERT_TRUE(w.writeUnsigned64(BerTag::Counter64, v));
+        BerReader r(buf, w.length());
+        uint64_t out = 0;
+        TEST_ASSERT_TRUE(r.readUnsigned64(BerTag::Counter64, out));
+        TEST_ASSERT_TRUE(v == out);
+    }
+    const uint8_t negative[] = {0x46, 0x01, 0x80};
+    const uint8_t tooLong[] = {0x46, 0x0A, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    const uint8_t nineNonZero[] = {0x46, 0x09, 0x01, 0, 0, 0, 0, 0, 0, 0, 0};
+    uint64_t out;
+    BerReader a(negative, sizeof(negative)), b(tooLong, sizeof(tooLong)), c(nineNonZero, sizeof(nineNonZero));
+    TEST_ASSERT_FALSE(a.readUnsigned64(BerTag::Counter64, out));
+    TEST_ASSERT_FALSE(b.readUnsigned64(BerTag::Counter64, out));
+    TEST_ASSERT_FALSE(c.readUnsigned64(BerTag::Counter64, out));
+}
+
 static void test_null_and_empty_input() {
     BerReader none(nullptr, 10);
     TEST_ASSERT_TRUE(none.failed());
@@ -710,6 +741,8 @@ int main() {
     RUN_TEST(test_read_raw_fails_on_truncated_element);
     RUN_TEST(test_rollback_discards_a_partly_written_element);
     RUN_TEST(test_v2c_exception_values_encode_as_empty_context_tags);
+    RUN_TEST(test_counter64_encoding);
+    RUN_TEST(test_counter64_round_trip_and_rejects);
     RUN_TEST(test_null_and_empty_input);
     RUN_TEST(test_decode_every_single_byte_corruption_is_safe);
     return UNITY_END();

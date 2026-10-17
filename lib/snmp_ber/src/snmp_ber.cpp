@@ -167,6 +167,21 @@ bool BerReader::readUnsigned(uint8_t expectedTag, uint32_t& value) {
     return true;
 }
 
+bool BerReader::readUnsigned64(uint8_t expectedTag, uint64_t& value) {
+    uint8_t tag;
+    BerReader c;
+    if (!readTlv(tag, c)) return false;
+    size_t n = c.remaining();
+    if (tag != expectedTag || n < 1 || n > 9) return fail();
+    if (c._p[0] & 0x80) return fail();                 // Negative
+    if (n == 9 && c._p[0] != 0x00) return fail();      // Would exceed 64 bits
+
+    uint64_t v = 0;
+    for (size_t i = 0; i < n; i++) v = (v << 8) | c._p[i];
+    value = v;
+    return true;
+}
+
 bool BerReader::readOctetString(const uint8_t*& data, size_t& length, uint8_t expectedTag) {
     uint8_t tag;
     BerReader c;
@@ -316,6 +331,20 @@ bool BerWriter::writeUnsigned(uint8_t tag, uint32_t value) {
     while (start < 4 && bytes[start] == 0x00 && !(bytes[start + 1] & 0x80)) start++;
     if (!putHeader(tag, (size_t)(5 - start))) return false;
     for (int i = start; i < 5; i++) {
+        if (!put(bytes[i])) return false;
+    }
+    return true;
+}
+
+bool BerWriter::writeUnsigned64(uint8_t tag, uint64_t value) {
+    uint8_t bytes[9];
+    bytes[0] = 0x00;
+    for (int i = 0; i < 8; i++) bytes[1 + i] = (uint8_t)(value >> (56 - 8 * i));
+    // Keep a leading 0x00 only when the next byte has its top bit set
+    int start = 0;
+    while (start < 8 && bytes[start] == 0x00 && !(bytes[start + 1] & 0x80)) start++;
+    if (!putHeader(tag, (size_t)(9 - start))) return false;
+    for (int i = start; i < 9; i++) {
         if (!put(bytes[i])) return false;
     }
     return true;

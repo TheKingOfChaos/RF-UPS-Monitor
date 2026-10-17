@@ -1,13 +1,13 @@
 RF-UPS-MONITOR-MIB DEFINITIONS ::= BEGIN
 
 IMPORTS
-    MODULE-IDENTITY, OBJECT-TYPE, NOTIFICATION-TYPE, Counter32, TimeTicks, enterprises
+    MODULE-IDENTITY, OBJECT-TYPE, NOTIFICATION-TYPE, Counter32, Integer32, TimeTicks, enterprises
         FROM SNMPv2-SMI
     MODULE-COMPLIANCE, OBJECT-GROUP, NOTIFICATION-GROUP
         FROM SNMPv2-CONF;
 
 rfUpsMonitor MODULE-IDENTITY
-    LAST-UPDATED "202610160000Z"
+    LAST-UPDATED "202610170100Z"
     ORGANIZATION "RF-UPS-Monitor project"
     CONTACT-INFO
         "https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3
@@ -17,6 +17,9 @@ rfUpsMonitor MODULE-IDENTITY
          Ethernet module. The agent speaks SNMPv1 only and all objects
          are read-only. The standard system group (RFC 1213) is also
          implemented."
+    REVISION "202610170100Z"
+    DESCRIPTION
+        "Added boardTemperature (firmware 1.0.0)."
     REVISION "202610170000Z"
     DESCRIPTION
         "Added mainsPowerLost and mainsPowerRestored notifications,
@@ -78,6 +81,19 @@ mainsPowerLastChange OBJECT-TYPE
          the state has not changed since the agent started."
     ::= { rfUpsMonitor 3 }
 
+boardTemperature OBJECT-TYPE
+    SYNTAX      Integer32 (-400..1250)
+    UNITS       "0.1 degrees Celsius"
+    MAX-ACCESS  read-only
+    STATUS      current
+    DESCRIPTION
+        "Temperature of the RP2040 chip, from its on-chip sensor, in
+         tenths of a degree Celsius (287 = 28.7 C), averaged over the
+         last 16 seconds. This is the die temperature: it reads a few
+         degrees above the air around the board and is accurate to a
+         few degrees."
+    ::= { rfUpsMonitor 4 }
+
 -- Conformance
 
 rfUpsMonitorConformance OBJECT IDENTIFIER ::= { rfUpsMonitor 100 }
@@ -90,6 +106,13 @@ rfUpsMonitorMainsGroup OBJECT-GROUP
     DESCRIPTION
         "Mains power monitoring objects."
     ::= { rfUpsMonitorGroups 1 }
+
+rfUpsMonitorBoardGroup OBJECT-GROUP
+    OBJECTS     { boardTemperature }
+    STATUS      current
+    DESCRIPTION
+        "Board health objects."
+    ::= { rfUpsMonitorGroups 3 }
 
 rfUpsMonitorMainsNotificationGroup NOTIFICATION-GROUP
     NOTIFICATIONS { mainsPowerLost, mainsPowerRestored }
@@ -104,7 +127,8 @@ rfUpsMonitorCompliance MODULE-COMPLIANCE
         "Every RF-UPS-Monitor agent implements all objects and
          notifications."
     MODULE      -- this module
-        MANDATORY-GROUPS { rfUpsMonitorMainsGroup, rfUpsMonitorMainsNotificationGroup }
+        MANDATORY-GROUPS { rfUpsMonitorMainsGroup, rfUpsMonitorMainsNotificationGroup,
+                           rfUpsMonitorBoardGroup }
     ::= { rfUpsMonitorCompliances 1 }
 
 END

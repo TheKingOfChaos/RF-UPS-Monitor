@@ -31,6 +31,7 @@ constexpr uint8_t Counter32 = 0x41;
 constexpr uint8_t Gauge32 = 0x42;
 constexpr uint8_t TimeTicks = 0x43;
 constexpr uint8_t Opaque = 0x44;
+constexpr uint8_t Counter64 = 0x46;       ///< v2c only (RFC 2578)
 // SNMP PDUs (context-specific, constructed)
 constexpr uint8_t GetRequest = 0xA0;
 constexpr uint8_t GetNextRequest = 0xA1;
@@ -136,6 +137,11 @@ public:
     bool readUnsigned(uint8_t expectedTag, uint32_t& value);
 
     /**
+     * @brief Read an unsigned 64-bit value (Counter64): 1-9 content bytes, a ninth only as leading 0x00
+     */
+    bool readUnsigned64(uint8_t expectedTag, uint64_t& value);
+
+    /**
      * @brief Read an OCTET STRING (or another primitive tag), returning a pointer into the buffer
      */
     bool readOctetString(const uint8_t*& data, size_t& length, uint8_t expectedTag = BerTag::OctetString);
@@ -197,6 +203,7 @@ public:
 
     bool writeInteger(int32_t value);
     bool writeUnsigned(uint8_t tag, uint32_t value);
+    bool writeUnsigned64(uint8_t tag, uint64_t value);
     bool writeOctetString(const uint8_t* data, size_t length, uint8_t tag = BerTag::OctetString);
     bool writeOctetString(const char* text);
     bool writeNull();

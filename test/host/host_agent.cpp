@@ -8,6 +8,7 @@
 #include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
@@ -60,6 +61,13 @@ int main(int argc, char** argv) {
         state.sysContact = "ops@example.com";
         state.sysName = "host-agent";
         state.sysLocation = "WSL";
+        state.iface.linkUp = true;
+        state.iface.speedBps = 100000000;
+        const uint8_t mac[6] = {0x02, 0x00, 0x00, 0x00, 0x00, 0x01};
+        memcpy(state.iface.mac, mac, 6);
+        state.iface.counters.inOctets = 5000000000ull;   // past 32 bits: ifInOctets wraps, ifHCInOctets not
+        state.iface.counters.inUcastPkts = 1234;
+        state.boardTempDeciC = 250;
 
         size_t len = agent.handle(in, (size_t)n, out, sizeof(out), state);
         if (len) sendto(fd, out, len, 0, (sockaddr*)&peer, peerLen);

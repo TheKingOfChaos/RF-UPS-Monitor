@@ -8,7 +8,7 @@ The device works in LibreNMS as a plain SNMP device out of the box: it answers S
 
 | In LibreNMS | From |
 |---|---|
-| OS "RF-UPS-Monitor", type power, version (`1.0.0`) and hardware (`RP2040, W5500`) | sysObjectID `1.3.6.1.4.1.63050`, sysDescr |
+| OS "RF-UPS-Monitor", type power, version (e.g. `1.0.2`) and hardware (`RP2040, W5500`) | sysObjectID `1.3.6.1.4.1.63050`, sysDescr |
 | Port `eth0` with traffic, packets, speed and status | IF-MIB (64-bit counters over v2c) |
 | State sensor "Mains power": present (OK) / lost (critical) | `mainsPowerStatus` |
 | Temperature sensor "Board (RP2040 die)", warning at 60 °C, critical at 70 °C, low limit −20 °C | `boardTemperature` / 10 |

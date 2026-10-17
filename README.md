@@ -2,7 +2,7 @@
 
 A mains power monitor built on a Raspberry Pi Pico with a W5500 Ethernet module. It reports whether mains power is present over SNMP v1 and v2c, including traps, together with standard interface statistics (IF-MIB) and the board temperature, so it can be monitored by LibreNMS or any other SNMP manager. It is configured through a menu on the USB serial port.
 
-Current version: **1.0.1** (see [CHANGELOG.md](CHANGELOG.md)).
+Current version: **1.0.2** (see [CHANGELOG.md](CHANGELOG.md)).
 
 ## Status
 
@@ -21,6 +21,17 @@ Current version: **1.0.1** (see [CHANGELOG.md](CHANGELOG.md)).
 | LibreNMS OS definition (mains state, temperature, change counter) | Working, tested with LibreNMS 26.9.1 |
 
 See [TODO.md](TODO.md) for the detailed plan.
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| This README | Hardware, wiring, serial menu, network, mains monitoring, factory reset, settings, building, SNMP overview, troubleshooting |
+| [docs/MIB.md](docs/MIB.md) | Every SNMP object (system, IF-MIB, RF-UPS-MONITOR-MIB), traps, v1/v2c differences, rate limiting, errors, limits |
+| [docs/LIBRENMS.md](docs/LIBRENMS.md) | Monitoring the device with LibreNMS: install, sensors, alerts, traps, Docker test setup |
+| [docs/TESTING.md](docs/TESTING.md) | Test layers, how to run them, automated mains tests with a smart plug, what each suite covers |
+| [CHANGELOG.md](CHANGELOG.md) | What changed in each version |
+| [.clinerules](.clinerules) | Project and test rules |
 
 ## Hardware
 
@@ -61,7 +72,38 @@ Connect to the Pico's USB serial port (`COM16` here) at **115200 baud, 8N1**, wi
 >
 ```
 
-**1. Show status** prints the mains power state, the board temperature, the Ethernet link speed, traffic and drop counters, the SNMP counters and settings (community, sysName, sysContact, sysLocation), the configured network mode, the stored static settings, and the live interface: state, MAC, IP, subnet, gateway and DNS. The interface state line is one of:
+**1. Show status** prints the mains power state, the board temperature, the Ethernet link speed, traffic and drop counters, the SNMP counters and settings (community, sysName, sysContact, sysLocation), the configured network mode, the stored static settings, and the live interface: state, MAC, IP, subnet, gateway and DNS.
+
+```
+> 1
+
+Mains power: present (22 changes, last change 1053 s ago)
+SNMP: 802 packets, 802 responses (get 437, getnext 0, set 0), bad community 0, bad version 0, malformed 0
+SNMP v2c: 792 requests, 365 getbulk
+Board temperature: 40.4 C
+Ethernet: link up, 100 Mbit/s, in 184054263 bytes / 1351415 packets, out 149671 bytes / 1002 packets
+Ethernet drops: 0 discarded (no buffer), 0 errors, 211829 unknown protocol, 0 send errors
+SNMP security: 0 rate limited, 0 access log events
+SNMP community: "public"
+sysName: "rf-ups-monitor"
+sysContact: ""
+sysLocation: ""
+Trap destination: "" (4 sent, 0 failed)
+Trap version: v2c
+Mode: DHCP
+Stored static IP: 10.10.6.249 / 255.255.0.0, gateway 10.10.0.1
+Live interface:
+State: connected
+MAC: 1E:B2:CF:4E:A2:2C
+IP: 10.10.6.111
+Subnet: 255.255.0.0
+Gateway: 10.10.0.1
+DNS: 10.10.0.1
+```
+
+"Unknown protocol" counts frames the device receives but does not use (IPv6, LLDP, spanning tree); on a busy LAN it grows steadily, which is normal.
+
+The interface state line is one of:
 
 | State | Meaning |
 |---|---|
@@ -142,7 +184,7 @@ If you lock yourself out with a wrong static address, use the serial menu to swi
 GPIO27 reads the mains detection circuit: HIGH = mains present, LOW = mains lost. The internal pull-down is enabled, so a disconnected input reads as "lost" rather than floating.
 
 - Core 1 samples the pin every millisecond and only accepts a new level once it has held for 5 ms, so short glitches and contact bounce are ignored. A real change is detected within 6 ms (requirement: 10 ms).
-- Core 0 (network, menu, later SNMP) reads the state through a sequence lock, so it never sees a half-updated value and core 1 never waits.
+- Core 0 (network, menu, SNMP) reads the state through a sequence lock, so it never sees a half-updated value and core 1 never waits.
 - Every change is logged on the serial port, e.g. `Mains power LOST at 123456 ms`, and the status screen shows the state, the number of changes and the time since the last one:
 
 ```
@@ -167,13 +209,16 @@ Settings are stored as JSON on the Pico's internal flash (LittleFS) in two copie
 ```json
 {"community":"public","dhcpEnabled":true,"staticIP":"192.168.1.100",
  "subnetMask":"255.255.255.0","gateway":"192.168.1.1","sysName":"rf-ups-monitor",
- "sysContact":"","sysLocation":"","version":1,"sequence":7}
+ "sysContact":"","sysLocation":"","trapTarget":"","trapVersion":2,
+ "version":1,"sequence":7}
 ```
 
 | Field | Meaning |
 |---|---|
 | `community` | SNMP community string, 1-31 printable characters |
 | `sysName`, `sysContact`, `sysLocation` | SNMP system group text, 0-63 printable characters; optional, defaults if missing |
+| `trapTarget` | IPv4 address that receives traps, empty = no traps; optional |
+| `trapVersion` | `1` = SNMPv1 Trap-PDU, `2` = SNMPv2-Trap (default); optional |
 | `dhcpEnabled` | `true` = DHCP, `false` = use the static fields |
 | `staticIP`, `subnetMask`, `gateway` | Static configuration, validated when DHCP is off |
 | `version` | Layout version, currently 1 |

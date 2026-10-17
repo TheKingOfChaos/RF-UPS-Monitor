@@ -152,6 +152,6 @@ An item is only ticked when it is implemented **and** its tests exist and pass (
 
 ## Notes
 - SNMP must be v1 and v2c (no v3) and our own code; networking may use libraries
-- Memory limits: 70 % flash, 50 % RAM (1.0.0: 8.5 % / 30 %, built with -Os)
+- Memory limits: 70 % flash, 50 % RAM (1.0.2: 8.5 % / 30 %, built with -Os)
 - Version: `include/version.h`; every user-visible change goes into CHANGELOG.md under [Unreleased]
 - Core 0 has a 4 KB stack shared with USB/lwIP/W5500 interrupts: keep big buffers static

@@ -6,10 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-10-17
+
+LibreNMS support tested in a real LibreNMS, and the mains tests automated. The firmware itself is unchanged apart from the version number.
+
 ### Fixed
 - LibreNMS temperature sensor: low limit set to -20 C. Without it LibreNMS put the low limit 10 C below the first reading, which alarmed when the room cooled down.
 
 ### Added
+- Documentation overview in the README, a real status screen example, and the trap settings in the settings file description.
 - `librenms/test/compose.yml`: a throw-away LibreNMS in Docker for checking the definitions. Tested with LibreNMS 26.9.1 against the device (see docs/LIBRENMS.md), including a real mains cut raising and clearing the "State Sensor Critical" alert.
 - Automated mains HIL tests: with `RFUPS_MAINS_SWITCH=dirigera` the tests switch an IKEA Dirigera smart plug feeding the mains detector (`test/hil/mains_switch.py`, `dirigera_outlet.py`). Mains loss/restore over serial and SNMP and the mains traps in v1 and v2c now pass with real mains, plus a new test that a ~1 s outage shows in mainsPowerChanges.
 
@@ -52,6 +57,7 @@ First release.
 - The network stack queues 5 UDP packets; larger bursts are dropped (SNMP managers retry).
 - Not yet tested with the real hardware: mains traps with real mains, the factory reset button, the "no link" and "no DHCP server" states. The LibreNMS definitions are validated against the schema but not yet tried in a running LibreNMS (done after 1.0.1).
 
-[Unreleased]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v1.0.2...HEAD
+[1.0.2]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/releases/tag/v1.0.0

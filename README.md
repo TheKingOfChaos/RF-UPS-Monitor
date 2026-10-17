@@ -104,7 +104,7 @@ sysContact: ""
 sysLocation: ""
 Trap destination: "" (4 sent, 0 failed)
 Trap version: v2c
-Web login: user admin, default password "gsj73nmsr5" (change with option 6)
+Web login: user admin, default password "k7wqz3mtd9" (change with option 6)
 Core 0 stack: 2520 bytes never used
 Mode: DHCP
 Stored static IP: 10.10.6.249 / 255.255.0.0, gateway 10.10.0.1
@@ -194,7 +194,7 @@ If you lock yourself out with a wrong static address, use the serial menu to swi
 
 The device serves a small configuration page on **http://&lt;device IP&gt;/** (port 80): log in, see the status, change the network settings and the SNMP community, and restart the device.
 
-- **Login:** user `admin`. Until you set your own password, the password is the device's **default password**: 10 random characters generated on first boot, different for every device, and shown only on the serial status screen (menu option 1): `Web login: user admin, default password "gsj73nmsr5"`. A factory reset does not change it.
+- **Login:** user `admin`. Until you set your own password, the password is the device's **default password**: 10 random characters generated on first boot, different for every device, and shown only on the serial status screen (menu option 1): `Web login: user admin, default password "k7wqz3mtd9"`. A factory reset does not change it.
 - **Own password:** serial menu option 6 sets one (8-32 characters, no spaces; typed characters are shown as `*`), or `-` goes back to the device default. Changing it logs every browser out. The password is stored as a salted SHA-256 hash (2000 rounds), never as text; checking it takes about half a second, done in small steps so SNMP keeps answering meanwhile. It can only be changed from the serial menu, so someone who learns it cannot lock you out.
 - **Status:** mains power and change count, uptime, board temperature, Ethernet link, IP and MAC address, network mode, firmware version.
 - **Network:** DHCP or static IP (address, mask and gateway are checked as in the serial menu). Saving restarts the device; the page tells you the new address.

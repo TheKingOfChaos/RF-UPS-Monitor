@@ -53,7 +53,7 @@ The device answers SNMP over IPv6 too (see the README's IPv6 section). To poll i
 ./lnms device:add --v2c -c <community> -t udp6 <device IPv6 address>
 ```
 
-or choose transport `udp6` in Devices → Add Device. The firmware side is tested with net-snmp over IPv6 (`snmpget udp6:[...]`); LibreNMS itself has not been tried over IPv6 yet: the Docker test setup below runs in WSL with NAT networking, which has no IPv6 route to the LAN. A static IPv6 address (serial menu option 9) gives the device an address that does not change with the router's prefix, which suits a monitoring system.
+or choose transport `udp6` in Devices → Add Device. Checked with LibreNMS 26.9.1 in the Docker setup below: added with `-t udp6`, the device is detected as RF-UPS-Monitor, and discovery and polling over IPv6 give the mains state, change counter, board temperature and the `eth0` port. If LibreNMS already has the device by its IPv4 address, it refuses a second entry with the same sysName (`--force` skips that check). A static IPv6 address (serial menu option 9) gives the device an address that does not change with the router's prefix, which suits a monitoring system.
 
 ## Traps
 
@@ -74,6 +74,8 @@ docker compose down -v                   # remove everything again
 ```
 
 The poller polls every 5 minutes; traffic rates appear after the second poll.
+
+The compose network has IPv6 (`enable_ipv6`, NATed by Docker), so the containers can poll the device over IPv6 (`./lnms device:add --v2c -c public -t udp6 <device IPv6 address>`). In WSL this needs mirrored networking (`networkingMode=mirrored` under `[wsl2]` in `%USERPROFILE%\.wslconfig`, then `wsl --shutdown`); with the default NAT networking WSL has no IPv6 route to the LAN. WSL stops when no terminal uses it, and the containers do not restart on their own: run `docker compose up -d` again after that.
 
 ## Files
 

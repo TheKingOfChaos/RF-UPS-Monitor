@@ -59,3 +59,9 @@ services:
 volumes:
   db:
   data:
+
+# IPv6 for the containers (Docker NATs it to the host), so LibreNMS can poll the device over
+# IPv6. From WSL this needs networkingMode=mirrored in .wslconfig (NAT mode has no IPv6 route).
+networks:
+  default:
+    enable_ipv6: true

@@ -1,0 +1,24 @@
+{
+    "name": "web_ui",
+    "version": "1.0.0",
+    "description": "Configuration web page: HTTP request parsing, login, sessions and pages (pure C++, host testable)",
+    "keywords": "http, web, login",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3.git"
+    },
+    "authors": [
+        {
+            "name": "kenneth Foli Jørgensen",
+            "email": "kenneth@tkoc.dk",
+            "maintainer": true
+        }
+    ],
+    "license": "MIT",
+    "frameworks": "*",
+    "platforms": "*",
+    "dependencies": {
+        "netconfig": "*",
+        "settings_codec": "*"
+    }
+}

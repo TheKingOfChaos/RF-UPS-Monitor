@@ -5,6 +5,11 @@
 #include <stdio.h>
 #include <string.h>
 #include <settings_codec.h>
+#include <string>
+
+// A well-formed stored web password: 32 hex salt, '$', 64 hex hash
+static const char WEB_HASH_EXAMPLE[] =
+    "000102030405060708090a0b0c0d0e0f$e26c162ef26c955d928e62311a429a4cf549b87f3f889489c46dd262e14c3356";
 
 void setUp() {}
 void tearDown() {}
@@ -204,6 +209,7 @@ static void test_worst_case_escaped_settings_fit_and_round_trip() {
     strcpy(in.staticIP, "255.255.255.254");
     strcpy(in.subnetMask, "255.255.255.254");
     strcpy(in.gateway, "255.255.255.255");
+    strcpy(in.webPassword, WEB_HASH_EXAMPLE);
     in.sequence = 0xFFFFFFFFu;
 
     char json[SETTINGS_JSON_MAX];
@@ -244,6 +250,46 @@ static void test_rejects_overlong_sys_text() {
     text[SYS_TEXT_MAX_LENGTH] = '\0';  // exactly the maximum is fine
     snprintf(field, sizeof(field), "\"sysName\":\"%s\"", text);
     withField(json, sizeof(json), field);
+    TEST_ASSERT_EQUAL(SettingsParseError::None, settingsFromJson(json, s));
+}
+
+static void test_web_password_defaults_to_empty_and_round_trips() {
+    Settings s;
+    settingsDefaults(s);
+    TEST_ASSERT_EQUAL_STRING("", s.webPassword);  // empty = the device default password
+    TEST_ASSERT_EQUAL(SettingsParseError::None, settingsFromJson(LEGACY_V1_JSON, s));
+    TEST_ASSERT_EQUAL_STRING("", s.webPassword);
+
+    Settings in = staticSettings(), out;
+    strcpy(in.webPassword, WEB_HASH_EXAMPLE);
+    char json[SETTINGS_JSON_MAX];
+    TEST_ASSERT_GREATER_THAN(0, settingsToJson(in, json, sizeof(json)));
+    TEST_ASSERT_EQUAL(SettingsParseError::None, settingsFromJson(json, out));
+    TEST_ASSERT_EQUAL_STRING(WEB_HASH_EXAMPLE, out.webPassword);
+    TEST_ASSERT_TRUE(settingsEqual(in, out));
+    out.webPassword[0] = '1';
+    TEST_ASSERT_FALSE(settingsEqual(in, out));
+}
+
+static void test_rejects_malformed_web_password_hash() {
+    char json[SETTINGS_JSON_MAX], field[160];
+    Settings s;
+    std::string good = WEB_HASH_EXAMPLE;
+    std::string upper = good;
+    upper[50] = 'F';
+    std::string noDollar = good;
+    noDollar[32] = 'a';
+    const std::string bad[] = {"plaintext", good.substr(1), good + "0", upper, noDollar, "$"};
+    for (const std::string& b : bad) {
+        snprintf(field, sizeof(field), "\"webPassword\":\"%s\"", b.c_str());
+        withField(json, sizeof(json), field);
+        SettingsParseError err = settingsFromJson(json, s);
+        TEST_ASSERT_TRUE_MESSAGE(err == SettingsParseError::BadWebPassword || err == SettingsParseError::FieldTooLong,
+                                 b.c_str());
+    }
+    withField(json, sizeof(json), "\"webPassword\":7");
+    TEST_ASSERT_EQUAL(SettingsParseError::MissingField, settingsFromJson(json, s));
+    withField(json, sizeof(json), "\"webPassword\":\"\"");
     TEST_ASSERT_EQUAL(SettingsParseError::None, settingsFromJson(json, s));
 }
 
@@ -435,6 +481,8 @@ int main() {
     RUN_TEST(test_worst_case_escaped_settings_fit_and_round_trip);
     RUN_TEST(test_file_without_sys_text_loads_with_defaults);
     RUN_TEST(test_rejects_overlong_sys_text);
+    RUN_TEST(test_web_password_defaults_to_empty_and_round_trips);
+    RUN_TEST(test_rejects_malformed_web_password_hash);
     RUN_TEST(test_rejects_unprintable_or_mistyped_sys_text);
     RUN_TEST(test_empty_sys_text_is_allowed);
     RUN_TEST(test_settings_text_is_valid);

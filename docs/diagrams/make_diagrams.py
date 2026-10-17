@@ -170,12 +170,14 @@ def system_overview():
     d.arrow("pc", "right", "pico", "left", "USB", b_frac=0.85, both=True)
 
     d.zone("z-net", 1150, 80, 380, 700, "Network", ZONE_GRAY)
-    d.box("dhcp", 1190, 140, 300, 80, "DHCP server\n(or static IP)", GRAY, 16)
+    d.box("dhcp", 1190, 140, 140, 80, "DHCP server\n(or static IP)", GRAY, 16)
+    d.box("browser", 1350, 140, 140, 80, "Browser\nweb page\nTCP 80", VIOLET, 16)
     d.box("switch", 1190, 360, 300, 90, "LAN switch", GRAY)
     d.box("lnms", 1190, 520, 300, 110, "SNMP manager\nLibreNMS / net-snmp\npolls UDP 161 (v1 / v2c)", VIOLET, 16)
     d.box("traps", 1190, 670, 300, 80, "Trap receiver\nUDP 162 (v1 or v2c)", VIOLET, 16)
     d.arrow("w5500", "right", "switch", "left", "100 Mbit/s", b_frac=0.5, both=True)
-    d.arrow("switch", "top", "dhcp", "bottom", both=True)
+    d.arrow("switch", "top", "dhcp", "bottom", a_frac=0.23, both=True)
+    d.arrow("switch", "top", "browser", "bottom", a_frac=0.77, both=True)
     d.arrow("switch", "bottom", "lnms", "top", both=True)
     d.arrow("switch", "right", "traps", "right", "traps", via=[(1515, 405), (1515, 710)])
     d.save()
@@ -185,30 +187,32 @@ def firmware_architecture():
     d = Diagram("firmware-architecture", "RF-UPS-Monitor: firmware architecture")
     d.text(40, 64, "Arrows show the main dependencies. Everything in lib/ (green) is plain C++ and unit tested on the PC.",
            size=16, color="#495057")
-    d.zone("z-src", 40, 100, 1420, 200, "src/  firmware on the Pico (Arduino)", ZONE_BLUE)
-    cols = [70, 300, 530, 760, 990, 1220]
+    d.zone("z-src", 40, 100, 1650, 200, "src/  firmware on the Pico (Arduino)", ZONE_BLUE)
+    cols = [70, 300, 530, 760, 990, 1220, 1450]
     src = [("main", "main.cpp\nboot, Ethernet,\nloop, starts core 1"), ("cli", "cli.cpp\nserial menu"),
            ("svc", "snmp_service.cpp\nUDP 161, traps,\ndevice state"), ("temp", "board_temp.cpp\nRP2040 die\ntemperature"),
-           ("net", "net_stats.cpp\nframe counters,\nW5500 PHY"), ("reset", "factory_reset.cpp\nGPIO22 on core 1")]
+           ("net", "net_stats.cpp\nframe counters,\nW5500 PHY"), ("reset", "factory_reset.cpp\nGPIO22 on core 1"),
+           ("web", "web_service.cpp\nweb page, TCP 80,\nnon-blocking")]
     for x, (eid, text) in zip(cols, src):
         d.box(eid, x, 160, 210, 110, text, BLUE, 16)
 
-    d.zone("z-pure", 40, 340, 1420, 330, "lib/  pure C++, host tested", ZONE_GREEN, title_at="bottom",
+    d.zone("z-pure", 40, 340, 1650, 330, "lib/  pure C++, host tested", ZONE_GREEN, title_at="bottom",
            title_x=760)
     pure = [("codec", "settings_codec\nJSON, validation,\nA/B selection"), ("netcfg", "netconfig\nIPv4 parse +\nvalidate"),
             ("agent", "snmp_agent\nMIB, Get / GetNext /\nGetBulk, traps"), ("acl", "access_control\nrate limiter,\naccess log"),
-            ("ifst", "if_stats\nframe classes,\nPHYCFGR decode"), ("power", "power_monitor\ndebouncer,\nreset button")]
+            ("ifst", "if_stats\nframe classes,\nPHYCFGR decode"), ("power", "power_monitor\ndebouncer,\nreset button"),
+            ("webui", "web_ui\nHTTP parser, login,\nsessions, pages")]
     for x, (eid, text) in zip(cols, pure):
         d.box(eid, x, 400, 210, 110, text, GREEN, 16)
     d.box("ber", 530, 560, 210, 90, "snmp_ber\nBER codec, OIDs,\nCounter64", GREEN, 16)
 
-    d.zone("z-hw", 40, 710, 1420, 170, "lib/  hardware layers", ZONE_YELLOW, title_at="bottom")
+    d.zone("z-hw", 40, 710, 1650, 170, "lib/  hardware layers", ZONE_YELLOW, title_at="bottom")
     d.box("settings", 70, 740, 210, 90, "settings\nLittleFS A/B slots", YELLOW, 16)
     d.box("mains", 1220, 735, 210, 100, "mains_input\nGPIO27 on core 1,\nseqlock", YELLOW, 16)
 
-    d.zone("z-core", 40, 920, 1420, 150, "Arduino-Pico core (earlephilhower)", ZONE_GRAY)
+    d.zone("z-core", 40, 920, 1650, 150, "Arduino-Pico core (earlephilhower)", ZONE_GRAY)
     core = [(70, 330, "lwip", "lwIP + Wiznet5500lwIP\n(CountingW5500)"), (430, 200, "lfs", "LittleFS"),
-            (660, 200, "spi", "SPI"), (890, 250, "usb", "USB serial"), (1170, 260, "mc", "multicore\nsetup1 / loop1")]
+            (660, 200, "spi", "SPI"), (890, 250, "usb", "USB serial"), (1170, 260, "mc", "multicore\nsetup1 / loop1"), (1460, 200, "tcp", "WiFiServer\n(TCP)")]
     for x, w, eid, text in core:
         d.box(eid, x, 980, w, 70, text, GRAY, 16)
 
@@ -218,6 +222,7 @@ def firmware_architecture():
     d.arrow("agent", "bottom", "ber", "top")
     d.arrow("net", "bottom", "ifst", "top")
     d.arrow("reset", "bottom", "power", "top")
+    d.arrow("web", "bottom", "webui", "top")
     d.arrow("settings", "top", "codec", "bottom")
     d.arrow("mains", "top", "power", "bottom")
     d.save()

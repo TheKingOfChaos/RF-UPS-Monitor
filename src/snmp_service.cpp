@@ -80,8 +80,13 @@ static void logAccess(uint32_t source, AccessEvent event) {
     if (accessLog.record(source, event, millis())) {
         char ip[16];
         formatIPv4(source, ip);
-        Serial.printf("\nSNMP access: %s from %s\n", accessEventName(event), ip);
+        bool web = event == AccessEvent::WebLoginFailed || event == AccessEvent::WebLoginLocked;
+        Serial.printf("\n%s access: %s from %s\n", web ? "Web" : "SNMP", accessEventName(event), ip);
     }
+}
+
+void accessLogRecord(uint32_t source, AccessEvent event) {
+    logAccess(source, event);
 }
 
 /// request-id of the next v2c trap

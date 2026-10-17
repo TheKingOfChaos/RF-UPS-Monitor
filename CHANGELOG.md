@@ -6,8 +6,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-10-17
+
+A new major version for the second management interface: the configuration web page with login. SNMP, the MIB, the serial menu and the settings files stay compatible: files from 1.x load unchanged, and older firmware ignores the new `webPassword` field (a downgrade only loses the own web password).
+
 ### Added
+- **Web page** on `http://<device-ip>/` with login (user `admin`): status, DHCP/static IP (saves and restarts), SNMP community (active immediately), restart button, log out. Pure library `lib/web_ui` (HTTP parser, sessions, pages, SHA-256) with host tests; `src/web_service.cpp` serves it without ever blocking SNMP.
+- **Web password:** a random 10-character default password per device, generated on first boot, stored in `data/web_default.txt` and shown only on the serial status screen; serial menu option 6 sets an own password (stored as a salted, iterated SHA-256 hash in the new optional settings field `webPassword`) or returns to the default.
+- Web security: 30 s lockout after 5 failed logins, HttpOnly SameSite=Strict session cookie, CSRF token in every form, idle sessions end after 15 min, strict Content-Security-Policy, no framing; failed logins and lockouts in the access log.
+- The own-password check (2000 SHA-256 rounds, ~0.45 s on the RP2040) runs 40 rounds per loop pass, so a login never delays SNMP (measured: worst 52 ms during a login, before the change 467 ms); found by a code review before release.
+- Status screen: web login line and the core 0 stack high-water mark (`Core 0 stack: N bytes never used`).
 - Excalidraw diagrams in `docs/diagrams/` (system overview, firmware architecture, SNMP request flow, mains flow, settings storage, test layers), editable `.excalidraw` files with SVG exports shown in the README and docs/TESTING.md.
+
+### Changed
+- `Settings` grew by the password hash, so every temporary copy of it on core 0's 4 KB stack became static (serial menu, web page, settings parser). Settings save/load measures 1120 bytes of stack on the device (budget 1536).
 
 ## [1.0.2] - 2026-10-17
 
@@ -60,7 +72,8 @@ First release.
 - The network stack queues 5 UDP packets; larger bursts are dropped (SNMP managers retry).
 - Not yet tested with the real hardware: mains traps with real mains, the factory reset button, the "no link" and "no DHCP server" states. The LibreNMS definitions are validated against the schema but not yet tried in a running LibreNMS (done after 1.0.1).
 
-[Unreleased]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v1.0.2...HEAD
+[Unreleased]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v1.0.2...v2.0.0
 [1.0.2]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/releases/tag/v1.0.0

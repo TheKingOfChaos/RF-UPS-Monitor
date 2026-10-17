@@ -180,6 +180,13 @@ Flashing an embedded test replaces the firmware, so always reflash with `pio run
 - `test_snmp_agent`: ifTable and ifXTable values from the device state, ifInDiscards/ifInErrors/ifInUnknownProtos, ifPhysAddress is the MAC, Counter64 values, link down shows `down` and speed 0, no such instance for interface 2, Counter64 objects do not exist for v1 (Get and walk, RFC 3584), a v1 walk returns every other object, board temperature
 - `test_snmp_agent` GetBulk: a walk returns the whole MIB then endOfMibView, replies are capped at 16 varbinds (no amplification), a GetBulk does not make its source trusted
 
+### `test/native/test_web_ui`: the web page (`lib/web_ui`)
+- SHA-256 against the NIST vectors (incl. one million 'a'), split at every position around the padding boundaries
+- Password rules, salted iterated hash compared with an independent Python `hashlib` result, the stepwise check equals the one-shot check for every step size and always runs all rounds, wrong/malformed hashes never match, default password alphabet, constant-time compare
+- Sessions: token format, idle expiry, millis wrap, replacement of the least recently used, logout/clear; login throttle: lockout after 5 failures for 30 s, reset on success, wrap
+- HTTP parser: GET/POST, every prefix incomplete, byte-by-byte, header lookup, size limits at the boundary, malformed request lines, chunked, NUL bytes, extra bytes; form and cookie decoding; HTML escaping
+- Page logic with a fake backend: login form, right/wrong login, lockout, status values escaped, every action needs session and CSRF token, community and network validation, save failure, reboot, logout, idle expiry, 404/405/400/413, security headers and Content-Length on every response, every single-byte corruption of two real requests gives a well-formed response
+
 ### `test/native/test_snmp_trap`: trap encoding
 - mainsPowerLost and coldStart byte-for-byte identical to net-snmp's `snmptrap` output for the same fields; authenticationFailure differs only in generic-trap
 - mainsPowerRestored fields, varbinds are the MIB objects with the right types, configured community used
@@ -255,6 +262,16 @@ Uses `test/settings_a.json` and `test/settings_b.json`, never the real settings.
 - The device must use community `public` for this suite
 
 - v2c: get, exceptions instead of errors, walk of all 53 objects ending with endOfMibView, `snmpbulkwalk` returns the same objects as `snmpwalk`, `snmpbulkget -Cn1 -Cr3`, `-Cr1000` capped at 16 varbinds and reaching endOfMibView, Set notWritable, wrong community; SNMPv3 gets no reply and is counted; v1/v2c counters
+
+### `test/hil/test_web.py`: the web page on the device
+- Login form without device data, security headers; wrong password refused and logged; login shows the device status
+- 5 failed logins lock out even the right password for 30 s, logged as `web locked out`
+- Actions need session and CSRF token; community change applies to SNMP at once (old community refused) and is restored; invalid community and invalid static address rejected without restart
+- Restart button and DHCP save restart the device (sysUpTime restarts, default password kept); static IP from the web page and back (opt-in `RFUPS_STATIC_IP`)
+- Own password via serial option 6: masked echo, old sessions logged out, default refused, hashed check under 2 s, mismatch and short passwords change nothing, `-` restores the default
+- With an own password set, SNMP stays under 100 ms while a login (right or wrong) hashes the password
+- A client that never finishes its request does not slow SNMP and is dropped after 5 s; 30 page loads keep SNMP under 100 ms and leave > 1 KB of core 0 stack never used; oversized request gets 413
+- Needs the device default web password (the suite skips otherwise)
 
 ### `test/hil/test_snmp_traps.py`: traps on the device (every test runs with v1 and with v2c traps)
 - coldStart arrives after a reboot (empty ARP table, the trap is the first packet to this PC), exactly once, from the device's address, with a small time-stamp

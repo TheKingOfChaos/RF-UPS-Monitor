@@ -156,6 +156,11 @@ class Device:
                       r"(\d+) send errors", out, re.MULTILINE)
         for i, key in enumerate(("inDiscards", "inErrors", "inUnknownProtos", "outErrors")):
             info[key] = int(m.group(i + 1)) if m else None
+        m = re.search(r'^Web login: user admin, (?:default password "(\w+)"|(own password))', out, re.MULTILINE)
+        info["webDefaultPassword"] = m.group(1) if m else None
+        info["webOwnPassword"] = bool(m and m.group(2))
+        m = re.search(r"^Core 0 stack: (\d+) bytes never used", out, re.MULTILINE)
+        info["stackNeverUsed"] = int(m.group(1)) if m else None
         m = re.search(r"^MAC: ([0-9A-F:]+)", out, re.MULTILINE)
         info["mac"] = m.group(1) if m else None
         m = re.search(r"^SNMP v2c: (\d+) requests, (\d+) getbulk", out, re.MULTILINE)
@@ -188,6 +193,18 @@ class Device:
         """Change only the trap destination ('' turns traps off) and optionally the trap version."""
         st = self.status()
         return self.set_snmp(st["community"], st["sysName"], st["sysContact"], st["sysLocation"], target, version)
+
+    def set_web_password(self, password, repeat=None):
+        """Menu option 6. password '-' goes back to the device default; returns the menu output."""
+        self.send("6", expect=r"Enter to cancel: $")
+        if password == "-":
+            return self.send("-", expect=r"(reset to the device default|Failed)[\s\S]*> $")
+        out = self.send(password, expect=r"(Repeat the password: |Not accepted[\s\S]*Enter to cancel: )$")
+        if "Not accepted" in out:
+            self.send("", expect=r"Cancelled[\s\S]*> $")
+            return out
+        return out + self.send(password if repeat is None else repeat,
+                               expect=r"(Web password saved|passwords differ|Failed)[\s\S]*> $")
 
     def access_log(self):
         """Menu option 5: list of (ip, event, count) tuples, newest first."""

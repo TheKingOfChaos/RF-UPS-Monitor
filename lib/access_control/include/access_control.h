@@ -121,7 +121,9 @@ enum class AccessEvent : uint8_t {
     BadVersion,    ///< SNMPv2c/v3 request
     Malformed,     ///< Not a valid SNMP message
     RateLimited,   ///< Dropped by the rate limiter
-    SetRejected    ///< SetRequest with the right community (all objects are read-only)
+    SetRejected,   ///< SetRequest with the right community (all objects are read-only)
+    WebLoginFailed,  ///< Wrong user name or password on the web page
+    WebLoginLocked   ///< Web login refused during the lockout after repeated failures
 };
 
 /**

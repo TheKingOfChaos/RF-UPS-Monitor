@@ -92,3 +92,8 @@ const SnmpServiceStats& snmpServiceStats();
  * @brief Rejected access attempts, newest first
  */
 const AccessLog& snmpAccessLog();
+
+/**
+ * @brief Record a rejected access attempt from another service (the web page) in the same log
+ */
+void accessLogRecord(uint32_t source, AccessEvent event);

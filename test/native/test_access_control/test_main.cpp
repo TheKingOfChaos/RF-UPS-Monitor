@@ -333,6 +333,8 @@ static void test_event_names_and_ip_format() {
     TEST_ASSERT_EQUAL_STRING("malformed", accessEventName(AccessEvent::Malformed));
     TEST_ASSERT_EQUAL_STRING("rate limited", accessEventName(AccessEvent::RateLimited));
     TEST_ASSERT_EQUAL_STRING("set rejected", accessEventName(AccessEvent::SetRejected));
+    TEST_ASSERT_EQUAL_STRING("web login failed", accessEventName(AccessEvent::WebLoginFailed));
+    TEST_ASSERT_EQUAL_STRING("web locked out", accessEventName(AccessEvent::WebLoginLocked));
     char buf[16];
     formatIPv4(PC, buf);
     TEST_ASSERT_EQUAL_STRING("10.10.6.65", buf);

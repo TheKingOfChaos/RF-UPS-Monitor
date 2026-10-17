@@ -9,6 +9,8 @@
 #include "net_stats.h"
 #include "pins.h"
 #include "snmp_service.h"
+#include "stack_watch.h"
+#include "web_service.h"
 #include "version.h"
 
 // W5500 on SPI0 (MISO 16, CS 17, SCK 18, MOSI 19) with interrupt on GPIO21;
@@ -120,6 +122,9 @@ void listFiles(const char * dirname, uint8_t levels) {
 }
 
 void setup() {
+    // First, so the high-water mark covers everything after it
+    stackWatchBegin();
+
     // Initialize serial for debugging
     Serial.begin(115200);
     // Wait briefly for a terminal, but don't block boot when none is attached
@@ -166,6 +171,7 @@ void setup() {
     if (startEthernet()) {
         netStatsBegin(eth.getNetIf());
         snmpBegin();
+        webBegin();
     }
 
     // Serial configuration menu
@@ -203,6 +209,9 @@ void loop() {
 
     // SNMP requests
     snmpPoll();
+
+    // Configuration web page (non-blocking)
+    webPoll();
 
     // Serial configuration menu
     cliProcess();

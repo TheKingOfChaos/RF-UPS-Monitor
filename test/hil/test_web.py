@@ -1,0 +1,376 @@
+"""Hardware-in-the-loop tests for the configuration web page (TCP port 80).
+
+The device must be in DHCP mode, use community "public" and the device
+default web password (status screen: 'Web login: user admin, default
+password "..."'). Tests restore whatever they change.
+
+Run:
+    %USERPROFILE%\\.platformio\\penv\\Scripts\\python.exe -m unittest discover -s test/hil -p "test_web.py" -v
+
+Environment variables:
+    RFUPS_STATIC_IP / RFUPS_STATIC_MASK / RFUPS_STATIC_GW  Also test switching to a static
+        address from the web page and back (as for test_serial_menu.py)
+"""
+
+import http.client
+import os
+import re
+import socket
+import statistics
+import threading
+import time
+import unittest
+
+from device import Device
+from snmp_tools import local_ip_towards, net_snmp, raw_get
+
+LOCKOUT_S = 30
+
+
+class Web:
+    """Minimal browser: one request per connection, like the device expects."""
+
+    def __init__(self, host):
+        self.host = host
+        self.sid = None
+
+    def request(self, method, path, form=None, sid=None, timeout=5):
+        conn = http.client.HTTPConnection(self.host, 80, timeout=timeout)
+        headers = {}
+        body = None
+        if form is not None:
+            body = "&".join("%s=%s" % (k, v) for k, v in form.items())
+            headers["Content-Type"] = "application/x-www-form-urlencoded"
+        cookie = sid if sid is not None else self.sid
+        if cookie:
+            headers["Cookie"] = "sid=" + cookie
+        conn.request(method, path, body=body, headers=headers)
+        r = conn.getresponse()
+        page = r.read().decode("utf-8")
+        conn.close()
+        return r.status, dict(r.getheaders()), page
+
+    def login(self, password, user="admin"):
+        status, headers, page = self.request("POST", "/login", {"user": user, "password": password}, sid="")
+        m = re.search(r"sid=([0-9a-f]{32});", headers.get("Set-Cookie", ""))
+        self.sid = m.group(1) if m else None
+        return status, page
+
+    def csrf(self):
+        status, _, page = self.request("GET", "/")
+        m = re.search(r'name="csrf" value="([0-9a-f]{32})"', page)
+        return m.group(1) if m else None
+
+    def post(self, path, **fields):
+        fields.setdefault("csrf", self.csrf())
+        return self.request("POST", path, fields)
+
+
+class WebPageTest(unittest.TestCase):
+
+    @classmethod
+    def setUpClass(cls):
+        cls.dev = Device()
+        cls.dev.open()
+        cls.dev.wait_for_menu()
+        st = cls.dev.wait_connected()
+        if st["mode"] != "DHCP" or st["community"] != "public" or not st["webDefaultPassword"]:
+            cls.dev.close()
+            raise unittest.SkipTest("device must be in DHCP mode with community public and the default web password")
+        cls.ip = st["ip"]
+        cls.password = st["webDefaultPassword"]
+        cls.pc = local_ip_towards(cls.ip)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.dev.close()
+
+    def setUp(self):
+        self.dev.wait_for_menu(timeout=10)
+        self.web = Web(self.ip)
+
+    def logged_in(self):
+        status, page = self.web.login(self.password)
+        self.assertEqual(303, status, page)
+        self.assertIsNotNone(self.web.sid)
+        return self.web
+
+    def wait_lockout_over(self):
+        # A previous test may have triggered the lockout; a right password then gets 429
+        deadline = time.time() + LOCKOUT_S + 5
+        while time.time() < deadline:
+            status, _ = Web(self.ip).login(self.password)
+            if status == 303:
+                return
+            time.sleep(2)
+        self.fail("web login still locked out")
+
+    # ---- login ----
+
+    def test_start_page_is_the_login_form_without_device_data(self):
+        status, headers, page = self.web.request("GET", "/")
+        self.assertEqual(200, status)
+        self.assertIn('action="/login"', page)
+        self.assertNotIn(self.ip, page)
+        self.assertNotIn("Restart device", page)
+        self.assertIn("default-src 'none'", headers["Content-Security-Policy"])
+        self.assertEqual("DENY", headers["X-Frame-Options"])
+        self.assertEqual("no-store", headers["Cache-Control"])
+
+    def test_wrong_password_is_refused_and_logged(self):
+        self.wait_lockout_over()
+        status, page = self.web.login("wrong-" + self.password)
+        self.assertEqual(401, status)
+        self.assertIsNone(self.web.sid)
+        self.assertIn("Wrong user name or password.", page)
+        self.dev.wait_for_menu(timeout=5)
+        entries = [e for e in self.dev.access_log() if e[0] == self.pc and e[1] == "web login failed"]
+        self.assertTrue(entries, "web login failure not in the access log")
+        status, _ = self.web.login(self.password, user="root")
+        self.assertEqual(401, status)
+
+    def test_login_shows_the_device_status(self):
+        self.wait_lockout_over()
+        web = self.logged_in()
+        status, _, page = web.request("GET", "/")
+        self.assertEqual(200, status)
+        st = self.dev.status()
+        self.assertIn("<td>%s</td>" % self.ip, page)
+        self.assertIn(st["mac"], page)
+        self.assertRegex(page, r"RF-UPS-Monitor \d+\.\d+\.\d+</h1>")
+        self.assertIn("<td>Mains power</td><td>%s</td>" % st["mains"], page)
+        self.assertIn('value="public"', page)
+        self.assertIn('value="dhcp" checked', page)
+
+    def test_five_failed_logins_lock_out_for_30_s(self):
+        self.wait_lockout_over()
+        for i in range(5):
+            self.assertEqual(401, self.web.login("wrong-%d" % i)[0])
+        status, page = self.web.login(self.password)
+        self.assertEqual(429, status, "the right password must also be refused during the lockout")
+        self.assertRegex(page, r"Try again in \d+ s")
+        self.dev.wait_for_menu(timeout=5)
+        self.assertTrue([e for e in self.dev.access_log() if e[0] == self.pc and e[1] == "web locked out"])
+        time.sleep(LOCKOUT_S + 1)
+        self.assertEqual(303, self.web.login(self.password)[0])
+
+    # ---- forms ----
+
+    def test_actions_need_session_and_csrf_token(self):
+        self.wait_lockout_over()
+        status, _, _ = self.web.request("POST", "/community", {"community": "hacked1", "csrf": "0" * 32}, sid="")
+        self.assertEqual(403, status)
+        web = self.logged_in()
+        status, _, _ = web.request("POST", "/community", {"community": "hacked2"})
+        self.assertEqual(403, status)
+        status, _, _ = web.request("POST", "/community", {"community": "hacked3", "csrf": "f" * 32})
+        self.assertEqual(403, status)
+        self.assertEqual("public", self.dev.status()["community"])
+
+    def test_change_community_applies_immediately(self):
+        self.wait_lockout_over()
+        web = self.logged_in()
+        try:
+            status, _, page = web.post("/community", community="web-test%21")
+            self.assertEqual(200, status, page)
+            self.assertIn("SNMP community saved and active.", page)
+            self.assertEqual("web-test!", self.dev.status()["community"])
+            rc, out = net_snmp("snmpget", self.ip, "1.3.6.1.2.1.1.5.0", community="web-test!")
+            self.assertIn("STRING:", out)
+            rc, out = net_snmp("snmpget", self.ip, "1.3.6.1.2.1.1.5.0", community="public")
+            self.assertIn("Timeout", out)
+        finally:
+            status, _, _ = web.post("/community", community="public")
+            self.assertEqual(200, status)
+        self.assertEqual("public", self.dev.status()["community"])
+
+    def test_invalid_community_is_rejected(self):
+        self.wait_lockout_over()
+        web = self.logged_in()
+        status, _, page = web.post("/community", community="x" * 32)
+        self.assertEqual(400, status)
+        self.assertIn('class="err"', page)
+        self.assertEqual("public", self.dev.status()["community"])
+
+    def test_invalid_static_address_is_rejected_without_reboot(self):
+        self.wait_lockout_over()
+        web = self.logged_in()
+        status, _, page = web.post("/network", mode="static", ip="10.10.6.250", mask="255.255.0.0", gateway="192.168.1.1")
+        self.assertEqual(400, status)
+        self.assertIn("ateway", page)  # the netconfig message about the gateway
+        st = self.dev.status()
+        self.assertEqual("DHCP", st["mode"])
+        self.assertEqual("connected", st["state"])
+
+    # ---- restarts ----
+
+    def uptime_ticks(self):
+        rc, out = net_snmp("snmpget", self.ip, "1.3.6.1.2.1.1.3.0")
+        return int(re.search(r"Timeticks: \((\d+)\)", out).group(1))
+
+    def test_reboot_button_restarts_the_device(self):
+        self.wait_lockout_over()
+        web = self.logged_in()
+        before = self.uptime_ticks()
+        status, _, page = web.post("/reboot")
+        self.assertEqual(200, status)
+        self.assertIn("restarts now", page)
+        st = self.dev.reconnect_after_reboot()
+        self.assertLess(self.uptime_ticks(), before, "sysUpTime did not restart: no reboot")
+        self.assertEqual(self.ip, st["ip"])
+        self.assertEqual(self.password, st["webDefaultPassword"], "default password must survive a reboot")
+        status, _, _ = Web(self.ip).request("GET", "/", sid=web.sid)
+        self.assertEqual(200, status)
+
+    def test_saving_dhcp_reboots_and_keeps_the_settings(self):
+        self.wait_lockout_over()
+        web = self.logged_in()
+        status, _, page = web.post("/network", mode="dhcp")
+        self.assertEqual(200, status)
+        self.assertIn("restarts now with DHCP", page)
+        st = self.dev.reconnect_after_reboot()
+        self.assertEqual("DHCP", st["mode"])
+        self.assertEqual(self.ip, st["ip"])
+        # Sessions do not survive a restart
+        _, _, page = Web(self.ip).request("GET", "/", sid=web.sid)
+        self.assertIn('action="/login"', page)
+
+    @unittest.skipUnless(os.environ.get("RFUPS_STATIC_IP"), "set RFUPS_STATIC_IP to a free address to run")
+    def test_static_address_from_the_web_page_and_back(self):
+        static_ip = os.environ["RFUPS_STATIC_IP"]
+        mask = os.environ.get("RFUPS_STATIC_MASK", "255.255.0.0")
+        gw = os.environ.get("RFUPS_STATIC_GW", self.dev.status()["gateway"])
+        self.wait_lockout_over()
+        web = self.logged_in()
+        try:
+            status, _, page = web.post("/network", mode="static", ip=static_ip, mask=mask, gateway=gw)
+            self.assertEqual(200, status, page)
+            self.assertIn("reachable at %s" % static_ip, page)
+            st = self.dev.reconnect_after_reboot()
+            self.assertEqual("Static", st["mode"])
+            self.assertEqual(static_ip, st["ip"])
+            web = Web(static_ip)
+            self.assertEqual(303, web.login(self.password)[0])
+            status, _, page = web.post("/network", mode="dhcp")
+            self.assertEqual(200, status)
+            st = self.dev.reconnect_after_reboot()
+        finally:
+            if self.dev.status()["mode"] != "DHCP":
+                self.dev.send("2", expect=r"\(y/n\): $")
+                self.dev.send("y", expect=r"Rebooting", timeout=10)
+                st = self.dev.reconnect_after_reboot()
+        self.assertEqual("DHCP", st["mode"])
+
+    # ---- password from the serial menu ----
+
+    def test_own_password_from_serial_menu(self):
+        self.wait_lockout_over()
+        own = "Pico-pass-42"
+        web = self.logged_in()
+        try:
+            out = self.dev.set_web_password(own)
+            self.assertIn("Web password saved", out)
+            self.assertNotIn(own, out, "the password must not be echoed")
+            self.assertIn("*" * len(own), out)
+            st = self.dev.status()
+            self.assertTrue(st["webOwnPassword"])
+            self.assertIsNone(st["webDefaultPassword"])
+            self.assertNotIn(self.password, st["raw"])
+            # Changing the password logs every browser out
+            _, _, page = web.request("GET", "/")
+            self.assertIn('action="/login"', page)
+            self.assertEqual(401, Web(self.ip).login(self.password)[0])
+            t = time.perf_counter()
+            self.assertEqual(303, Web(self.ip).login(own)[0])
+            self.assertLess(time.perf_counter() - t, 2.0, "hashed password check too slow")
+            # Mismatched repeat and invalid passwords change nothing
+            self.assertIn("passwords differ", self.dev.set_web_password("Other-pass-1", repeat="Other-pass-2"))
+            self.assertIn("Not accepted", self.dev.set_web_password("short"))
+            self.assertEqual(303, Web(self.ip).login(own)[0])
+        finally:
+            self.assertIn("reset to the device default", self.dev.set_web_password("-"))
+        st = self.dev.status()
+        self.assertEqual(self.password, st["webDefaultPassword"])
+        self.assertEqual(303, Web(self.ip).login(self.password)[0])
+
+    def test_login_with_own_password_keeps_snmp_fast(self):
+        # The own password is a slow salted hash (~0.45 s of SHA-256); it must not block SNMP
+        self.wait_lockout_over()
+        own = "Pico-pass-43"
+        self.assertIn("Web password saved", self.dev.set_web_password(own))
+        try:
+            for password, expected in ((own, 303), ("wrong-" + own, 401)):
+                samples = []
+                stop = threading.Event()
+
+                def poll():
+                    i = 0
+                    while not stop.is_set():
+                        resp, secs = raw_get(self.ip, 7300 + i, timeout=2)
+                        samples.append(secs if resp is not None else 9.9)
+                        i += 1
+                        time.sleep(0.04)  # ~25/s: stay under the SNMP rate limit of 50/s per source
+
+                t = threading.Thread(target=poll)
+                t.start()
+                time.sleep(0.2)
+                start = time.perf_counter()
+                status, _ = Web(self.ip).login(password)
+                login_s = time.perf_counter() - start
+                time.sleep(0.2)
+                stop.set()
+                t.join()
+                self.assertEqual(expected, status)
+                self.assertGreater(login_s, 0.2, "the hash should take time")
+                self.assertLess(max(samples), 0.1, "SNMP blocked during a login: worst %.0f ms" % (max(samples) * 1000))
+        finally:
+            self.assertIn("reset to the device default", self.dev.set_web_password("-"))
+
+    # ---- robustness ----
+
+    def snmp_times(self, count=10):
+        times = []
+        for i in range(count):
+            resp, secs = raw_get(self.ip, 7000 + i)
+            self.assertIsNotNone(resp, "SNMP did not answer")
+            times.append(secs)
+            time.sleep(0.05)
+        return times
+
+    def test_slow_client_does_not_stall_snmp_and_is_dropped(self):
+        s = socket.create_connection((self.ip, 80), timeout=10)
+        try:
+            s.sendall(b"GET / HTTP/1.1\r\nHost: x\r\n")  # never finishes the request
+            times = self.snmp_times()
+            self.assertLess(max(times), 0.1, "SNMP slowed by an open web connection: %r" % times)
+            # The device gives up after 5 s without answering
+            s.settimeout(10)
+            start = time.time()
+            self.assertEqual(b"", s.recv(100))
+            self.assertLess(time.time() - start, 8)
+        finally:
+            s.close()
+        # And serves the next browser normally
+        self.assertEqual(200, Web(self.ip).request("GET", "/")[0])
+
+    def test_oversized_request_is_refused(self):
+        status, _, _ = self.web.request("POST", "/login", {"user": "admin", "password": "x" * 3000})
+        self.assertEqual(413, status)
+
+    def test_page_load_burst_keeps_snmp_fast_and_stack_headroom(self):
+        self.wait_lockout_over()
+        web = self.logged_in()
+        snmp = []
+        for i in range(30):
+            self.assertEqual(200, web.request("GET", "/")[0])
+            snmp.append(raw_get(self.ip, 7100 + i)[1])
+        self.assertLess(statistics.median(snmp), 0.02)
+        self.assertLess(max(snmp), 0.1)
+        free = self.dev.status()["stackNeverUsed"]
+        self.assertIsNotNone(free)
+        # Core 0 has 4 KB; keep at least 1 KB that was never touched
+        self.assertGreater(free, 1024, "core 0 stack headroom only %d bytes" % free)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

@@ -61,11 +61,25 @@ size_t settingsToJson(const Settings& s, char* buf, size_t size) {
     doc["sysLocation"] = (const char*)s.sysLocation;
     doc["trapTarget"] = (const char*)s.trapTarget;
     doc["trapVersion"] = s.trapVersion;
+    doc["webPassword"] = (const char*)s.webPassword;
     doc["version"] = s.version;
     doc["sequence"] = s.sequence;
 
     if (buf == nullptr || doc.overflowed() || measureJson(doc) + 1 > size) return 0;
     return serializeJson(doc, buf, size);
+}
+
+/**
+ * @brief "<32 lower-case hex>$<64 lower-case hex>", the form web_auth stores
+ */
+static bool webPasswordHashFormatOk(const char* text) {
+    if (strlen(text) != SETTINGS_WEB_PASSWORD_LEN) return false;
+    for (size_t i = 0; i < SETTINGS_WEB_PASSWORD_LEN; i++) {
+        char c = text[i];
+        bool ok = i == 32 ? c == '$' : ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'));
+        if (!ok) return false;
+    }
+    return true;
 }
 
 /**
@@ -100,8 +114,10 @@ SettingsParseError settingsFromJson(const char* json, Settings& out) {
         return SettingsParseError::MissingField;
     }
 
-    // Start from defaults so optional fields missing in older files get them
-    Settings s;
+    // Start from defaults so optional fields missing in older files get them.
+    // Static: ~400 bytes is too much for core 0's 4 KB stack. Not reentrant, but
+    // settings are only ever parsed on core 0.
+    static Settings s;
     settingsDefaults(s);
     if (!copyField(s.community, sizeof(s.community), doc["community"]) ||
         !copyField(s.staticIP, sizeof(s.staticIP), doc["staticIP"]) ||
@@ -121,6 +137,13 @@ SettingsParseError settingsFromJson(const char* json, Settings& out) {
     }
     uint8_t trapAddr[4];
     if (s.trapTarget[0] != '\0' && !parseIPv4(s.trapTarget, trapAddr)) return SettingsParseError::BadTrapTarget;
+
+    JsonVariantConst webPassword = doc["webPassword"];
+    if (!webPassword.isNull()) {
+        if (!webPassword.is<const char*>()) return SettingsParseError::MissingField;
+        if (!copyField(s.webPassword, sizeof(s.webPassword), webPassword)) return SettingsParseError::FieldTooLong;
+        if (s.webPassword[0] != '\0' && !webPasswordHashFormatOk(s.webPassword)) return SettingsParseError::BadWebPassword;
+    }
 
     JsonVariantConst trapVersion = doc["trapVersion"];
     if (!trapVersion.isNull()) {
@@ -156,6 +179,7 @@ const char* settingsParseErrorMessage(SettingsParseError error) {
     case SettingsParseError::BadSysText:      return "invalid sysName/sysContact/sysLocation";
     case SettingsParseError::BadTrapTarget:   return "invalid trap destination";
     case SettingsParseError::BadTrapVersion:  return "invalid trap version";
+    case SettingsParseError::BadWebPassword:  return "invalid web password hash";
     }
     return "unknown error";
 }
@@ -166,6 +190,7 @@ bool settingsEqual(const Settings& a, const Settings& b) {
            strcmp(a.gateway, b.gateway) == 0 && strcmp(a.sysName, b.sysName) == 0 &&
            strcmp(a.sysContact, b.sysContact) == 0 && strcmp(a.sysLocation, b.sysLocation) == 0 &&
            strcmp(a.trapTarget, b.trapTarget) == 0 && a.trapVersion == b.trapVersion &&
+           strcmp(a.webPassword, b.webPassword) == 0 &&
            a.version == b.version && a.sequence == b.sequence;
 }
 

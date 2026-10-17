@@ -40,5 +40,6 @@ Details and setup are in `docs/TESTING.md`.
 - `lib/if_stats` (pure): frame counting and PHY decoding; `src/net_stats.cpp` hooks the lwIP netif and reads the W5500 PHY; `src/board_temp.cpp` reads the RP2040 temperature
 - `lib/power_monitor` (pure: mains debouncer, reset button) and `lib/mains_input` (GPIO27 on core 1, `setup1()`/`loop1()` in `main.cpp`); `src/factory_reset.cpp` samples GPIO22 on core 1
 - `lib/access_control` (pure): SNMP rate limiter and access log
+- `lib/web_ui` (pure): web page HTTP parser, login/sessions, pages; `src/web_service.cpp` serves it on TCP 80 (non-blocking); `src/stack_watch.cpp` core 0 stack high-water mark
 - CI: `.github/workflows/tests.yml` runs native tests, sanitizers, net-snmp check and the firmware build
 - `test/native`, `test/embedded`, `test/hil`: the three test layers

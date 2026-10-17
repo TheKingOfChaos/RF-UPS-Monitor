@@ -150,8 +150,20 @@ An item is only ticked when it is implemented **and** its tests exist and pass (
 - [x] CHANGELOG.md (Keep a Changelog) and version tags (`v1.0.0`)
 - [x] docs/LIBRENMS.md
 
+## 10. Web page
+- [x] HTTP request parser: bounded (2 KB), incremental, rejects chunked/oversized/malformed requests — native `test_web_ui` incl. every truncation and single-byte corruption, sanitizers
+- [x] Login with user admin, random per-device default password (shown on serial only), own password via serial option 6 stored as salted iterated SHA-256 — native, HIL `test_own_password_from_serial_menu`
+- [x] Sessions (HttpOnly, SameSite=Strict, 15 min idle, max 2), CSRF token per session, 30 s lockout after 5 failures, access log entries — native, HIL
+- [x] Pages: status, DHCP/static IP (validated, save + restart), SNMP community (active immediately), restart, log out — native with fake backend, HIL incl. static IP round trip
+- [x] Non-blocking server: slow or stuck clients never delay SNMP; 5 s connection timeout — HIL `test_slow_client_does_not_stall_snmp_and_is_dropped`, `test_page_load_burst_keeps_snmp_fast_and_stack_headroom`
+- [x] Core 0 stack high-water mark on the status screen; HIL asserts > 1 KB headroom after web traffic
+- [x] Own-password hash checked in steps (40 rounds per loop pass) so SNMP stays under 100 ms during a login — native `test_stepwise_check_*`, HIL `test_login_with_own_password_keeps_snmp_fast`
+- [x] Session cookie found among up to 1 KB of other cookies of the same host — native `test_session_found_among_many_other_cookies`
+- [x] Checked with real Chromium (headless, Playwright): login, reloads, form post, logout all under 120 ms
+- [ ] HTTPS (decided 2026-10-17: plain HTTP on the management LAN)
+
 ## Notes
 - SNMP must be v1 and v2c (no v3) and our own code; networking may use libraries
-- Memory limits: 70 % flash, 50 % RAM (1.0.2: 8.5 % / 30 %, built with -Os)
+- Memory limits: 70 % flash, 50 % RAM (2.0.0: 9.7 % / 36 %, built with -Os)
 - Version: `include/version.h`; every user-visible change goes into CHANGELOG.md under [Unreleased]
 - Core 0 has a 4 KB stack shared with USB/lwIP/W5500 interrupts: keep big buffers static

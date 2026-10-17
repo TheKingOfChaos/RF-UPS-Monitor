@@ -22,13 +22,18 @@ static void writeRaw(const char* path, const char* content) {
     f.close();
 }
 
-static Settings staticSettings(const char* ip) {
-    Settings s;
+/// Fill s with valid static settings in place (no Settings copy on the stack)
+static void fillStaticSettings(Settings& s, const char* ip) {
     settingsDefaults(s);
     s.dhcpEnabled = false;
     strcpy(s.staticIP, ip);
     strcpy(s.subnetMask, "255.255.255.0");
     strcpy(s.gateway, "192.168.50.1");
+}
+
+static Settings staticSettings(const char* ip) {
+    Settings s;
+    fillStaticSettings(s, ip);
     return s;
 }
 
@@ -222,7 +227,7 @@ static void saveAndLoadOnce() {
     static SettingsStore store(PATH_A, PATH_B);
     static Settings s;
     store.load(s);
-    s = staticSettings("192.168.50.60");
+    fillStaticSettings(s, "192.168.50.60");  // in place: measure save/load, not a test temporary
     memset(s.sysLocation, 'S', SYS_TEXT_MAX_LENGTH);
     s.sysLocation[SYS_TEXT_MAX_LENGTH] = '\0';
     TEST_ASSERT_TRUE(store.save(s));

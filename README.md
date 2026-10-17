@@ -2,7 +2,7 @@
 
 A mains power monitor built on a Raspberry Pi Pico with a W5500 Ethernet module. It reports whether mains power is present over SNMP v1 and v2c, including traps, together with standard interface statistics (IF-MIB) and the board temperature, so it can be monitored by LibreNMS or any other SNMP manager. It is configured through a menu on the USB serial port.
 
-Current version: **1.0.2** (see [CHANGELOG.md](CHANGELOG.md)).
+Current version: **2.0.0** (see [CHANGELOG.md](CHANGELOG.md)).
 
 ## Overview
 
@@ -10,7 +10,7 @@ Current version: **1.0.2** (see [CHANGELOG.md](CHANGELOG.md)).
 
 - **Mains side:** an isolated detector (optocoupler with filtering) turns mains presence into a clean 3.3 V level on GPIO27. In the test setup an IKEA smart plug in front of it lets the tests switch mains off and on.
 - **Board:** the Pico's core 1 samples GPIO27 and the reset button (GPIO22) every millisecond; core 0 runs the network, the SNMP agent and the serial menu. Settings live in the Pico's flash in two copies, and the W5500 provides 10/100 Ethernet over SPI.
-- **Network:** the device gets its address by DHCP (or a static IP), answers SNMP v1/v2c on UDP 161 for LibreNMS or net-snmp, and sends traps on UDP 162.
+- **Network:** the device gets its address by DHCP (or a static IP), answers SNMP v1/v2c on UDP 161 for LibreNMS or net-snmp, sends traps on UDP 162, and serves a configuration web page with login on TCP 80 ([Web page](#web-page)).
 - **PC:** the USB serial port carries the configuration menu and the hardware-in-the-loop tests.
 
 More diagrams (firmware architecture, SNMP request flow, mains flow, settings, tests) are in [docs/diagrams/](docs/diagrams/README.md).
@@ -27,6 +27,7 @@ More diagrams (firmware architecture, SNMP request flow, mains flow, settings, t
 | SNMP v1 and v2c agent (Get, GetNext, GetBulk, walk, bulkwalk) | Working, tested with net-snmp |
 | SNMP traps in v1 or v2c (coldStart, authenticationFailure, mainsPowerLost/Restored) | Working, mains traps verified with real mains |
 | SNMP rate limiting and access log | Working |
+| Web page with login: status, DHCP/static IP, SNMP community, restart | Working |
 | Interface statistics (IF-MIB ifTable/ifXTable, 64-bit counters) | Working, counted by the firmware |
 | Board temperature (RP2040 internal sensor) | Working |
 | LibreNMS OS definition (mains state, temperature, change counter) | Working, tested with LibreNMS 26.9.1 |
@@ -80,6 +81,7 @@ Connect to the Pico's USB serial port (`COM16` here) at **115200 baud, 8N1**, wi
 3. Set static IP
 4. SNMP settings
 5. Access log
+6. Web password
 ?. Show this menu
 >
 ```
@@ -102,6 +104,8 @@ sysContact: ""
 sysLocation: ""
 Trap destination: "" (4 sent, 0 failed)
 Trap version: v2c
+Web login: user admin, default password "gsj73nmsr5" (change with option 6)
+Core 0 stack: 2520 bytes never used
 Mode: DHCP
 Stored static IP: 10.10.6.249 / 255.255.0.0, gateway 10.10.0.1
 Live interface:
@@ -182,7 +186,27 @@ Access log: 3 entries, 128 events since boot
 
 Each new entry is also printed on the serial port when it happens (`SNMP access: bad community from 10.10.6.80`).
 
+**6. Web password** sets the password for the web page (see [Web page](#web-page)), or `-` returns to the device default password. The password is asked twice and shown as `*` while typing.
+
 If you lock yourself out with a wrong static address, use the serial menu to switch back to DHCP, or do a factory reset.
+
+## Web page
+
+The device serves a small configuration page on **http://&lt;device IP&gt;/** (port 80): log in, see the status, change the network settings and the SNMP community, and restart the device.
+
+- **Login:** user `admin`. Until you set your own password, the password is the device's **default password**: 10 random characters generated on first boot, different for every device, and shown only on the serial status screen (menu option 1): `Web login: user admin, default password "gsj73nmsr5"`. A factory reset does not change it.
+- **Own password:** serial menu option 6 sets one (8-32 characters, no spaces; typed characters are shown as `*`), or `-` goes back to the device default. Changing it logs every browser out. The password is stored as a salted SHA-256 hash (2000 rounds), never as text; checking it takes about half a second, done in small steps so SNMP keeps answering meanwhile. It can only be changed from the serial menu, so someone who learns it cannot lock you out.
+- **Status:** mains power and change count, uptime, board temperature, Ethernet link, IP and MAC address, network mode, firmware version.
+- **Network:** DHCP or static IP (address, mask and gateway are checked as in the serial menu). Saving restarts the device; the page tells you the new address.
+- **SNMP community:** active immediately, no restart.
+- **Restart device** and **Log out** buttons.
+
+Security:
+- Five wrong logins in a row lock the login for 30 seconds, from any address. Failed logins and lockouts appear in the access log (menu option 5) as `web login failed` / `web locked out`.
+- A session ends after 15 minutes without a request, on Log out, after a restart, or when the password changes. At most two browsers are logged in at once.
+- The session cookie is `HttpOnly` and `SameSite=Strict`, every form carries a per-session token (CSRF protection), and the page sends a strict Content-Security-Policy (no scripts at all) and forbids framing.
+- **Plain HTTP:** the password and the session cookie cross the network unencrypted, like the SNMP community. Use the page on a trusted management network.
+- The server handles one connection at a time without ever blocking: requests are read as they arrive (at most 2 KB), responses are written as fast as the network takes them, and a connection that does not finish within 5 seconds is closed. SNMP keeps answering in between.
 
 ## Network
 
@@ -211,7 +235,7 @@ The input must be a clean DC level from an isolated circuit (optocoupler with fi
 
 1. Press and hold the button on GPIO22. The onboard LED blinks slowly (2 Hz) while it is held, and the serial log prints `Factory reset button pressed`.
 2. After 10 seconds the LED blinks fast, and the log prints `Factory reset after 10000 ms hold`. You can release the button.
-3. Settings return to defaults: DHCP on, community `public`, sysName `rf-ups-monitor`, empty sysContact and sysLocation, no trap destination.
+3. Settings return to defaults: DHCP on, community `public`, sysName `rf-ups-monitor`, empty sysContact and sysLocation, no trap destination, and the web page back on the device default password (the default password itself stays the same).
 4. The device reboots, well within 2 seconds of the trigger.
 
 Releasing the button earlier cancels the reset (`released after ... ms, no reset`). The device keeps working normally while the button is held: SNMP answers, the menu responds and mains monitoring continues. A button held down while the device starts is ignored until it has been released once, so a stuck button cannot cause a reset loop.
@@ -225,7 +249,7 @@ Settings are stored as JSON on the Pico's internal flash (LittleFS) in two copie
 ```json
 {"community":"public","dhcpEnabled":true,"staticIP":"192.168.1.100",
  "subnetMask":"255.255.255.0","gateway":"192.168.1.1","sysName":"rf-ups-monitor",
- "sysContact":"","sysLocation":"","trapTarget":"","trapVersion":2,
+ "sysContact":"","sysLocation":"","trapTarget":"","trapVersion":2,"webPassword":"",
  "version":1,"sequence":7}
 ```
 
@@ -235,6 +259,7 @@ Settings are stored as JSON on the Pico's internal flash (LittleFS) in two copie
 | `sysName`, `sysContact`, `sysLocation` | SNMP system group text, 0-63 printable characters; optional, defaults if missing |
 | `trapTarget` | IPv4 address that receives traps, empty = no traps; optional |
 | `trapVersion` | `1` = SNMPv1 Trap-PDU, `2` = SNMPv2-Trap (default); optional |
+| `webPassword` | Salted SHA-256 hash of the web password (`<salt>$<hash>`), empty = device default password; optional |
 | `dhcpEnabled` | `true` = DHCP, `false` = use the static fields |
 | `staticIP`, `subnetMask`, `gateway` | Static configuration, validated when DHCP is off |
 | `version` | Layout version, currently 1 |
@@ -278,6 +303,8 @@ include/pins.h              GPIO assignments
 src/main.cpp                Boot, Ethernet bring-up, main loop
 src/cli.cpp                 Serial menu
 src/factory_reset.cpp       Reset button on core 1, reset on core 0
+src/web_service.cpp         Web page on TCP 80: non-blocking connection handling, default password
+src/stack_watch.cpp         Core 0 stack high-water mark for the status screen
 lib/netconfig/              IPv4 parsing and validation (pure C++)
 lib/settings_codec/         Settings JSON, validation, A/B selection (pure C++)
 lib/settings/               LittleFS storage on top of settings_codec
@@ -287,6 +314,7 @@ lib/mains_input/            GPIO27 sampler on core 1, seqlock hand-over to core 
 lib/snmp_ber/               ASN.1 BER codec and OIDs for SNMP (pure C++)
 lib/snmp_agent/             SNMP v1/v2c messages, MIB, request handling, traps (pure C++)
 lib/if_stats/               Ethernet frame counting and W5500 PHY status decoding (pure C++)
+lib/web_ui/                 Web page: HTTP parser, login, sessions, pages, SHA-256 (pure C++)
 src/snmp_service.cpp        UDP port 161, device state for the MIB
 src/net_stats.cpp           Counts frames at the lwIP driver, reads the W5500 PHY register
 src/board_temp.cpp          RP2040 die temperature, averaged
@@ -352,6 +380,8 @@ Object details, traps, error behaviour, limits and the MIB file: [docs/MIB.md](d
 
 | Problem | What to check |
 |---|---|
+| Forgot the web password | Serial menu option 6, enter `-` to go back to the device default password shown on the status screen |
+| Web page does not load | Use `http://` (not https); the status screen shows the device IP |
 | No traps arrive | Trap destination set (status screen shows it and "N sent"); firewall on the receiving PC must allow inbound UDP 162 |
 | A manager gets no answers after polling hard | Rate limit (50/s per source): check menu option 5 for "rate limited" |
 | No IP address | Menu option 1 shows the state: cable/link, or no DHCP answer (it keeps retrying) |

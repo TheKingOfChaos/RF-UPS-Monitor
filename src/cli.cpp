@@ -6,6 +6,9 @@
 #include "board_temp.h"
 #include "net_stats.h"
 #include "snmp_service.h"
+#include "stack_watch.h"
+#include "web_service.h"
+#include <web_auth.h>
 
 // Menu state machine
 enum CliState {
@@ -20,13 +23,16 @@ enum CliState {
     CLI_SNMP_LOCATION,  // Entering sysLocation
     CLI_SNMP_TRAP,      // Entering trap destination
     CLI_SNMP_TRAP_VER,  // Entering trap version
-    CLI_SNMP_CONFIRM    // Confirming SNMP change, save without reboot
+    CLI_SNMP_CONFIRM,   // Confirming SNMP change, save without reboot
+    CLI_WEB_PASSWORD,   // Entering a new web password (echoed as *)
+    CLI_WEB_REPEAT      // Repeating it
 };
 
 static CliState state = CLI_MENU;
 static char lineBuf[96];
 static uint8_t lineLen = 0;
 static bool lineOverflow = false;  // More characters were typed than lineBuf holds
+static Settings settingsBackup;    // restored when a save fails; static: too big for core 0's stack
 
 // Network values being entered, applied only on confirm
 static char newIP[16];
@@ -41,6 +47,9 @@ static char newSysContact[SYS_TEXT_MAX_LENGTH + 1];
 static char newSysLocation[SYS_TEXT_MAX_LENGTH + 1];
 static char newTrapTarget[16];
 static uint8_t newTrapVersion;
+
+// Web password being entered; cleared after use
+static char newWebPassword[WEB_PASSWORD_MAX + 1];
 
 static const char* trapVersionName(uint8_t v) {
     return v == TRAP_VERSION_V1 ? "1" : "2c";
@@ -57,6 +66,7 @@ static void printMenu() {
     Serial.println("3. Set static IP");
     Serial.println("4. SNMP settings");
     Serial.println("5. Access log");
+    Serial.println("6. Web password");
     Serial.println("?. Show this menu");
     Serial.print("> ");
 }
@@ -113,6 +123,12 @@ static void printStatus() {
     Serial.printf("Trap destination: \"%s\" (%lu sent, %lu failed)\n", currentSettings.trapTarget,
                   (unsigned long)svc.trapsSent, (unsigned long)svc.trapsFailed);
     Serial.printf("Trap version: %s\n", currentSettings.trapVersion == TRAP_VERSION_V1 ? "v1" : "v2c");
+    if (webUsesDefaultPassword()) {
+        Serial.printf("Web login: user admin, default password \"%s\" (change with option 6)\n", webDefaultPassword());
+    } else {
+        Serial.println("Web login: user admin, own password (option 6)");
+    }
+    Serial.printf("Core 0 stack: %u bytes never used\n", (unsigned)stackWatchNeverUsed());
 
     Serial.printf("Mode: %s\n", currentSettings.dhcpEnabled ? "DHCP" : "Static");
     Serial.printf("Stored static IP: %s / %s, gateway %s\n",
@@ -263,6 +279,21 @@ static void askConfirm() {
     state = CLI_CONFIRM;
 }
 
+static void promptWebPassword() {
+    Serial.printf("New web password (%u-%u characters, no spaces), '-' for the device default, Enter to cancel: ",
+                  (unsigned)WEB_PASSWORD_MIN, (unsigned)WEB_PASSWORD_MAX);
+    state = CLI_WEB_PASSWORD;
+}
+
+/// Leave the web password entry, wiping what was typed
+static void endWebPassword(const char* message) {
+    memset(newWebPassword, 0, sizeof(newWebPassword));
+    memset(lineBuf, 0, sizeof(lineBuf));
+    Serial.println(message);
+    state = CLI_MENU;
+    printMenu();
+}
+
 /**
  * @brief Handle one complete input line according to the current state
  */
@@ -288,6 +319,10 @@ static void handleLine(const char* line) {
             promptSnmp();
         } else if (strcmp(line, "5") == 0) {
             printAccessLog();
+        } else if (strcmp(line, "6") == 0) {
+            Serial.printf("Web page login: user admin, %s.\n",
+                          webUsesDefaultPassword() ? "currently the device default password" : "own password set");
+            promptWebPassword();
         } else if (line[0] == '\0') {
             Serial.print("> ");
         } else {
@@ -339,21 +374,18 @@ static void handleLine(const char* line) {
 
     case CLI_CONFIRM:
         if (line[0] == 'y' || line[0] == 'Y') {
-            Settings updated = currentSettings;
-            updated.dhcpEnabled = newDhcp;
-            strlcpy(updated.staticIP, newIP, sizeof(updated.staticIP));
-            strlcpy(updated.subnetMask, newSubnet, sizeof(updated.subnetMask));
-            strlcpy(updated.gateway, newGateway, sizeof(updated.gateway));
-
-            Settings saved = currentSettings;
-            currentSettings = updated;
+            settingsBackup = currentSettings;
+            currentSettings.dhcpEnabled = newDhcp;
+            strlcpy(currentSettings.staticIP, newIP, sizeof(currentSettings.staticIP));
+            strlcpy(currentSettings.subnetMask, newSubnet, sizeof(currentSettings.subnetMask));
+            strlcpy(currentSettings.gateway, newGateway, sizeof(currentSettings.gateway));
             if (saveSettings()) {
                 Serial.println("Settings saved. Rebooting...");
                 Serial.flush();
                 delay(200);
                 rp2040.reboot();
             }
-            currentSettings = saved;
+            currentSettings = settingsBackup;
             Serial.println("Failed to save settings, nothing changed");
         } else {
             Serial.println("Cancelled");
@@ -414,7 +446,7 @@ static void handleLine(const char* line) {
 
     case CLI_SNMP_CONFIRM:
         if (line[0] == 'y' || line[0] == 'Y') {
-            Settings saved = currentSettings;
+            settingsBackup = currentSettings;
             bool communityChanged = strcmp(currentSettings.community, newCommunity) != 0;
             strlcpy(currentSettings.community, newCommunity, sizeof(currentSettings.community));
             strlcpy(currentSettings.sysName, newSysName, sizeof(currentSettings.sysName));
@@ -427,7 +459,7 @@ static void handleLine(const char* line) {
                 if (communityChanged) snmpCommunityChanged();
                 Serial.println("SNMP settings saved and active");
             } else {
-                currentSettings = saved;
+                currentSettings = settingsBackup;
                 Serial.println("Failed to save settings, nothing changed");
             }
         } else {
@@ -435,6 +467,31 @@ static void handleLine(const char* line) {
         }
         state = CLI_MENU;
         printMenu();
+        break;
+
+    case CLI_WEB_PASSWORD:
+        if (line[0] == '\0') {
+            endWebPassword("Cancelled");
+        } else if (strcmp(line, "-") == 0) {
+            endWebPassword(webSetPassword(nullptr) ? "Web password reset to the device default; web sessions logged out"
+                                                   : "Failed to save settings, nothing changed");
+        } else if (!webPasswordIsValid(line)) {
+            Serial.println("Not accepted: use 8-32 printable characters without spaces");
+            promptWebPassword();
+        } else {
+            strlcpy(newWebPassword, line, sizeof(newWebPassword));
+            Serial.print("Repeat the password: ");
+            state = CLI_WEB_REPEAT;
+        }
+        break;
+
+    case CLI_WEB_REPEAT:
+        if (strcmp(line, newWebPassword) != 0) {
+            endWebPassword("The passwords differ, nothing changed");
+        } else {
+            endWebPassword(webSetPassword(newWebPassword) ? "Web password saved; web sessions logged out"
+                                                          : "Failed to save settings, nothing changed");
+        }
         break;
     }
 }
@@ -466,6 +523,9 @@ void cliProcess() {
                     Serial.print("> ");
                 } else if (state >= CLI_SNMP_COMMUNITY && state <= CLI_SNMP_TRAP_VER) {
                     promptSnmp();
+                } else if (state == CLI_WEB_PASSWORD || state == CLI_WEB_REPEAT) {
+                    memset(newWebPassword, 0, sizeof(newWebPassword));
+                    promptWebPassword();
                 } else {
                     state = CLI_MENU;
                     printMenu();
@@ -481,7 +541,9 @@ void cliProcess() {
         } else if (isprint((unsigned char)c)) {
             if (lineLen < sizeof(lineBuf) - 1) {
                 lineBuf[lineLen++] = c;
-                Serial.print(c);    // Echo, terminals like PuTTY don't echo locally
+                // Echo, terminals like PuTTY don't echo locally; never echo a password
+                bool secret = state == CLI_WEB_PASSWORD || state == CLI_WEB_REPEAT;
+                Serial.print(secret ? '*' : c);
             } else {
                 lineOverflow = true;
             }

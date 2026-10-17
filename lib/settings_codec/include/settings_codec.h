@@ -22,13 +22,16 @@ constexpr uint32_t SETTINGS_VERSION = 1;
 
 /// Largest serialized settings document, including the terminating NUL.
 /// Worst case: every text field at maximum length and fully JSON-escaped.
-constexpr size_t SETTINGS_JSON_MAX = 768;
+constexpr size_t SETTINGS_JSON_MAX = 896;
 
 /// Longest SNMP community string
 constexpr size_t COMMUNITY_MAX_LENGTH = 31;
 
 /// Longest sysName / sysContact / sysLocation
 constexpr size_t SYS_TEXT_MAX_LENGTH = 63;
+
+/// Stored web password: 32 hex salt + '$' + 64 hex SHA-256 (see lib/web_ui/web_auth.h)
+constexpr size_t SETTINGS_WEB_PASSWORD_LEN = 97;
 
 /// Trap formats
 constexpr uint8_t TRAP_VERSION_V1 = 1;   ///< SNMPv1 Trap-PDU
@@ -48,6 +51,7 @@ struct Settings {
     char sysLocation[SYS_TEXT_MAX_LENGTH + 1];  ///< SNMP sysLocation, 0-63 printable characters
     char trapTarget[16];  ///< SNMP trap destination (IPv4, UDP 162), empty = traps off
     uint8_t trapVersion;  ///< TRAP_VERSION_V1 or TRAP_VERSION_V2C
+    char webPassword[SETTINGS_WEB_PASSWORD_LEN + 1];  ///< Salted hash of the web password, empty = device default
     uint32_t version;     ///< Layout version, must equal SETTINGS_VERSION
     uint32_t sequence;    ///< Save counter, newest valid copy wins on load
 };
@@ -72,7 +76,8 @@ enum class SettingsParseError : uint8_t {
     BadStaticConfig,  ///< DHCP disabled but static configuration is invalid
     BadSysText,       ///< sysName/sysContact/sysLocation contains non-printable characters
     BadTrapTarget,    ///< trapTarget is neither empty nor an IPv4 address
-    BadTrapVersion    ///< trapVersion is not 1 or 2
+    BadTrapVersion,   ///< trapVersion is not 1 or 2
+    BadWebPassword    ///< webPassword is neither empty nor a well-formed salted hash
 };
 
 /**
@@ -98,7 +103,7 @@ size_t settingsToJson(const Settings& s, char* buf, size_t size);
  * @brief Parse and validate a settings document
  *
  * Unknown fields are ignored. "sequence", "sysName", "sysContact",
- * "sysLocation", "trapTarget" and "trapVersion" are optional and take their
+ * "sysLocation", "trapTarget", "trapVersion" and "webPassword" are optional and take their
  * defaults, so files written by older firmware still load.
  *
  * @param json NUL-terminated JSON text

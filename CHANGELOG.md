@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-10-17
+
+### Added
+- **Trap destination from DHCP:** enter `dhcp` as the trap destination (menu option 4). The device asks for DHCP option 224 in its DHCP messages and sends traps to the address in the ACK for its current lease. Works with any DHCP server that has option 224 configured; tested with Kea 2.2.0 (configuration examples for Kea, ISC dhcpd and dnsmasq in docs/MIB.md). New pure library `lib/dhcp_option`, tested with frames captured from the device and from Kea.
+- **Web interface on/off:** serial menu option 8 and a "Turn off…" button on the page (with confirmation). Off closes TCP port 80, logs every browser out and stops the mDNS announcement; kept across restarts, turned on again by option 8 or a factory reset. Turning it on works at once, also right after the page turned itself off: the core's lwIP is built without SO_REUSE, so a just-closed web connection in TIME-WAIT would block port 80 for 2 minutes; the firmware drops those entries for port 80 before reopening it, and retries every second if opening still fails (found by the HIL suite).
+- **Logo** (`logo/RF-canopy-RGB-Orange.svg`) in the top bar, on the login card and as the browser tab icon (`/favicon.svg`).
+- Settings fields `trapFromDhcp` and `webEnabled` (optional; older files load unchanged, older firmware ignores them).
+- Status screen: `Trap destination source` and `Web interface` lines; the trap destination shown is the one in use.
+
 ## [2.1.1] - 2026-10-17
 
 ### Changed
@@ -96,7 +105,8 @@ First release.
 - The network stack queues 5 UDP packets; larger bursts are dropped (SNMP managers retry).
 - Not yet tested with the real hardware: mains traps with real mains, the factory reset button, the "no link" and "no DHCP server" states. The LibreNMS definitions are validated against the schema but not yet tried in a running LibreNMS (done after 1.0.1).
 
-[Unreleased]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.1.1...HEAD
+[Unreleased]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.1.1...v2.2.0
 [2.1.1]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.1.0...v2.1.1
 [2.1.0]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.0.1...v2.1.0
 [2.0.1]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.0.0...v2.0.1

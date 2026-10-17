@@ -14,7 +14,7 @@ The device runs an SNMP agent on UDP port 161 and sends traps. Every object is r
 
 | OID | Name | Type | Value |
 |---|---|---|---|
-| `1.3.6.1.2.1.1.1.0` | sysDescr | OCTET STRING | `RF-UPS-Monitor 2.1.1 mains power monitor (RP2040, W5500)` (with the firmware version) |
+| `1.3.6.1.2.1.1.1.0` | sysDescr | OCTET STRING | `RF-UPS-Monitor 2.2.0 mains power monitor (RP2040, W5500)` (with the firmware version) |
 | `1.3.6.1.2.1.1.2.0` | sysObjectID | OBJECT IDENTIFIER | `1.3.6.1.4.1.63050` |
 | `1.3.6.1.2.1.1.3.0` | sysUpTime | TimeTicks | Hundredths of a second since boot |
 | `1.3.6.1.2.1.1.4.0` | sysContact | OCTET STRING | From the settings (menu option 4), default empty |
@@ -97,7 +97,7 @@ With net-snmp, v2c shows these as `No Such Object available on this agent at thi
 
 ## Traps
 
-Traps are sent to the trap destination set in menu option 4 (UDP 162, community = the configured community), in the trap version chosen there: **v2c (default)** or v1. With no destination set, no traps are sent.
+Traps are sent to the trap destination set in menu option 4 (a fixed address, or `dhcp`: see [Trap destination from DHCP](#trap-destination-from-dhcp)) (UDP 162, community = the configured community), in the trap version chosen there: **v2c (default)** or v1. With no destination set, no traps are sent.
 
 | Trap | v1: generic / specific | v2c: snmpTrapOID.0 | Variable bindings | When |
 |---|---|---|---|---|
@@ -114,6 +114,34 @@ Traps are sent to the trap destination set in menu option 4 (UDP 162, community 
 Traps are not acknowledged (v2c InformRequest is not used), so a manager should also poll `mainsPowerChanges`: if it changed between two polls, an outage happened even if its traps were lost.
 
 To receive traps on Linux, run `snmptrapd -f -Lo` (package `snmptrapd`). On Windows, allow inbound UDP 162 in the firewall for the receiving program.
+
+### Trap destination from DHCP
+
+Instead of a fixed address, the trap destination can come from the DHCP server: enter `dhcp` as the trap destination in menu option 4. The device then asks for DHCP option **224** (a site-specific option carrying one IPv4 address) in every DHCP request, and sends traps to the address in the latest DHCPACK for its current lease. If the ACK has no option 224, or the device uses a static IP, no traps are sent. Choosing `dhcp` renews the lease at once, so the address arrives within seconds; the status screen shows it:
+
+```
+Trap destination: "10.10.6.65" (12 sent, 0 failed)
+Trap destination source: DHCP option 224 (asked in 3 DHCP messages; last ACK 40 s ago: 10.10.6.65)
+```
+
+Configure option 224 on the DHCP server. The device asks for it, so the server does not have to be told to send it unasked:
+
+```jsonc
+// Kea (kea-dhcp4.conf, in "Dhcp4"); tested with Kea 2.2.0
+"option-def": [ { "name": "rfups-trap-target", "code": 224, "type": "ipv4-address", "space": "dhcp4" } ],
+"subnet4": [ { ..., "option-data": [ { "name": "rfups-trap-target", "data": "10.10.6.65" } ] } ]
+```
+
+```
+# ISC dhcpd (dhcpd.conf)
+option rfups-trap-target code 224 = ip-address;
+option rfups-trap-target 10.10.6.65;
+
+# dnsmasq
+dhcp-option=224,10.10.6.65
+```
+
+How it works: the core's lwIP is precompiled and cannot be told to ask for or keep extra options, so the firmware edits the device's own outgoing DHCP DISCOVER/REQUEST at the driver: it appends 224 to the Parameter Request List (option 55), using one of the padding bytes lwIP always leaves after the END option, and fixes the UDP checksum. Incoming DHCPACKs for the device's MAC are read for option 224 (IP and UDP checksums must verify). With the trap destination fixed or off, DHCP messages are not changed. DHCP has no authentication, so anyone who can answer DHCP on the network can choose the trap destination; the same holds for the address, gateway and DNS it hands out.
 
 ## Rate limiting and access log
 

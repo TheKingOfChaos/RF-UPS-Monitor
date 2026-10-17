@@ -15,6 +15,7 @@
 #include <Arduino.h>
 #include <LwipEthernet.h>
 #include <W5500lwIP.h>
+#include <dhcp_option.h>
 #include <snmp_mib.h>
 
 struct netif;
@@ -79,3 +80,26 @@ void netStatsCapture(SnmpInterfaceState& out);
  * @brief Latest decoded PHY status (link, 10/100, duplex)
  */
 PhyStatus netStatsPhy();
+
+/**
+ * @brief What the DHCP server said about option 224 (SNMP trap destination)
+ */
+struct DhcpTrapInfo {
+    uint32_t requests;   ///< Outgoing DHCP messages that had option 224 added
+    uint32_t acks;       ///< DHCPACKs for this device read
+    bool seen;           ///< At least one ACK read
+    bool hasOption;      ///< The latest ACK carried option 224
+    uint8_t target[4];   ///< Its value (when hasOption)
+    uint8_t yiaddr[4];   ///< Address the latest ACK assigned
+    uint32_t ackMs;      ///< millis() of the latest ACK
+};
+
+/**
+ * @brief Ask for option 224 in every DHCP DISCOVER/REQUEST (or stop asking)
+ *
+ * Switching it on renews the lease at once, so the answer arrives in seconds.
+ */
+void netStatsRequestDhcpTrapTarget(bool on);
+
+/// Copy of the latest DHCP option 224 information
+DhcpTrapInfo netStatsDhcpTrap();

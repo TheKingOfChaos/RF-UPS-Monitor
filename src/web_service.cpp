@@ -3,6 +3,7 @@
 #include <LittleFS.h>
 #include <WiFiClient.h>
 #include <WiFiServer.h>
+#include <lwip/priv/tcp_priv.h>
 #include <mains_input.h>
 #include <settings.h>
 #include <web_app.h>
@@ -40,6 +41,50 @@ static const uint8_t* staticBody = nullptr;  // sent after out (the stylesheet, 
 static size_t staticLen = 0;
 static bool rebootRequested = false;
 static uint32_t rebootAtMs = 0;
+static bool listening = false;
+static bool stopAfterResponse = false;  // the page itself turned the web interface off
+
+static bool wantListening = false;     // web interface on, port 80 may still be opening
+static uint32_t lastListenTryMs = 0;
+
+/**
+ * @brief Forget finished web connections in TIME-WAIT on port 80
+ *
+ * The core's lwIP is built without SO_REUSE, so a connection the device closed
+ * keeps port 80 bound for 2 minutes (2 x TCP_MSL) and opening the server again
+ * fails. Removing those entries is safe for finished HTTP connections on a LAN;
+ * tcp_abort() frees a TIME-WAIT pcb without sending anything.
+ */
+static void dropTimeWaitOnPort80() {
+    DriverLock lock;
+    for (tcp_pcb* p = tcp_tw_pcbs; p != nullptr;) {
+        tcp_pcb* next = p->next;
+        if (p->local_port == 80) tcp_abort(p);
+        p = next;
+    }
+}
+
+/// Try to open port 80; webPoll() retries every second until it works
+static void tryListening() {
+    lastListenTryMs = millis();
+    dropTimeWaitOnPort80();
+    server.begin();
+    listening = server.status() == LISTEN;
+    if (!listening) Serial.println("\nWeb: cannot open TCP port 80 yet, retrying");
+}
+
+static void startListening() {
+    wantListening = true;
+    if (!listening) tryListening();
+}
+
+/// Close port 80 and end every session (after the current response, if one is being sent)
+static void stopListening() {
+    wantListening = false;
+    if (listening) server.stop();
+    listening = false;
+    app.logoutAll();
+}
 
 static uint32_t toU32(const IPAddress& ip) {
     return ((uint32_t)ip[0] << 24) | ((uint32_t)ip[1] << 16) | ((uint32_t)ip[2] << 8) | ip[3];
@@ -119,6 +164,19 @@ public:
         return false;
     }
 
+    bool disableWeb() override {
+        settingsBackup = currentSettings;
+        currentSettings.webEnabled = false;
+        if (!saveSettings()) {
+            currentSettings = settingsBackup;
+            return false;
+        }
+        Serial.println("\nWeb: interface turned off from the web page (serial menu option 8 turns it on)");
+        stopAfterResponse = true;  // the confirmation page still goes out
+        hostnameAdvertiseWeb(false);
+        return true;
+    }
+
     void requestReboot() override { rebootRequested = true; }
 
     void random(uint8_t* buf, size_t len) override {
@@ -181,8 +239,36 @@ bool webRegenerateDefaultPassword() {
 
 void webBegin() {
     loadDefaultPassword();
-    server.begin();
     started = true;
+    hostnameAdvertiseWeb(currentSettings.webEnabled);  // before mDNS starts with the network
+    if (currentSettings.webEnabled) {
+        startListening();
+    } else {
+        Serial.println("Web interface off (serial menu option 8 turns it on)");
+    }
+}
+
+bool webEnabled() { return currentSettings.webEnabled; }
+
+bool webListening() { return listening; }
+
+bool webSetEnabled(bool on) {
+    settingsBackup = currentSettings;
+    currentSettings.webEnabled = on;
+    if (!saveSettings()) {
+        currentSettings = settingsBackup;
+        return false;
+    }
+    hostnameAdvertiseWeb(on);
+    if (on) {
+        stopAfterResponse = false;
+        startListening();
+    } else if (conn == Conn::Idle) {
+        stopListening();
+    } else {
+        stopAfterResponse = true;  // let the connection in progress finish first
+    }
+    return true;
 }
 
 /// A login while an own (hashed) password is set: check it in steps first
@@ -204,6 +290,10 @@ static void closeConnection() {
     conn = Conn::Idle;
     out = nullptr;
     if (rebootRequested && rebootAtMs == 0) rebootAtMs = millis() + REBOOT_DELAY_MS;
+    if (stopAfterResponse) {
+        stopAfterResponse = false;
+        stopListening();
+    }
 }
 
 void webPoll() {
@@ -216,6 +306,10 @@ void webPoll() {
     }
 
     if (conn == Conn::Idle) {
+        if (!listening) {
+            if (wantListening && millis() - lastListenTryMs >= 1000) tryListening();
+            return;
+        }
         client = server.accept();
         if (!client) return;
         client.setNoDelay(true);

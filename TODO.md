@@ -164,6 +164,12 @@ An item is only ticked when it is implemented **and** its tests exist and pass (
 - [x] Bootstrap 5.3.3 styling, CSS embedded in flash (gzip, cached), works without internet — native, HIL `test_bootstrap_stylesheet_is_served_from_flash`, checked in Chromium (desktop and phone)
 - [ ] HTTPS (decided 2026-10-17: plain HTTP on the management LAN)
 
+## 12. Web on/off, DHCP trap destination, logo (2.2.0)
+- [x] Web interface on/off: setting `webEnabled`, serial option 8, "Turn off…" on the page with confirmation; port 80 closed, sessions ended, mDNS `_http` removed — native, HIL
+- [x] Trap destination `dhcp`: option 224 requested in the device's DHCP messages (frame edit at the driver) and read from ACKs; verified against Kea 2.2.0 in Docker and the LAN server — native `test_dhcp_option`, HIL `test_dhcp_trap.py`
+- [ ] Opt-in HIL `test_trap_destination_comes_from_option_224` against the home DHCP server once option 224 is configured there (`RFUPS_DHCP_TRAP_TARGET`)
+- [x] Logo in the navbar, on the login card and as favicon — native, HIL
+
 ## 11. Hostname
 - [x] One hostname = SNMP sysName, DHCP hostname (option 12) and mDNS `<name>.local` with `_http._tcp` — native `test_netconfig` hostname tests, HIL `test_hostname_from_web_applies_to_snmp_mdns_and_status`
 - [x] Set in serial option 4 and on the web page, validated, active immediately (DHCP renew, mDNS rename)
@@ -173,6 +179,6 @@ An item is only ticked when it is implemented **and** its tests exist and pass (
 
 ## Notes
 - SNMP must be v1 and v2c (no v3) and our own code; networking may use libraries
-- Memory limits: 70 % flash, 50 % RAM (2.1.0: 10.4 % / 37 %, built with -Os)
+- Memory limits: 70 % flash, 50 % RAM (2.2.0: 12.6 % / 39 %, built with -Os)
 - Version: `include/version.h`; every user-visible change goes into CHANGELOG.md under [Unreleased]
 - Core 0 has a 4 KB stack shared with USB/lwIP/W5500 interrupts: keep big buffers static

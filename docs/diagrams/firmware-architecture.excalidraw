@@ -241,7 +241,7 @@
     },
     {
      "type": "arrow",
-     "id": "a-cli-netcfg-56"
+     "id": "a-cli-netcfg-58"
     }
    ],
    "updated": 1,
@@ -315,11 +315,11 @@
     },
     {
      "type": "arrow",
-     "id": "a-svc-agent-57"
+     "id": "a-svc-agent-59"
     },
     {
      "type": "arrow",
-     "id": "a-svc-acl-58"
+     "id": "a-svc-acl-60"
     }
    ],
    "updated": 1,
@@ -463,7 +463,11 @@
     },
     {
      "type": "arrow",
-     "id": "a-net-ifst-60"
+     "id": "a-net-ifst-62"
+    },
+    {
+     "type": "arrow",
+     "id": "a-net-dhcpopt-63"
     }
    ],
    "updated": 1,
@@ -537,7 +541,7 @@
     },
     {
      "type": "arrow",
-     "id": "a-reset-power-61"
+     "id": "a-reset-power-64"
     }
    ],
    "updated": 1,
@@ -611,7 +615,7 @@
     },
     {
      "type": "arrow",
-     "id": "a-web-webui-62"
+     "id": "a-web-webui-65"
     }
    ],
    "updated": 1,
@@ -750,7 +754,7 @@
     },
     {
      "type": "arrow",
-     "id": "a-settings-codec-63"
+     "id": "a-settings-codec-66"
     }
    ],
    "updated": 1,
@@ -824,7 +828,7 @@
     },
     {
      "type": "arrow",
-     "id": "a-cli-netcfg-56"
+     "id": "a-cli-netcfg-58"
     }
    ],
    "updated": 1,
@@ -898,11 +902,11 @@
     },
     {
      "type": "arrow",
-     "id": "a-svc-agent-57"
+     "id": "a-svc-agent-59"
     },
     {
      "type": "arrow",
-     "id": "a-agent-ber-59"
+     "id": "a-agent-ber-61"
     }
    ],
    "updated": 1,
@@ -976,7 +980,7 @@
     },
     {
      "type": "arrow",
-     "id": "a-svc-acl-58"
+     "id": "a-svc-acl-60"
     }
    ],
    "updated": 1,
@@ -1050,7 +1054,7 @@
     },
     {
      "type": "arrow",
-     "id": "a-net-ifst-60"
+     "id": "a-net-ifst-62"
     }
    ],
    "updated": 1,
@@ -1124,11 +1128,11 @@
     },
     {
      "type": "arrow",
-     "id": "a-reset-power-61"
+     "id": "a-reset-power-64"
     },
     {
      "type": "arrow",
-     "id": "a-mains-power-64"
+     "id": "a-mains-power-67"
     }
    ],
    "updated": 1,
@@ -1202,7 +1206,7 @@
     },
     {
      "type": "arrow",
-     "id": "a-web-webui-62"
+     "id": "a-web-webui-65"
     }
    ],
    "updated": 1,
@@ -1276,7 +1280,7 @@
     },
     {
      "type": "arrow",
-     "id": "a-agent-ber-59"
+     "id": "a-agent-ber-61"
     }
    ],
    "updated": 1,
@@ -1320,6 +1324,80 @@
    "autoResize": true
   },
   {
+   "id": "dhcpopt",
+   "type": "rectangle",
+   "x": 990,
+   "y": 548,
+   "width": 210,
+   "height": 72,
+   "angle": 0,
+   "strokeColor": "#1e1e1e",
+   "backgroundColor": "#b2f2bb",
+   "fillStyle": "solid",
+   "strokeWidth": 2,
+   "strokeStyle": "solid",
+   "roughness": 1,
+   "opacity": 100,
+   "groupIds": [],
+   "frameId": null,
+   "roundness": {
+    "type": 3
+   },
+   "seed": 3629131499,
+   "version": 1,
+   "versionNonce": 420705702,
+   "isDeleted": false,
+   "boundElements": [
+    {
+     "type": "text",
+     "id": "dhcpopt-text"
+    },
+    {
+     "type": "arrow",
+     "id": "a-net-dhcpopt-63"
+    }
+   ],
+   "updated": 1,
+   "link": null,
+   "locked": false
+  },
+  {
+   "id": "dhcpopt-text",
+   "type": "text",
+   "x": 1025.4,
+   "y": 554.0,
+   "width": 139.2,
+   "height": 60.0,
+   "angle": 0,
+   "strokeColor": "#1e1e1e",
+   "backgroundColor": "transparent",
+   "fillStyle": "solid",
+   "strokeWidth": 2,
+   "strokeStyle": "solid",
+   "roughness": 1,
+   "opacity": 100,
+   "groupIds": [],
+   "frameId": null,
+   "roundness": null,
+   "seed": 3758224396,
+   "version": 1,
+   "versionNonce": 2999998606,
+   "isDeleted": false,
+   "boundElements": null,
+   "updated": 1,
+   "link": null,
+   "locked": false,
+   "text": "dhcp_option\nask for / read\nDHCP option 224",
+   "originalText": "dhcp_option\nask for / read\nDHCP option 224",
+   "fontSize": 16,
+   "fontFamily": 1,
+   "textAlign": "center",
+   "verticalAlign": "middle",
+   "containerId": "dhcpopt",
+   "lineHeight": 1.25,
+   "autoResize": true
+  },
+  {
    "id": "z-hw",
    "type": "rectangle",
    "x": 40,
@@ -1349,7 +1427,7 @@
    "locked": false
   },
   {
-   "id": "t37",
+   "id": "t39",
    "type": "text",
    "x": 56,
    "y": 844,
@@ -1366,9 +1444,9 @@
    "groupIds": [],
    "frameId": null,
    "roundness": null,
-   "seed": 114828168,
+   "seed": 36930046,
    "version": 1,
-   "versionNonce": 3443522324,
+   "versionNonce": 1312162132,
    "isDeleted": false,
    "boundElements": null,
    "updated": 1,
@@ -1415,7 +1493,7 @@
     },
     {
      "type": "arrow",
-     "id": "a-settings-codec-63"
+     "id": "a-settings-codec-66"
     }
    ],
    "updated": 1,
@@ -1489,7 +1567,7 @@
     },
     {
      "type": "arrow",
-     "id": "a-mains-power-64"
+     "id": "a-mains-power-67"
     }
    ],
    "updated": 1,
@@ -1562,7 +1640,7 @@
    "locked": false
   },
   {
-   "id": "t43",
+   "id": "t45",
    "type": "text",
    "x": 56,
    "y": 930,
@@ -1579,9 +1657,9 @@
    "groupIds": [],
    "frameId": null,
    "roundness": null,
-   "seed": 4003282784,
+   "seed": 198701388,
    "version": 1,
-   "versionNonce": 2948588041,
+   "versionNonce": 56570474,
    "isDeleted": false,
    "boundElements": null,
    "updated": 1,
@@ -2018,7 +2096,7 @@
    "autoResize": true
   },
   {
-   "id": "a-cli-netcfg-56",
+   "id": "a-cli-netcfg-58",
    "type": "arrow",
    "x": 405.0,
    "y": 270,
@@ -2037,9 +2115,9 @@
    "roundness": {
     "type": 2
    },
-   "seed": 4253863965,
+   "seed": 3308096747,
    "version": 1,
-   "versionNonce": 2072790278,
+   "versionNonce": 1789123133,
    "isDeleted": false,
    "boundElements": [],
    "updated": 1,
@@ -2071,7 +2149,7 @@
    "elbowed": false
   },
   {
-   "id": "a-svc-agent-57",
+   "id": "a-svc-agent-59",
    "type": "arrow",
    "x": 635.0,
    "y": 270,
@@ -2090,9 +2168,9 @@
    "roundness": {
     "type": 2
    },
-   "seed": 3293689478,
+   "seed": 521031248,
    "version": 1,
-   "versionNonce": 1164593943,
+   "versionNonce": 1161851860,
    "isDeleted": false,
    "boundElements": [],
    "updated": 1,
@@ -2124,7 +2202,7 @@
    "elbowed": false
   },
   {
-   "id": "a-svc-acl-58",
+   "id": "a-svc-acl-60",
    "type": "arrow",
    "x": 698.0,
    "y": 270,
@@ -2143,9 +2221,9 @@
    "roundness": {
     "type": 2
    },
-   "seed": 436232107,
+   "seed": 1874076014,
    "version": 1,
-   "versionNonce": 2564314557,
+   "versionNonce": 286011840,
    "isDeleted": false,
    "boundElements": [],
    "updated": 1,
@@ -2177,7 +2255,7 @@
    "elbowed": false
   },
   {
-   "id": "a-agent-ber-59",
+   "id": "a-agent-ber-61",
    "type": "arrow",
    "x": 635.0,
    "y": 510,
@@ -2196,9 +2274,9 @@
    "roundness": {
     "type": 2
    },
-   "seed": 1058287095,
+   "seed": 463456892,
    "version": 1,
-   "versionNonce": 1551755049,
+   "versionNonce": 4180047632,
    "isDeleted": false,
    "boundElements": [],
    "updated": 1,
@@ -2230,9 +2308,9 @@
    "elbowed": false
   },
   {
-   "id": "a-net-ifst-60",
+   "id": "a-net-ifst-62",
    "type": "arrow",
-   "x": 1095.0,
+   "x": 1074.0,
    "y": 270,
    "width": 0.0,
    "height": 130,
@@ -2249,9 +2327,9 @@
    "roundness": {
     "type": 2
    },
-   "seed": 3578573862,
+   "seed": 1447407896,
    "version": 1,
-   "versionNonce": 3124332085,
+   "versionNonce": 2802296933,
    "isDeleted": false,
    "boundElements": [],
    "updated": 1,
@@ -2283,7 +2361,66 @@
    "elbowed": false
   },
   {
-   "id": "a-reset-power-61",
+   "id": "a-net-dhcpopt-63",
+   "type": "arrow",
+   "x": 1189.5,
+   "y": 270,
+   "width": 20.5,
+   "height": 278,
+   "angle": 0,
+   "strokeColor": "#1e1e1e",
+   "backgroundColor": "transparent",
+   "fillStyle": "solid",
+   "strokeWidth": 2,
+   "strokeStyle": "solid",
+   "roughness": 1,
+   "opacity": 100,
+   "groupIds": [],
+   "frameId": null,
+   "roundness": null,
+   "seed": 885197551,
+   "version": 1,
+   "versionNonce": 896519498,
+   "isDeleted": false,
+   "boundElements": [],
+   "updated": 1,
+   "link": null,
+   "locked": false,
+   "points": [
+    [
+     0.0,
+     0
+    ],
+    [
+     20.5,
+     30
+    ],
+    [
+     20.5,
+     260
+    ],
+    [
+     0.0,
+     278
+    ]
+   ],
+   "lastCommittedPoint": null,
+   "startBinding": {
+    "elementId": "net",
+    "focus": 0,
+    "gap": 4
+   },
+   "endBinding": {
+    "elementId": "dhcpopt",
+    "focus": 0,
+    "gap": 4
+   },
+   "startArrowhead": null,
+   "endArrowhead": "arrow",
+   "elbowed": false
+  },
+  {
+   "id": "a-reset-power-64",
    "type": "arrow",
    "x": 1325.0,
    "y": 270,
@@ -2302,9 +2439,9 @@
    "roundness": {
     "type": 2
    },
-   "seed": 1017148070,
+   "seed": 356420252,
    "version": 1,
-   "versionNonce": 502338279,
+   "versionNonce": 3056778869,
    "isDeleted": false,
    "boundElements": [],
    "updated": 1,
@@ -2336,7 +2473,7 @@
    "elbowed": false
   },
   {
-   "id": "a-web-webui-62",
+   "id": "a-web-webui-65",
    "type": "arrow",
    "x": 1555.0,
    "y": 270,
@@ -2355,9 +2492,9 @@
    "roundness": {
     "type": 2
    },
-   "seed": 61390786,
+   "seed": 3757620516,
    "version": 1,
-   "versionNonce": 4263434436,
+   "versionNonce": 313898341,
    "isDeleted": false,
    "boundElements": [],
    "updated": 1,
@@ -2389,7 +2526,7 @@
    "elbowed": false
   },
   {
-   "id": "a-settings-codec-63",
+   "id": "a-settings-codec-66",
    "type": "arrow",
    "x": 175.0,
    "y": 740,
@@ -2408,9 +2545,9 @@
    "roundness": {
     "type": 2
    },
-   "seed": 224009281,
+   "seed": 3086936521,
    "version": 1,
-   "versionNonce": 2582256958,
+   "versionNonce": 79419640,
    "isDeleted": false,
    "boundElements": [],
    "updated": 1,
@@ -2442,7 +2579,7 @@
    "elbowed": false
   },
   {
-   "id": "a-mains-power-64",
+   "id": "a-mains-power-67",
    "type": "arrow",
    "x": 1325.0,
    "y": 735,
@@ -2461,9 +2598,9 @@
    "roundness": {
     "type": 2
    },
-   "seed": 3401627986,
+   "seed": 1938839951,
    "version": 1,
-   "versionNonce": 2082252346,
+   "versionNonce": 2002685366,
    "isDeleted": false,
    "boundElements": [],
    "updated": 1,

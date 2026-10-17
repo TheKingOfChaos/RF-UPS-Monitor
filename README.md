@@ -2,7 +2,7 @@
 
 A mains power monitor built on a Raspberry Pi Pico with a W5500 Ethernet module. It reports whether mains power is present over SNMP v1 and v2c, including traps, together with standard interface statistics (IF-MIB) and the board temperature, so it can be monitored by LibreNMS or any other SNMP manager. It is configured through a menu on the USB serial port.
 
-Current version: **2.1.1** (see [CHANGELOG.md](CHANGELOG.md)).
+Current version: **2.2.0** (see [CHANGELOG.md](CHANGELOG.md)).
 
 ## Overview
 
@@ -29,6 +29,8 @@ More diagrams (firmware architecture, SNMP request flow, mains flow, settings, t
 | SNMP rate limiting and access log | Working |
 | Web page with login: status, DHCP/static IP, SNMP community, hostname, restart | Working |
 | Hostname for SNMP sysName, DHCP and mDNS (`name.local`) | Working |
+| Web interface can be turned off (serial menu or the page itself) | Working |
+| SNMP trap destination from DHCP option 224 | Working, tested with Kea 2.2.0; in your network once the DHCP server has option 224 |
 | Interface statistics (IF-MIB ifTable/ifXTable, 64-bit counters) | Working, counted by the firmware |
 | Board temperature (RP2040 internal sensor) | Working |
 | LibreNMS OS definition (mains state, temperature, change counter) | Working, tested with LibreNMS 26.9.1 |
@@ -84,6 +86,7 @@ Connect to the Pico's USB serial port (`COM16` here) at **115200 baud, 8N1**, wi
 5. Access log
 6. Web password
 7. New default web password
+8. Web interface on/off
 ?. Show this menu
 >
 ```
@@ -105,8 +108,10 @@ sysName: "rf-ups-monitor"
 sysContact: ""
 sysLocation: ""
 Trap destination: "" (4 sent, 0 failed)
+Trap destination source: fixed (menu option 4)
 Trap version: v2c
 Hostname: rf-ups-monitor (DHCP, mDNS rf-ups-monitor.local)
+Web interface: on (TCP port 80)
 Web login: user admin, default password "k7wqz3mtd9" (change with option 6)
 Core 0 stack: 2520 bytes never used
 Mode: DHCP
@@ -164,7 +169,7 @@ Community [public]: s3cret
 Hostname (sysName) [rf-ups-monitor]: ups-rack4
 sysContact []: ops@example.com
 sysLocation []: Server room, rack 4
-Trap destination IP []: 10.10.6.65
+Trap destination IP or dhcp []: 10.10.6.65
 Trap version (1/2c) [2c]:
 
 New SNMP settings: community "s3cret", sysName "ups-rack4", sysContact "ops@example.com", sysLocation "Server room, rack 4", trap destination "10.10.6.65", trap version v2c
@@ -175,7 +180,7 @@ SNMP settings saved and active
 - Community: 1-31 printable ASCII characters. After saving, requests with the old community get no answer.
 - Hostname (sysName): 1-32 letters, digits and `-`, not starting or ending with `-`; `-` does not clear it. Active immediately for DHCP and mDNS too.
 - sysContact, sysLocation: 0-63 printable ASCII characters.
-- Trap destination: an IPv4 address that receives traps on UDP 162, or empty for no traps.
+- Trap destination: an IPv4 address that receives traps on UDP 162, `-` for no traps, or `dhcp` to take it from DHCP option 224 (see [docs/MIB.md](docs/MIB.md#trap-destination-from-dhcp)). Choosing `dhcp` keeps the fixed address for switching back.
 - Trap version: `1` (SNMPv1 Trap-PDU) or `2c` (SNMPv2-Trap, default).
 - Saved to flash and active immediately, no reboot. A factory reset restores `public`, `rf-ups-monitor`, empty contact and location, no trap destination and v2c traps.
 
@@ -194,6 +199,8 @@ Each new entry is also printed on the serial port when it happens (`SNMP access:
 
 **7. New default web password** replaces the device default password with a new random one after you confirm with `y`, and shows it. Use it if the default password became known to someone else: the old one stops working at once (browsers logged in with it are logged out), and the new one is kept across restarts. An own password set with option 6 stays in use.
 
+**8. Web interface on/off** switches the web page on or off after you confirm with `y`. Off closes TCP port 80, logs every browser out and stops announcing the page over mDNS; SNMP and the serial menu are not affected. The setting is kept across restarts; a factory reset turns the web interface on again. Turning it on takes effect at once; the status screen shows `Web interface: on (TCP port 80)`.
+
 If you lock yourself out with a wrong static address, use the serial menu to switch back to DHCP, or do a factory reset.
 
 ## Web page
@@ -207,6 +214,9 @@ The device serves a small configuration page on **http://&lt;device IP&gt;/** (p
 - **Network:** DHCP or static IP (address, mask and gateway are checked as in the serial menu). Saving restarts the device; the page tells you the new address.
 - **SNMP community:** active immediately, no restart.
 - **Restart device** and **Log out** buttons.
+- **Web interface: Turn off…** asks for confirmation, then turns the web page off. Only serial menu option 8 (or a factory reset) turns it on again.
+
+The page carries the RF logo (`logo/RF-canopy-RGB-Orange.svg`) in the top bar and on the login card, and as the browser tab icon (`/favicon.svg`).
 
 The page is styled with [Bootstrap](https://getbootstrap.com/) 5.3.3, which is built into the firmware: the device serves its CSS from flash (31 KB, gzip-compressed, cached by the browser for a year), so the page looks the same on a management network without internet access. It works on phones too. `scripts/embed_bootstrap.py` downloads a pinned version, checks it against Bootstrap's official integrity hash and regenerates `lib/web_ui/src/bootstrap_css.cpp`.
 
@@ -256,7 +266,7 @@ The input must be a clean DC level from an isolated circuit (optocoupler with fi
 
 1. Press and hold the button on GPIO22. The onboard LED blinks slowly (2 Hz) while it is held, and the serial log prints `Factory reset button pressed`.
 2. After 10 seconds the LED blinks fast, and the log prints `Factory reset after 10000 ms hold`. You can release the button.
-3. Settings return to defaults: DHCP on, community `public`, sysName `rf-ups-monitor`, empty sysContact and sysLocation, no trap destination, and the web page back on the device default password (the default password itself stays the same).
+3. Settings return to defaults: DHCP on, community `public`, sysName `rf-ups-monitor`, empty sysContact and sysLocation, no trap destination (fixed), the web interface on, and the web page back on the device default password (the default password itself stays the same).
 4. The device reboots, well within 2 seconds of the trigger.
 
 Releasing the button earlier cancels the reset (`released after ... ms, no reset`). The device keeps working normally while the button is held: SNMP answers, the menu responds and mains monitoring continues. A button held down while the device starts is ignored until it has been released once, so a stuck button cannot cause a reset loop.
@@ -281,6 +291,8 @@ Settings are stored as JSON on the Pico's internal flash (LittleFS) in two copie
 | `sysContact`, `sysLocation` | SNMP system group text, 0-63 printable characters; optional, default empty |
 | `trapTarget` | IPv4 address that receives traps, empty = no traps; optional |
 | `trapVersion` | `1` = SNMPv1 Trap-PDU, `2` = SNMPv2-Trap (default); optional |
+| `trapFromDhcp` | `true` = trap destination from DHCP option 224 (`trapTarget` is kept for switching back); optional, default `false` |
+| `webEnabled` | `false` = web interface off; optional, default `true` |
 | `webPassword` | Salted SHA-256 hash of the web password (`<salt>$<hash>`), empty = device default password; optional |
 | `dhcpEnabled` | `true` = DHCP, `false` = use the static fields |
 | `staticIP`, `subnetMask`, `gateway` | Static configuration, validated when DHCP is off |
@@ -337,11 +349,13 @@ lib/mains_input/            GPIO27 sampler on core 1, seqlock hand-over to core 
 lib/snmp_ber/               ASN.1 BER codec and OIDs for SNMP (pure C++)
 lib/snmp_agent/             SNMP v1/v2c messages, MIB, request handling, traps (pure C++)
 lib/if_stats/               Ethernet frame counting and W5500 PHY status decoding (pure C++)
-lib/web_ui/                 Web page: HTTP parser, login, sessions, pages, SHA-256 (pure C++)
+lib/web_ui/                 Web page: HTTP parser, login, sessions, pages, SHA-256, logo (pure C++)
+lib/dhcp_option/            Ask for and read DHCP option 224 in Ethernet frames (pure C++)
 src/snmp_service.cpp        UDP port 161, device state for the MIB
 src/net_stats.cpp           Counts frames at the lwIP driver, reads the W5500 PHY register
 src/board_temp.cpp          RP2040 die temperature, averaged
 mibs/                       RF-UPS-MONITOR-MIB
+logo/                       RF logo (SVG), used on the web page
 librenms/                   LibreNMS OS detection and discovery definitions, Docker test setup
 test/host/                  Host build of the agent for net-snmp checks
 test/native/                Unit tests, run on the PC
@@ -405,6 +419,8 @@ Object details, traps, error behaviour, limits and the MIB file: [docs/MIB.md](d
 | Problem | What to check |
 |---|---|
 | Someone else knows the default web password | Serial menu option 7 makes a new one; or set your own with option 6 |
+| Web page does not answer at all (connection refused) | The web interface may be off: status screen "Web interface: off", turn it on with menu option 8 |
+| Traps go nowhere with trap destination `dhcp` | Status screen "Trap destination source": the DHCP server must have option 224 configured |
 | Forgot the web password | Serial menu option 6, enter `-` to go back to the device default password shown on the status screen |
 | Web page does not load | Use `http://` (not https); the status screen shows the device IP |
 | No traps arrive | Trap destination set (status screen shows it and "N sent"); firewall on the receiving PC must allow inbound UDP 162 |

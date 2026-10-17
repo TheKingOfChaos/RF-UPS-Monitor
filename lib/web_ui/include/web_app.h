@@ -13,6 +13,8 @@
  *   POST /community SNMP community; saves, active immediately
  *   POST /hostname  hostname (sysName, DHCP, mDNS); saves, active immediately
  *   POST /reboot
+ *   POST /disable   turn the web interface off (asks first; confirm=yes does it)
+ *   GET  /favicon.svg  the logo, no login
  *   GET  /static/bootstrap-<version>.min.css  Bootstrap from flash, gzip, cached a year, no login
  * Every POST except /login needs a valid session cookie and the session's
  * CSRF token in the form. The cookie is HttpOnly and SameSite=Strict.
@@ -63,6 +65,8 @@ public:
     virtual bool saveCommunity(const char* community) = 0;
     /// Save and apply a new hostname (already validated): sysName, DHCP and mDNS
     virtual bool saveHostname(const char* hostname) = 0;
+    /// Save webEnabled = false; the server closes port 80 after this response
+    virtual bool disableWeb() = 0;
     /// Reboot once the response has been sent
     virtual void requestReboot() = 0;
     /// Fill out with random bytes from a good source
@@ -102,6 +106,8 @@ private:
     const char* network(const HttpRequest& req, size_t slot, WebBackend& backend, size_t& len);
     const char* community(const HttpRequest& req, size_t slot, WebBackend& backend, size_t& len);
     const char* hostname(const HttpRequest& req, size_t slot, WebBackend& backend, size_t& len);
+    const char* disable(const HttpRequest& req, size_t slot, WebBackend& backend, size_t& len);
+    const char* favicon(size_t& len);
     const char* mainPage(int code, const char* reason, size_t slot, WebBackend& backend, const char* message,
                          bool error, size_t& len);
     const char* loginPage(int code, const char* reason, const char* message, size_t& len);

@@ -137,6 +137,11 @@ Flashing an embedded test replaces the firmware, so always reflash with `pio run
 - Hostname rules (length 1-32, letters/digits/'-', no leading or trailing '-', one label, ASCII only)
 - Free text to hostname: valid names unchanged, runs of other characters become one '-', cut at 32 on a word end, fallback name; every printable text gives a valid hostname
 
+### `test/native/test_dhcp_option`: DHCP option 224 (`lib/dhcp_option`)
+- Real frames: the device's own DISCOVER and REQUESTs (dumped at the driver), the LAN server's OFFER/ACK, and Kea 2.2.0's replies to the device's frames replayed in Docker with and without option 224 added (`frames.h`). Kea sent 224 only to the edited frames, which proves the request works
+- Editing: 224 appended to option 55 in every device request, length unchanged, nothing else changed, UDP checksum recomputed (not dropped), idempotent, zero checksum kept, no padding = no change, server messages / ARP / corrupt frames untouched, every truncation and every single-byte corruption safe
+- Reading: Kea ACK gives 10.10.6.65 and the lease, ACKs without 224, OFFERs and requests are not ACKs, another MAC, wrong option length, bad IP/UDP checksums, fragments, every truncation and corruption
+
 ### `test/native/test_settings_codec`: `lib/settings_codec`
 - Defaults and JSON round trip, maximum-length fields fit the buffer
 - v1 files without `sequence` still load (backward compatibility)
@@ -274,12 +279,18 @@ Uses `test/settings_a.json` and `test/settings_b.json`, never the real settings.
 - Actions need session and CSRF token; community change applies to SNMP at once (old community refused) and is restored; invalid community and invalid static address rejected without restart
 - Restart button and DHCP save restart the device (sysUpTime restarts, default password kept); static IP from the web page and back (opt-in `RFUPS_STATIC_IP`)
 - Hostname from the web page: status screen, SNMP sysName and mDNS (`name.local` resolved by the PC) follow at once without restart; invalid names refused; restored afterwards
+- Web interface off via serial option 8: port 80 closed, SNMP keeps working, off survives a restart, back on; the page turning itself off asks first, then closes port 80, and serial option 8 reopens it at once (the TIME-WAIT case)
+- Logo and favicon: `/favicon.svg` is the path from `logo/RF-canopy-RGB-Orange.svg`, logo in the navbar and on the login card
 - New default password via serial option 7: `n` changes nothing; `y` gives a new 10-character password, logs browsers out, refuses the old one and keeps the new one across a restart; an own password stays in use
 - Own password via serial option 6: masked echo, old sessions logged out, default refused, hashed check under 2 s, mismatch and short passwords change nothing, `-` restores the default
 - The Bootstrap stylesheet downloaded from the device unpacks to exactly Bootstrap 5.3.3 (official integrity hash), without slowing SNMP
 - With an own password set, SNMP stays under 100 ms while a login (right or wrong) hashes the password
 - A client that never finishes its request does not slow SNMP and is dropped after 5 s; 30 page loads keep SNMP under 100 ms and leave > 1 KB of core 0 stack never used; oversized request gets 413
 - Needs the device default web password (the suite skips otherwise)
+
+### `test/hil/test_dhcp_trap.py`: trap destination from DHCP
+- Choosing `dhcp` asks for option 224 in the renewal, the LAN's server still answers (same lease and IP, SNMP answers), the status screen reports the ACK; back to fixed
+- Opt-in `RFUPS_DHCP_TRAP_TARGET=<address>`: with a server that sends option 224, the destination in use is that address; if it is this PC, an authenticationFailure trap arrives there
 
 ### `test/hil/test_snmp_traps.py`: traps on the device (every test runs with v1 and with v2c traps)
 - coldStart arrives after a reboot (empty ARP table, the trap is the first packet to this PC), exactly once, from the device's address, with a small time-stamp

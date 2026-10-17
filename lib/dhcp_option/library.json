@@ -1,0 +1,20 @@
+{
+    "name": "dhcp_option",
+    "version": "1.0.0",
+    "description": "Request and read a site-specific DHCP option by editing and reading Ethernet frames (pure C++, host testable)",
+    "keywords": "dhcp, option, snmp",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3.git"
+    },
+    "authors": [
+        {
+            "name": "kenneth Foli Jørgensen",
+            "email": "kenneth@tkoc.dk",
+            "maintainer": true
+        }
+    ],
+    "license": "MIT",
+    "frameworks": "*",
+    "platforms": "*"
+}

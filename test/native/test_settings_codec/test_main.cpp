@@ -271,6 +271,47 @@ static void test_web_password_defaults_to_empty_and_round_trips() {
     TEST_ASSERT_FALSE(settingsEqual(in, out));
 }
 
+static void test_web_enabled_and_dhcp_trap_target_defaults_and_round_trip() {
+    Settings s;
+    settingsDefaults(s);
+    TEST_ASSERT_TRUE(s.webEnabled);     // web page on
+    TEST_ASSERT_FALSE(s.trapFromDhcp);  // fixed trap destination
+    // Files from older firmware have neither field
+    TEST_ASSERT_EQUAL(SettingsParseError::None, settingsFromJson(LEGACY_V1_JSON, s));
+    TEST_ASSERT_TRUE(s.webEnabled);
+    TEST_ASSERT_FALSE(s.trapFromDhcp);
+
+    Settings in = staticSettings(), out;
+    in.webEnabled = false;
+    in.trapFromDhcp = true;
+    char json[SETTINGS_JSON_MAX];
+    TEST_ASSERT_GREATER_THAN(0, settingsToJson(in, json, sizeof(json)));
+    TEST_ASSERT_EQUAL(SettingsParseError::None, settingsFromJson(json, out));
+    TEST_ASSERT_FALSE(out.webEnabled);
+    TEST_ASSERT_TRUE(out.trapFromDhcp);
+    TEST_ASSERT_TRUE(settingsEqual(in, out));
+    out.webEnabled = true;
+    TEST_ASSERT_FALSE(settingsEqual(in, out));
+    out.webEnabled = false;
+    out.trapFromDhcp = false;
+    TEST_ASSERT_FALSE(settingsEqual(in, out));
+}
+
+static void test_rejects_mistyped_web_enabled_and_trap_from_dhcp() {
+    char json[SETTINGS_JSON_MAX];
+    Settings s;
+    const char* bad[] = {"\"webEnabled\":1", "\"webEnabled\":\"false\"", "\"trapFromDhcp\":0",
+                         "\"trapFromDhcp\":null2"};
+    for (const char* b : bad) {
+        withField(json, sizeof(json), b);
+        TEST_ASSERT_NOT_EQUAL_MESSAGE(SettingsParseError::None, settingsFromJson(json, s), b);
+    }
+    withField(json, sizeof(json), "\"webEnabled\":false,\"trapFromDhcp\":true");
+    TEST_ASSERT_EQUAL(SettingsParseError::None, settingsFromJson(json, s));
+    TEST_ASSERT_FALSE(s.webEnabled);
+    TEST_ASSERT_TRUE(s.trapFromDhcp);
+}
+
 static void test_rejects_malformed_web_password_hash() {
     char json[SETTINGS_JSON_MAX], field[160];
     Settings s;
@@ -482,6 +523,8 @@ int main() {
     RUN_TEST(test_file_without_sys_text_loads_with_defaults);
     RUN_TEST(test_rejects_overlong_sys_text);
     RUN_TEST(test_web_password_defaults_to_empty_and_round_trips);
+    RUN_TEST(test_web_enabled_and_dhcp_trap_target_defaults_and_round_trip);
+    RUN_TEST(test_rejects_mistyped_web_enabled_and_trap_from_dhcp);
     RUN_TEST(test_rejects_malformed_web_password_hash);
     RUN_TEST(test_rejects_unprintable_or_mistyped_sys_text);
     RUN_TEST(test_empty_sys_text_is_allowed);

@@ -27,7 +27,8 @@ enum CliState {
     CLI_SNMP_CONFIRM,   // Confirming SNMP change, save without reboot
     CLI_WEB_PASSWORD,   // Entering a new web password (echoed as *)
     CLI_WEB_REPEAT,     // Repeating it
-    CLI_WEB_REGENERATE  // Confirming a new default web password
+    CLI_WEB_REGENERATE, // Confirming a new default web password
+    CLI_WEB_TOGGLE      // Confirming web interface on/off
 };
 
 static CliState state = CLI_MENU;
@@ -48,6 +49,7 @@ static char newSysName[SYS_TEXT_MAX_LENGTH + 1];
 static char newSysContact[SYS_TEXT_MAX_LENGTH + 1];
 static char newSysLocation[SYS_TEXT_MAX_LENGTH + 1];
 static char newTrapTarget[16];
+static bool newTrapFromDhcp;
 static uint8_t newTrapVersion;
 
 // Web password being entered; cleared after use
@@ -70,6 +72,7 @@ static void printMenu() {
     Serial.println("5. Access log");
     Serial.println("6. Web password");
     Serial.println("7. New default web password");
+    Serial.println("8. Web interface on/off");
     Serial.println("?. Show this menu");
     Serial.print("> ");
 }
@@ -123,10 +126,35 @@ static void printStatus() {
     Serial.printf("sysName: \"%s\"\n", currentSettings.sysName);
     Serial.printf("sysContact: \"%s\"\n", currentSettings.sysContact);
     Serial.printf("sysLocation: \"%s\"\n", currentSettings.sysLocation);
-    Serial.printf("Trap destination: \"%s\" (%lu sent, %lu failed)\n", currentSettings.trapTarget,
-                  (unsigned long)svc.trapsSent, (unsigned long)svc.trapsFailed);
+    // The destination in use first, then where it comes from
+    uint8_t trap[4];
+    char trapText[16] = "";
+    if (snmpTrapTarget(trap)) snprintf(trapText, sizeof(trapText), "%u.%u.%u.%u", trap[0], trap[1], trap[2], trap[3]);
+    Serial.printf("Trap destination: \"%s\" (%lu sent, %lu failed)\n", trapText, (unsigned long)svc.trapsSent,
+                  (unsigned long)svc.trapsFailed);
+    if (!currentSettings.trapFromDhcp) {
+        Serial.println("Trap destination source: fixed (menu option 4)");
+    } else {
+        DhcpTrapInfo d = netStatsDhcpTrap();
+        Serial.printf("Trap destination source: DHCP option %u (asked in %lu DHCP messages; ", DHCP_OPTION_TRAP_TARGET,
+                      (unsigned long)d.requests);
+        if (!currentSettings.dhcpEnabled) {
+            Serial.println("static IP: no DHCP)");
+        } else if (!d.seen) {
+            Serial.println("no DHCP ACK yet)");
+        } else if (!d.hasOption) {
+            Serial.printf("last ACK %lu s ago had no option %u)\n", (unsigned long)((millis() - d.ackMs) / 1000),
+                          DHCP_OPTION_TRAP_TARGET);
+        } else {
+            Serial.printf("last ACK %lu s ago: %u.%u.%u.%u)\n", (unsigned long)((millis() - d.ackMs) / 1000),
+                          d.target[0], d.target[1], d.target[2], d.target[3]);
+        }
+    }
     Serial.printf("Trap version: %s\n", currentSettings.trapVersion == TRAP_VERSION_V1 ? "v1" : "v2c");
     Serial.printf("Hostname: %s (DHCP, mDNS %s.local)\n", hostnameCurrent(), hostnameCurrent());
+    Serial.printf("Web interface: %s\n", !webEnabled()   ? "off (option 8 turns it on)"
+                                         : webListening() ? "on (TCP port 80)"
+                                                          : "on, opening TCP port 80 (retrying)");
     if (webUsesDefaultPassword()) {
         Serial.printf("Web login: user admin, default password \"%s\" (change with option 6)\n", webDefaultPassword());
     } else {
@@ -228,20 +256,30 @@ static void promptSnmp() {
     case CLI_SNMP_NAME:      prompt("Hostname (sysName)", currentSettings.sysName); break;
     case CLI_SNMP_CONTACT:   prompt("sysContact", currentSettings.sysContact); break;
     case CLI_SNMP_LOCATION:  prompt("sysLocation", currentSettings.sysLocation); break;
-    case CLI_SNMP_TRAP:      prompt("Trap destination IP", currentSettings.trapTarget); break;
+    case CLI_SNMP_TRAP:
+        prompt("Trap destination IP or dhcp", currentSettings.trapFromDhcp ? "dhcp" : currentSettings.trapTarget);
+        break;
     case CLI_SNMP_TRAP_VER:  prompt("Trap version (1/2c)", trapVersionName(currentSettings.trapVersion)); break;
     default: break;
     }
 }
 
 /**
- * @brief Accept the trap destination: empty keeps, "-" turns traps off, else an IPv4 address
+ * @brief Accept the trap destination: empty keeps, "-" turns traps off, "dhcp" takes it from
+ *        DHCP option 224, else an IPv4 address
  */
 static bool takeTrapTarget(const char* input) {
+    // The fixed address is kept while DHCP is chosen, for switching back
+    strlcpy(newTrapTarget, currentSettings.trapTarget, sizeof(newTrapTarget));
     if (input[0] == '\0') {
-        strlcpy(newTrapTarget, currentSettings.trapTarget, sizeof(newTrapTarget));
+        newTrapFromDhcp = currentSettings.trapFromDhcp;
         return true;
     }
+    if (strcmp(input, "dhcp") == 0 || strcmp(input, "DHCP") == 0) {
+        newTrapFromDhcp = true;
+        return true;
+    }
+    newTrapFromDhcp = false;
     if (strcmp(input, "-") == 0) {
         newTrapTarget[0] = '\0';
         return true;
@@ -280,7 +318,7 @@ static void askSnmpConfirm() {
     Serial.println();
     Serial.printf("New SNMP settings: community \"%s\", sysName \"%s\", sysContact \"%s\", sysLocation \"%s\", "
                   "trap destination \"%s\", trap version %s\n",
-                  newCommunity, newSysName, newSysContact, newSysLocation, newTrapTarget,
+                  newCommunity, newSysName, newSysContact, newSysLocation, newTrapFromDhcp ? "dhcp" : newTrapTarget,
                   newTrapVersion == TRAP_VERSION_V1 ? "v1" : "v2c");
     Serial.print("Save? (y/n): ");
     state = CLI_SNMP_CONFIRM;
@@ -348,6 +386,10 @@ static void handleLine(const char* line) {
             Serial.printf("Replace the device default web password \"%s\" with a new random one? (y/n): ",
                           webDefaultPassword());
             state = CLI_WEB_REGENERATE;
+        } else if (strcmp(line, "8") == 0) {
+            Serial.printf(webEnabled() ? "The web interface is on. Turn it off? (y/n): "
+                                       : "The web interface is off. Turn it on? (y/n): ");
+            state = CLI_WEB_TOGGLE;
         } else if (line[0] == '\0') {
             Serial.print("> ");
         } else {
@@ -478,11 +520,13 @@ static void handleLine(const char* line) {
             strlcpy(currentSettings.sysContact, newSysContact, sizeof(currentSettings.sysContact));
             strlcpy(currentSettings.sysLocation, newSysLocation, sizeof(currentSettings.sysLocation));
             strlcpy(currentSettings.trapTarget, newTrapTarget, sizeof(currentSettings.trapTarget));
+            currentSettings.trapFromDhcp = newTrapFromDhcp;
             currentSettings.trapVersion = newTrapVersion;
             // The SNMP agent reads these on every request, so no reboot is needed
             if (saveSettings()) {
                 if (communityChanged) snmpCommunityChanged();
                 hostnameApply();  // no-op when sysName did not change
+                netStatsRequestDhcpTrapTarget(currentSettings.trapFromDhcp);  // renews when switched on
                 Serial.println("SNMP settings saved and active");
             } else {
                 currentSettings = settingsBackup;
@@ -527,6 +571,21 @@ static void handleLine(const char* line) {
                           saved ? "" : " (NOT saved, a new one is generated at the next boot)");
             if (!webUsesDefaultPassword()) {
                 Serial.println("Your own password stays in use; option 6 with '-' switches to the new default");
+            }
+        } else {
+            Serial.println("Cancelled");
+        }
+        state = CLI_MENU;
+        printMenu();
+        break;
+
+    case CLI_WEB_TOGGLE:
+        if (line[0] == 'y' || line[0] == 'Y') {
+            bool on = !webEnabled();
+            if (webSetEnabled(on)) {
+                Serial.println(on ? "Web interface on" : "Web interface off; browsers logged out");
+            } else {
+                Serial.println("Failed to save settings, nothing changed");
             }
         } else {
             Serial.println("Cancelled");

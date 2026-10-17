@@ -5,6 +5,7 @@
 #include <lwip/netif.h>
 #include <lwip/pbuf.h>
 #include <string.h>
+#include <lwip/dhcp.h>
 #include "pins.h"
 
 // W5500 common register with link, speed and duplex
@@ -23,11 +24,30 @@ static PhyStatus phy = {false, false, false};
 static uint32_t lastChangeTicks = 0;
 static uint8_t mac[6] = {0};
 static bool started = false;
+// DHCP option 224 (trap destination): requested in our DHCP messages, read from ACKs to us
+static volatile bool dhcpRequestOn = false;
+static DhcpTrapInfo dhcpTrap = {};
+
+/// A DHCPACK for this device: remember whether it carried option 224
+static void readDhcpAck(const uint8_t* frame, size_t len) {
+    uint8_t target[4], yiaddr[4];
+    DhcpAck r = dhcpReadAck(frame, len, mac, DHCP_OPTION_TRAP_TARGET, target, yiaddr);
+    if (r != DhcpAck::Option && r != DhcpAck::NoOption) return;
+    dhcpTrap.acks++;
+    dhcpTrap.seen = true;
+    dhcpTrap.hasOption = r == DhcpAck::Option;
+    if (dhcpTrap.hasOption) memcpy(dhcpTrap.target, target, 4);
+    memcpy(dhcpTrap.yiaddr, yiaddr, 4);
+    dhcpTrap.ackMs = millis();
+}
 
 /// Received frame: count, then hand to lwIP as before (it drops what it cannot use)
 static err_t countingInput(struct pbuf* p, struct netif* nif) {
     // The driver allocates one contiguous pbuf per frame (PBUF_RAM), so payload holds the header
-    if (p != nullptr) ifCountReceived(counters, (const uint8_t*)p->payload, p->len, LWIP_IPV6 != 0);
+    if (p != nullptr) {
+        ifCountReceived(counters, (const uint8_t*)p->payload, p->len, LWIP_IPV6 != 0);
+        readDhcpAck((const uint8_t*)p->payload, p->len);
+    }
     return originalInput(p, nif);
 }
 
@@ -35,8 +55,13 @@ void netStatsCountDiscard(uint16_t length) {
     ifCountDiscard(counters, length);
 }
 
-/// Frame to send: hand to the driver, count the result
+/// Frame to send: ask for option 224 in our DHCP messages, hand to the driver, count the result
 static err_t countingLinkOutput(struct netif* nif, struct pbuf* p) {
+    // lwIP builds each DHCP message in one pbuf (LWIP_NETIF_TX_SINGLE_PBUF), freed after sending
+    if (dhcpRequestOn && p->next == nullptr &&
+        dhcpRequestOption((uint8_t*)p->payload, p->len, DHCP_OPTION_TRAP_TARGET) == DhcpEdit::Added) {
+        dhcpTrap.requests++;
+    }
     err_t err = originalLinkOutput(nif, p);
     if (err == ERR_OK) {
         ifCountFrame(counters, (const uint8_t*)p->payload, p->tot_len, true);
@@ -101,4 +126,20 @@ void netStatsCapture(SnmpInterfaceState& out) {
 
 PhyStatus netStatsPhy() {
     return phy;
+}
+
+void netStatsRequestDhcpTrapTarget(bool on) {
+    DriverLock lock;
+    bool changed = dhcpRequestOn != on;
+    dhcpRequestOn = on;
+    if (!changed || !on) return;
+    // Ask now instead of at the next renewal (lease time / 2)
+    for (netif* n = netif_list; n != nullptr; n = n->next) {
+        if (dhcp_supplied_address(n)) dhcp_renew(n);  // only with a bound lease
+    }
+}
+
+DhcpTrapInfo netStatsDhcpTrap() {
+    DriverLock lock;  // written from lwIP context
+    return dhcpTrap;
 }

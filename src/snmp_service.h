@@ -69,6 +69,13 @@ void snmpPoll();
 void snmpCommunityChanged();
 
 /**
+ * @brief The trap destination in use: the fixed setting, or DHCP option 224 when trapFromDhcp is set
+ *        (only from the ACK for the current lease)
+ * @return false if traps are off or no destination is known
+ */
+bool snmpTrapTarget(uint8_t out[4]);
+
+/**
  * @brief Send mainsPowerLost or mainsPowerRestored for the current mains state
  */
 void snmpNotifyMainsChange();

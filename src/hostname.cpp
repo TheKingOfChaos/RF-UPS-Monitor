@@ -9,6 +9,18 @@ extern CountingW5500lwIP eth;  // main.cpp
 
 static char current[HOSTNAME_MAX_LENGTH + 1] = "";
 static bool mdnsStarted = false;
+static bool advertiseWeb = true;  // announce the web page as _http._tcp
+static s8_t httpSlot = -1;         // its mDNS service slot, -1 = not announced
+
+/// Add or remove the _http._tcp service to match advertiseWeb (driver lock held)
+static void syncWebService(netif* nif) {
+    if (advertiseWeb && httpSlot < 0) {
+        httpSlot = mdns_resp_add_service(nif, "RF-UPS-Monitor", "_http", DNSSD_PROTO_TCP, 80, nullptr, nullptr);
+    } else if (!advertiseWeb && httpSlot >= 0) {
+        mdns_resp_del_service(nif, httpSlot);
+        httpSlot = -1;
+    }
+}
 
 void hostnameBegin() {
     hostnameFromText(currentSettings.sysName, current);
@@ -22,7 +34,7 @@ void hostnameNetworkUp() {
     if (!mdnsStarted) {
         mdns_resp_init();
         if (mdns_resp_add_netif(nif, current) == ERR_OK) {
-            mdns_resp_add_service(nif, "RF-UPS-Monitor", "_http", DNSSD_PROTO_TCP, 80, nullptr, nullptr);
+            syncWebService(nif);
             mdnsStarted = true;
             Serial.printf("\nmDNS: %s.local\n", current);
         } else {
@@ -46,4 +58,13 @@ void hostnameApply() {
 
 const char* hostnameCurrent() {
     return current;
+}
+
+void hostnameAdvertiseWeb(bool on) {
+    advertiseWeb = on;
+    if (!mdnsStarted) return;  // hostnameNetworkUp() adds it when mDNS starts
+    netif* nif = eth.getNetIf();
+    DriverLock lock;
+    syncWebService(nif);
+    mdns_resp_announce(nif);
 }

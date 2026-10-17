@@ -516,7 +516,7 @@ class FakeBackend : public WebBackend {
 public:
     std::string password = "goodpasswd1";
     bool saveOk = true;
-    int passwordChecks = 0, networkSaves = 0, communitySaves = 0, hostnameSaves = 0, reboots = 0;
+    int passwordChecks = 0, networkSaves = 0, communitySaves = 0, hostnameSaves = 0, reboots = 0, disables = 0;
     bool savedDhcp = false;
     std::string savedIP, savedMask, savedGateway, savedCommunity, savedHostname;
     int failed = 0, locked = 0, loggedIn = 0;
@@ -565,6 +565,10 @@ public:
         hostnameSaves++;
         savedHostname = h;
         if (saveOk) strcpy(st.hostname, h);
+        return saveOk;
+    }
+    bool disableWeb() override {
+        disables++;
         return saveOk;
     }
     void requestReboot() override { reboots++; }
@@ -720,14 +724,14 @@ static void test_status_page_shows_device_values_escaped() {
 
 static void test_actions_need_a_session() {
     webSetUp();
-    const char* paths[] = {"/community", "/network", "/reboot", "/logout", "/hostname"};
+    const char* paths[] = {"/community", "/network", "/reboot", "/logout", "/hostname", "/disable"};
     for (const char* p : paths) {
-        std::string resp = post(p, "community=x&mode=dhcp&hostname=x&csrf=00");
+        std::string resp = post(p, "community=x&mode=dhcp&hostname=x&confirm=yes&csrf=00");
         TEST_ASSERT_EQUAL_MESSAGE(403, statusCode(resp), p);
         resp = post(p, "community=x&mode=dhcp", std::string(32, 'a'));
         TEST_ASSERT_EQUAL_MESSAGE(403, statusCode(resp), p);
     }
-    TEST_ASSERT_EQUAL(0, fb->communitySaves + fb->networkSaves + fb->hostnameSaves + fb->reboots);
+    TEST_ASSERT_EQUAL(0, fb->communitySaves + fb->networkSaves + fb->hostnameSaves + fb->reboots + fb->disables);
 }
 
 static void test_actions_need_the_session_csrf_token() {
@@ -861,6 +865,71 @@ static void test_failed_save_does_not_reboot() {
     TEST_ASSERT_EQUAL(0, fb->reboots);
 }
 
+static void test_disable_asks_first_then_turns_the_web_interface_off() {
+    webSetUp();
+    std::string csrf;
+    std::string token = logIn(csrf);
+    TEST_ASSERT_TRUE(get("/", token).find("action=\"/disable\"") != std::string::npos);
+    // Without confirm=yes: a confirmation page with its own form, nothing changed yet
+    std::string ask = post("/disable", "csrf=" + csrf, token);
+    TEST_ASSERT_EQUAL(200, statusCode(ask));
+    TEST_ASSERT_TRUE(ask.find("Turn off the web interface?") != std::string::npos);
+    TEST_ASSERT_TRUE(ask.find("name=\"confirm\" value=\"yes\"") != std::string::npos);
+    TEST_ASSERT_TRUE(ask.find("name=\"csrf\" value=\"" + csrf + "\"") != std::string::npos);
+    TEST_ASSERT_EQUAL(0, fb->disables);
+    TEST_ASSERT_EQUAL(200, statusCode(post("/disable", "csrf=" + csrf + "&confirm=no", token)));
+    TEST_ASSERT_EQUAL(0, fb->disables);
+    // Confirmed: saved, explained, and every session ends
+    std::string done = post("/disable", "csrf=" + csrf + "&confirm=yes", token);
+    TEST_ASSERT_EQUAL(200, statusCode(done));
+    TEST_ASSERT_EQUAL(1, fb->disables);
+    TEST_ASSERT_TRUE(done.find("serial menu option 8") != std::string::npos);
+    TEST_ASSERT_EQUAL(0, app->sessionCount());
+    TEST_ASSERT_TRUE(get("/", token).find("action=\"/login\"") != std::string::npos);
+}
+
+static void test_disable_needs_the_csrf_token_and_reports_save_failure() {
+    webSetUp();
+    std::string csrf;
+    std::string token = logIn(csrf);
+    TEST_ASSERT_EQUAL(403, statusCode(post("/disable", "confirm=yes", token)));
+    TEST_ASSERT_EQUAL(403, statusCode(post("/disable", "confirm=yes&csrf=" + token, token)));
+    TEST_ASSERT_EQUAL(405, statusCode(get("/disable", token)));
+    fb->saveOk = false;
+    TEST_ASSERT_EQUAL(500, statusCode(post("/disable", "csrf=" + csrf + "&confirm=yes", token)));
+    TEST_ASSERT_EQUAL(1, fb->disables);
+    TEST_ASSERT_EQUAL(1, app->sessionCount());  // still logged in: nothing changed
+}
+
+static void test_logo_in_navbar_and_login_card_and_favicon_link() {
+    webSetUp();
+    std::string login = get("/");
+    TEST_ASSERT_TRUE(login.find("<link rel=\"icon\" type=\"image/svg+xml\" href=\"/favicon.svg\">") != std::string::npos);
+    // Navbar logo and the large one on the login card
+    size_t first = login.find("fill=\"#FF7300\" d=\"M339.4847107,58.6125908");
+    TEST_ASSERT_TRUE(first != std::string::npos);
+    TEST_ASSERT_TRUE(login.find("fill=\"#FF7300\" d=\"M339.4847107,58.6125908", first + 1) != std::string::npos);
+    TEST_ASSERT_TRUE(login.find("aria-label=\"RF logo\"") != std::string::npos);
+    std::string csrf;
+    std::string page = get("/", logIn(csrf));
+    TEST_ASSERT_TRUE(page.find("fill=\"#FF7300\"") != std::string::npos);  // navbar on every page
+}
+
+static void test_favicon_is_the_logo_without_login() {
+    webSetUp();
+    std::string r = get("/favicon.svg");
+    TEST_ASSERT_EQUAL(200, statusCode(r));
+    TEST_ASSERT_TRUE(r.find("Content-Type: image/svg+xml\r\n") != std::string::npos);
+    TEST_ASSERT_TRUE(r.find("Cache-Control: public, max-age=86400") != std::string::npos);
+    size_t body = r.find("\r\n\r\n") + 4;
+    TEST_ASSERT_EQUAL(atoi(between(r, "Content-Length: ", "\r\n").c_str()), r.size() - body);
+    std::string svg = r.substr(body);
+    TEST_ASSERT_EQUAL(0, svg.find("<svg xmlns=\"http://www.w3.org/2000/svg\""));
+    TEST_ASSERT_TRUE(svg.find("H339.4847107z\"/></svg>") != std::string::npos);
+    TEST_ASSERT_TRUE(svg.find("<script") == std::string::npos);
+    TEST_ASSERT_EQUAL(405, statusCode(post("/favicon.svg", "")));
+}
+
 static void test_reboot_button() {
     webSetUp();
     std::string csrf;
@@ -941,7 +1010,7 @@ static void test_other_responses_have_no_static_body_and_pages_link_the_styleshe
     TEST_ASSERT_EQUAL(0, len);
     TEST_ASSERT_TRUE(page.find("<link rel=\"stylesheet\" href=\"" BOOTSTRAP_CSS_PATH "\">") != std::string::npos);
     // The policy allows the own stylesheet and Bootstrap's data: images, still no scripts
-    TEST_ASSERT_TRUE(page.find("default-src 'none'; style-src 'self' 'unsafe-inline'; img-src data:;") !=
+    TEST_ASSERT_TRUE(page.find("default-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;") !=
                      std::string::npos);
     TEST_ASSERT_TRUE(page.find("<script") == std::string::npos);
     TEST_ASSERT_EQUAL(405, statusCode(post(BOOTSTRAP_CSS_PATH, "")));
@@ -1065,6 +1134,10 @@ int main() {
     RUN_TEST(test_static_ip_is_validated_saved_and_reboots);
     RUN_TEST(test_invalid_static_ip_is_not_saved);
     RUN_TEST(test_failed_save_does_not_reboot);
+    RUN_TEST(test_disable_asks_first_then_turns_the_web_interface_off);
+    RUN_TEST(test_disable_needs_the_csrf_token_and_reports_save_failure);
+    RUN_TEST(test_logo_in_navbar_and_login_card_and_favicon_link);
+    RUN_TEST(test_favicon_is_the_logo_without_login);
     RUN_TEST(test_reboot_button);
     RUN_TEST(test_logout_ends_the_session);
     RUN_TEST(test_session_expires_after_idle_time_and_logout_all);

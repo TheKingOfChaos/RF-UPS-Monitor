@@ -13,7 +13,7 @@ static const char* const DEFAULT_GATEWAY = "192.168.1.1";
 static const char* const DEFAULT_SYS_NAME = "rf-ups-monitor";
 
 // Room for the parsed document: the object, its members and copies of all strings
-static const size_t JSON_DOC_CAPACITY = SETTINGS_JSON_MAX + JSON_OBJECT_SIZE(14);
+static const size_t JSON_DOC_CAPACITY = SETTINGS_JSON_MAX + JSON_OBJECT_SIZE(16);
 
 /**
  * @brief Copy a string into a fixed buffer, failing instead of truncating
@@ -44,13 +44,15 @@ void settingsDefaults(Settings& s) {
     copyField(s.gateway, sizeof(s.gateway), DEFAULT_GATEWAY);
     copyField(s.sysName, sizeof(s.sysName), DEFAULT_SYS_NAME);
     s.trapVersion = TRAP_VERSION_V2C;
+    s.trapFromDhcp = false;
+    s.webEnabled = true;
     s.version = SETTINGS_VERSION;
     s.sequence = 0;
 }
 
 size_t settingsToJson(const Settings& s, char* buf, size_t size) {
     // Strings are stored by pointer, so the document only needs the object
-    StaticJsonDocument<JSON_OBJECT_SIZE(14)> doc;
+    StaticJsonDocument<JSON_OBJECT_SIZE(16)> doc;
     doc["community"] = (const char*)s.community;
     doc["dhcpEnabled"] = s.dhcpEnabled;
     doc["staticIP"] = (const char*)s.staticIP;
@@ -61,6 +63,8 @@ size_t settingsToJson(const Settings& s, char* buf, size_t size) {
     doc["sysLocation"] = (const char*)s.sysLocation;
     doc["trapTarget"] = (const char*)s.trapTarget;
     doc["trapVersion"] = s.trapVersion;
+    doc["trapFromDhcp"] = s.trapFromDhcp;
+    doc["webEnabled"] = s.webEnabled;
     doc["webPassword"] = (const char*)s.webPassword;
     doc["version"] = s.version;
     doc["sequence"] = s.sequence;
@@ -145,6 +149,13 @@ SettingsParseError settingsFromJson(const char* json, Settings& out) {
         if (s.webPassword[0] != '\0' && !webPasswordHashFormatOk(s.webPassword)) return SettingsParseError::BadWebPassword;
     }
 
+    JsonVariantConst trapFromDhcp = doc["trapFromDhcp"], webEnabled = doc["webEnabled"];
+    if ((!trapFromDhcp.isNull() && !trapFromDhcp.is<bool>()) || (!webEnabled.isNull() && !webEnabled.is<bool>())) {
+        return SettingsParseError::MissingField;
+    }
+    if (!trapFromDhcp.isNull()) s.trapFromDhcp = trapFromDhcp.as<bool>();
+    if (!webEnabled.isNull()) s.webEnabled = webEnabled.as<bool>();
+
     JsonVariantConst trapVersion = doc["trapVersion"];
     if (!trapVersion.isNull()) {
         if (!trapVersion.is<int>()) return SettingsParseError::BadTrapVersion;
@@ -190,6 +201,7 @@ bool settingsEqual(const Settings& a, const Settings& b) {
            strcmp(a.gateway, b.gateway) == 0 && strcmp(a.sysName, b.sysName) == 0 &&
            strcmp(a.sysContact, b.sysContact) == 0 && strcmp(a.sysLocation, b.sysLocation) == 0 &&
            strcmp(a.trapTarget, b.trapTarget) == 0 && a.trapVersion == b.trapVersion &&
+           a.trapFromDhcp == b.trapFromDhcp && a.webEnabled == b.webEnabled &&
            strcmp(a.webPassword, b.webPassword) == 0 &&
            a.version == b.version && a.sequence == b.sequence;
 }

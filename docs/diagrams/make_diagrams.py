@@ -170,11 +170,11 @@ def system_overview():
     d.arrow("pc", "right", "pico", "left", "USB", b_frac=0.85, both=True)
 
     d.zone("z-net", 1150, 80, 380, 700, "Network", ZONE_GRAY)
-    d.box("dhcp", 1190, 140, 140, 80, "DHCP server\n(or static IP)", GRAY, 16)
+    d.box("dhcp", 1190, 130, 140, 100, "DHCP server\nopt. 224 = trap\ndestination", GRAY, 16)
     d.box("browser", 1350, 140, 140, 80, "Browser\nweb page\nTCP 80", VIOLET, 16)
     d.box("switch", 1190, 360, 300, 90, "LAN switch", GRAY)
     d.box("lnms", 1190, 520, 300, 110, "SNMP manager\nLibreNMS / net-snmp\npolls UDP 161 (v1 / v2c)", VIOLET, 16)
-    d.box("traps", 1190, 670, 300, 80, "Trap receiver\nUDP 162 (v1 or v2c)", VIOLET, 16)
+    d.box("traps", 1190, 660, 300, 100, "Trap receiver\nUDP 162 (v1 or v2c)\nfixed IP or from DHCP", VIOLET, 16)
     d.arrow("w5500", "right", "switch", "left", "100 Mbit/s", b_frac=0.5, both=True)
     d.arrow("switch", "top", "dhcp", "bottom", a_frac=0.23, both=True)
     d.arrow("switch", "top", "browser", "bottom", a_frac=0.77, both=True)
@@ -205,6 +205,7 @@ def firmware_architecture():
     for x, (eid, text) in zip(cols, pure):
         d.box(eid, x, 400, 210, 110, text, GREEN, 16)
     d.box("ber", 530, 560, 210, 90, "snmp_ber\nBER codec, OIDs,\nCounter64", GREEN, 16)
+    d.box("dhcpopt", 990, 548, 210, 72, "dhcp_option\nask for / read\nDHCP option 224", GREEN, 16)
 
     d.zone("z-hw", 40, 710, 1650, 170, "lib/  hardware layers", ZONE_YELLOW, title_at="bottom")
     d.box("settings", 70, 740, 210, 90, "settings\nLittleFS A/B slots", YELLOW, 16)
@@ -220,7 +221,8 @@ def firmware_architecture():
     d.arrow("svc", "bottom", "agent", "top")
     d.arrow("svc", "bottom", "acl", "top", a_frac=0.8, b_frac=0.3)
     d.arrow("agent", "bottom", "ber", "top")
-    d.arrow("net", "bottom", "ifst", "top")
+    d.arrow("net", "bottom", "ifst", "top", a_frac=0.4, b_frac=0.4)
+    d.arrow("net", "bottom", "dhcpopt", "top", a_frac=0.95, b_frac=0.95, via=[(1210, 300), (1210, 530)])
     d.arrow("reset", "bottom", "power", "top")
     d.arrow("web", "bottom", "webui", "top")
     d.arrow("settings", "top", "codec", "bottom")
@@ -312,11 +314,11 @@ def test_layers():
     layers = [
         ("lnms", "LibreNMS in Docker: definitions, sensors, alert on a real mains cut", VIOLET),
         ("mains", "Mains HIL: a Dirigera smart plug switches real mains", RED),
-        ("hil", "HIL tests (Python): serial menu, SNMP via net-snmp, traps, reboot", ORANGE),
+        ("hil", "HIL (Python): menu, SNMP, traps, web page, DHCP option 224, reboot", ORANGE),
         ("emb", "On-device Unity tests: LittleFS, W5500, GPIO27 sampler", YELLOW),
         ("host", "Host agent vs real net-snmp (WSL): 52 checks, MIB validation", CYAN),
         ("san", "Sanitizers (WSL): every native suite under ASan + UBSan", CYAN),
-        ("native", "Native unit tests (pio test -e native): 261 tests of lib/", GREEN),
+        ("native", "Native unit tests: 351 tests of lib/, frames from the device and Kea", GREEN),
     ]
     for i, (eid, text, bg) in enumerate(layers):
         d.box(eid, 120, 110 + i * 100, 820, 80, text, bg, 18)

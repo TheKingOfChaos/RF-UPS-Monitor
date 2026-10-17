@@ -51,7 +51,7 @@ class SerialMenuTest(unittest.TestCase):
     def test_menu_lists_all_options(self):
         out = self.dev.wait_for_menu()
         for text in ("1. Show status", "2. Use DHCP", "3. Set static IP", "4. SNMP settings",
-                     "5. Access log", "6. Web password", "7. New default web password", "?. Show this menu"):
+                     "5. Access log", "6. Web password", "7. New default web password", "8. Web interface on/off", "?. Show this menu"):
             self.assertIn(text, out)
 
     def test_status_reports_dhcp_lease(self):
@@ -168,8 +168,8 @@ class SerialMenuTest(unittest.TestCase):
         self.assertIn("Input too long", out)
         d.send("", expect=r"sysContact \[.*\]: $")                  # Enter keeps sysName
         d.send("-", expect=r"sysLocation \[.*\]: $")                # '-' clears sysContact
-        d.send('Rack "4", \\shelf', expect=r"Trap destination IP \[.*\]: $")
-        out = d.send("10.10.6.300", expect=r"Trap destination IP \[.*\]: $")
+        d.send('Rack "4", \\shelf', expect=r"Trap destination IP or dhcp \[.*\]: $")
+        out = d.send("10.10.6.300", expect=r"Trap destination IP or dhcp \[.*\]: $")
         self.assertIn("is not a valid IPv4 address", out)
         d.send("10.10.6.99", expect=r"Trap version \(1/2c\) \[.*\]: $")
         out = d.send("3", expect=r"Trap version \(1/2c\) \[.*\]: $")

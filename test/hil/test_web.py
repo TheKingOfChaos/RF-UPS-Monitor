@@ -77,6 +77,7 @@ class WebPageTest(unittest.TestCase):
         if st["mode"] != "DHCP" or st["community"] != "public" or not st["webDefaultPassword"]:
             cls.dev.close()
             raise unittest.SkipTest("device must be in DHCP mode with community public and the default web password")
+        cls.dev.set_web_enabled(True)  # a failed earlier run may have left it off
         cls.ip = st["ip"]
         cls.password = st["webDefaultPassword"]
         cls.pc = local_ip_towards(cls.ip)
@@ -423,6 +424,67 @@ class WebPageTest(unittest.TestCase):
         self.assertEqual("sha384-QWTKZyjpPEjISv5WaRU9OFeRpok6YctnYmDr5pNlyT2bRjXh0JMhjY6hW+ALEwIH", sri)
         # 31 KB from flash must not hold up SNMP
         self.assertLess(raw_get(self.ip, 7400)[1], 0.1)
+
+    # ---- web interface on/off, logo ----
+
+    def port_80_open(self):
+        try:
+            with socket.create_connection((self.ip, 80), timeout=2):
+                return True
+        except OSError:
+            return False
+
+    def test_web_interface_off_from_serial_survives_reboot_and_back_on(self):
+        d = self.dev
+        try:
+            out = d.set_web_enabled(False)
+            self.assertIn("Web interface off", out)
+            self.assertFalse(d.status()["webEnabled"])
+            self.assertFalse(self.port_80_open(), "port 80 still accepts connections")
+            self.assertIsNotNone(raw_get(self.ip, 7700)[0], "SNMP must keep working")
+            d.send("2", expect=r"\(y/n\): $")            # DHCP save = restart
+            d.send("y", expect=r"Rebooting", timeout=10)
+            st = d.reconnect_after_reboot()
+            self.assertFalse(st["webEnabled"], "off must survive a restart")
+            time.sleep(2)
+            self.assertFalse(self.port_80_open())
+        finally:
+            d.wait_for_menu(timeout=10)
+            self.assertIn("Web interface on", d.set_web_enabled(True))
+        self.assertTrue(self.port_80_open())
+        self.logged_in()
+
+    def test_web_page_can_turn_itself_off(self):
+        d = self.dev
+        web = self.logged_in()
+        try:
+            status, _, page = web.post("/disable")
+            self.assertEqual(200, status)
+            self.assertIn("Turn off the web interface?", page)
+            self.assertTrue(self.port_80_open(), "the first step must change nothing")
+            status, _, page = web.post("/disable", confirm="yes")
+            self.assertEqual(200, status)
+            self.assertIn("serial menu option 8", page)
+            time.sleep(1)
+            self.assertFalse(self.port_80_open())
+            d.wait_for_menu(timeout=10)
+            self.assertFalse(d.status()["webEnabled"])
+        finally:
+            d.wait_for_menu(timeout=10)
+            d.set_web_enabled(True)
+        self.assertTrue(self.port_80_open())
+
+    def test_logo_and_favicon(self):
+        status, headers, svg = self.web.request("GET", "/favicon.svg")
+        self.assertEqual(200, status)
+        self.assertEqual("image/svg+xml", headers.get("Content-Type"))
+        self.assertTrue(svg.startswith("<svg xmlns=\"http://www.w3.org/2000/svg\""))
+        with open(os.path.join(os.path.dirname(__file__), "..", "..", "logo", "RF-canopy-RGB-Orange.svg")) as f:
+            logo_path = "".join(re.search(r'<path[^>]*\sd="([^"]+)"', f.read()).group(1).split())
+        self.assertIn('d="%s"' % logo_path, svg, "favicon is not the logo from logo/")
+        _, _, page = self.web.request("GET", "/")
+        self.assertIn('href="/favicon.svg"', page)
+        self.assertEqual(2, page.count('d="%s"' % logo_path), "logo in the navbar and on the login card")
 
     # ---- robustness ----
 

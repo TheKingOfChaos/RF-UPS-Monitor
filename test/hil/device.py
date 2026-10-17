@@ -161,6 +161,10 @@ class Device:
         info["webOwnPassword"] = bool(m and m.group(2))
         m = re.search(r"^Hostname: ([\w-]+) \(DHCP, mDNS ([\w-]+)\.local\)", out, re.MULTILINE)
         info["hostname"] = m.group(1) if m else None
+        m = re.search(r"^Web interface: (on|off)", out, re.MULTILINE)
+        info["webEnabled"] = (m.group(1) == "on") if m else None
+        m = re.search(r"^Trap destination source: (.*?)\r?$", out, re.MULTILINE)
+        info["trapSource"] = m.group(1) if m else None
         m = re.search(r"^Core 0 stack: (\d+) bytes never used", out, re.MULTILINE)
         info["stackNeverUsed"] = int(m.group(1)) if m else None
         m = re.search(r"^MAC: ([0-9A-F:]+)", out, re.MULTILINE)
@@ -186,7 +190,7 @@ class Device:
         self.send(entry(community), expect=r"\(sysName\) \[.*\]: $")
         self.send(entry(sys_name), expect=r"sysContact \[.*\]: $")
         self.send(entry(sys_contact), expect=r"sysLocation \[.*\]: $")
-        self.send(entry(sys_location), expect=r"Trap destination IP \[.*\]: $")
+        self.send(entry(sys_location), expect=r"Trap destination IP or dhcp \[.*\]: $")
         self.send("" if trap_target is None else entry(trap_target), expect=r"Trap version \(1/2c\) \[.*\]: $")
         self.send("" if trap_version is None else trap_version, expect=r"Save\? \(y/n\): $")
         return self.send("y", expect=r"(SNMP settings saved and active|Failed to save)[\s\S]*> $")
@@ -212,6 +216,14 @@ class Device:
         """Menu option 7; returns the menu output (with the new password when confirmed)."""
         self.send("7", expect=r"\(y/n\): $")
         return self.send("y" if confirm else "n", expect=r"(New default web password|Cancelled)[\s\S]*> $")
+
+    def set_web_enabled(self, on):
+        """Menu option 8: switch the web interface on or off (no-op if already so). Returns the output."""
+        st = self.status()
+        if st["webEnabled"] == on:
+            return ""
+        self.send("8", expect=r"Turn it (on|off)\? \(y/n\): $")
+        return self.send("y", expect=r"(Web interface (on|off)|Failed)[\s\S]*> $")
 
     def access_log(self):
         """Menu option 5: list of (ip, event, count) tuples, newest first."""

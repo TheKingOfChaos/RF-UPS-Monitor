@@ -116,12 +116,25 @@ static size_t buildTrap(TrapKind kind, const SnmpDeviceState& state) {
     return 0;
 }
 
+bool snmpTrapTarget(uint8_t out[4]) {
+    if (!currentSettings.trapFromDhcp) {
+        return currentSettings.trapTarget[0] != '\0' && parseIPv4(currentSettings.trapTarget, out);
+    }
+    // Only the ACK for the lease in use counts; a static IP never has one
+    DhcpTrapInfo d = netStatsDhcpTrap();
+    if (!currentSettings.dhcpEnabled || !d.seen || !d.hasOption || memcmp(d.yiaddr, agentAddr, 4) != 0) return false;
+    memcpy(out, d.target, 4);
+    return true;
+}
+
 /**
- * @brief Send an encoded trap to the configured destination, if any
+ * @brief Send an encoded trap to the destination in use, if any
  */
 static void sendTrap(size_t len, const char* what) {
     uint8_t target[4];
-    if (currentSettings.trapTarget[0] == '\0' || !parseIPv4(currentSettings.trapTarget, target)) return;
+    if (!snmpTrapTarget(target)) return;
+    char targetText[16];
+    snprintf(targetText, sizeof(targetText), "%u.%u.%u.%u", target[0], target[1], target[2], target[3]);
     if (len == 0) {
         serviceStats.trapsFailed++;
         return;
@@ -131,10 +144,10 @@ static void sendTrap(size_t len, const char* what) {
     if (ok) {
         serviceStats.trapsSent++;
         Serial.printf("SNMP %s trap %s sent to %s\n", currentSettings.trapVersion == TRAP_VERSION_V1 ? "v1" : "v2c",
-                      what, currentSettings.trapTarget);
+                      what, targetText);
     } else {
         serviceStats.trapsFailed++;
-        Serial.printf("SNMP trap %s to %s failed\n", what, currentSettings.trapTarget);
+        Serial.printf("SNMP trap %s to %s failed\n", what, targetText);
     }
 }
 

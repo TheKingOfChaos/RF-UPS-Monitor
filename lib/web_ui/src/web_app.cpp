@@ -4,16 +4,17 @@
 #include <netconfig.h>
 #include <settings_codec.h>
 #include "bootstrap_css.h"
+#include "logo_svg.h"
 
 // Headers on every page. The pages have no scripts at all; the policy keeps it that way.
-// Bootstrap's form controls use small data: SVG images, hence img-src data:.
+// Bootstrap's form controls use small data: SVG images, the favicon is our own: img-src 'self' data:.
 static const char COMMON_HEADERS[] =
     "Content-Type: text/html; charset=utf-8\r\n"
     "Cache-Control: no-store\r\n"
     "X-Frame-Options: DENY\r\n"
     "X-Content-Type-Options: nosniff\r\n"
     "Referrer-Policy: no-referrer\r\n"
-    "Content-Security-Policy: default-src 'none'; style-src 'self' 'unsafe-inline'; img-src data:; "
+    "Content-Security-Policy: default-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
     "form-action 'self'; frame-ancestors 'none'\r\n"
     "Connection: close\r\n";
 
@@ -21,10 +22,13 @@ static void pageStart(TextBuffer& b, const char* title) {
     b.add("<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">"
           "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>");
     b.addEscaped(title);
-    b.add("</title><link rel=\"stylesheet\" href=\"" BOOTSTRAP_CSS_PATH "\">"
+    b.add("</title><link rel=\"icon\" type=\"image/svg+xml\" href=\"" LOGO_FAVICON_PATH "\">"
+          "<link rel=\"stylesheet\" href=\"" BOOTSTRAP_CSS_PATH "\">"
           "<style>body{background:#f3f5f8}.container{max-width:1000px}</style></head><body>"
           "<nav class=\"navbar navbar-dark bg-dark mb-4\"><div class=\"container\">"
-          "<span class=\"navbar-brand fw-semibold\">RF-UPS-Monitor</span>");
+          "<span class=\"navbar-brand fw-semibold d-flex align-items-center\">"
+          "<svg class=\"me-2\" width=\"44\" height=\"28\" viewBox=\"" LOGO_VIEWBOX "\" aria-hidden=\"true\">"
+          "<path fill=\"" LOGO_COLOR "\" d=\"" LOGO_PATH "\"/></svg>RF-UPS-Monitor</span>");
 }
 
 /// Close the navbar and open the page container
@@ -142,7 +146,10 @@ const char* WebApp::loginPage(int code, const char* reason, const char* text, si
     pageStart(b, "RF-UPS-Monitor login");
     navEnd(b);
     b.add("<div class=\"row justify-content-center\"><div class=\"col-sm-9 col-md-6 col-lg-4\">"
-          "<div class=\"card shadow-sm\"><div class=\"card-body p-4\"><h1 class=\"h4 mb-3\">Log in</h1>");
+          "<div class=\"card shadow-sm\"><div class=\"card-body p-4\">"
+          "<div class=\"text-center mb-3\"><svg width=\"160\" height=\"101\" viewBox=\"" LOGO_VIEWBOX "\" "
+          "role=\"img\" aria-label=\"RF logo\"><path fill=\"" LOGO_COLOR "\" d=\"" LOGO_PATH "\"/></svg></div>"
+          "<h1 class=\"h4 mb-3\">Log in</h1>");
     message(b, text, true);
     b.add("<form method=\"post\" action=\"/login\">"
           "<div class=\"mb-3\"><label class=\"form-label\" for=\"f-user\">User</label>"
@@ -253,6 +260,14 @@ const char* WebApp::mainPage(int code, const char* reason, size_t slot, WebBacke
           "<form method=\"post\" action=\"/reboot\" class=\"m-0\">");
     csrfField(b, csrf);
     b.add("<button class=\"btn btn-outline-danger btn-sm\" type=\"submit\">Restart device</button></form></div></div>");
+
+    b.add("<div class=\"card shadow-sm mt-4\"><div class=\"card-body d-flex justify-content-between "
+          "align-items-center gap-3\"><span>Web interface<br><span class=\"form-text\">Off closes this page; "
+          "serial menu option 8 turns it on again.</span></span>"
+          "<form method=\"post\" action=\"/disable\" class=\"m-0\">");
+    csrfField(b, csrf);
+    b.add("<button class=\"btn btn-outline-secondary btn-sm text-nowrap\" type=\"submit\">Turn off&hellip;</button>"
+          "</form></div></div>");
 
     // Right column: settings
     b.add("</div><div class=\"col-lg-7\">");
@@ -398,6 +413,50 @@ const char* WebApp::hostname(const HttpRequest& req, size_t slot, WebBackend& ba
     return mainPage(200, "OK", slot, backend, "Hostname saved and active.", false, len);
 }
 
+const char* WebApp::disable(const HttpRequest& req, size_t slot, WebBackend& backend, size_t& len) {
+    char confirm[8];
+    if (!formValue(req.body(), req.bodyLength(), "confirm", confirm, sizeof(confirm)) || strcmp(confirm, "yes") != 0) {
+        // First step: say what happens and ask again
+        TextBuffer b(_body, sizeof(_body));
+        pageStart(b, "Turn off the web interface");
+        navEnd(b);
+        b.add("<div class=\"row justify-content-center\"><div class=\"col-md-8 col-lg-6\"><div class=\"card "
+              "shadow-sm border-warning\"><div class=\"card-body p-4\"><h1 class=\"h4\">Turn off the web interface?"
+              "</h1><p>The device stops serving this page (TCP port 80 closes) and every browser is logged out. "
+              "SNMP keeps working. The web interface can only be turned on again from the serial menu "
+              "(USB, option 8).</p><form method=\"post\" action=\"/disable\" class=\"d-flex gap-2\">");
+        csrfField(b, _sessions.csrf(slot));
+        b.add("<input type=\"hidden\" name=\"confirm\" value=\"yes\">"
+              "<button class=\"btn btn-danger\" type=\"submit\">Turn off</button>"
+              "<a class=\"btn btn-outline-secondary\" href=\"/\">Cancel</a></form></div></div></div></div>");
+        pageEnd(b);
+        return respond(200, "OK", nullptr, len);
+    }
+    if (!backend.disableWeb()) {
+        return mainPage(500, "Internal Server Error", slot, backend, "Saving failed, nothing changed.", true, len);
+    }
+    _sessions.clear();
+    return notice(200, "OK", "Web interface off",
+                  "The web interface is now off. Turn it on again with serial menu option 8.", len);
+}
+
+const char* WebApp::favicon(size_t& len) {
+    static const char SVG[] = LOGO_SVG_FILE;
+    TextBuffer out(_response, sizeof(_response));
+    out.add("HTTP/1.1 200 OK\r\n"
+            "Content-Type: image/svg+xml\r\n"
+            "Cache-Control: public, max-age=86400\r\n"
+            "X-Content-Type-Options: nosniff\r\n"
+            "Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'\r\n"
+            "Connection: close\r\n"
+            "Content-Length: ");
+    out.addUnsigned((uint32_t)(sizeof(SVG) - 1));
+    out.add("\r\n\r\n");
+    out.add(SVG);
+    len = out.length();
+    return _response;
+}
+
 const char* WebApp::handle(const HttpRequest& req, uint32_t sourceIP, uint32_t nowMs, WebBackend& backend,
                            size_t& len) {
     _staticBody = nullptr;
@@ -422,6 +481,10 @@ const char* WebApp::handle(const HttpRequest& req, uint32_t sourceIP, uint32_t n
         if (!get) return notice(405, "Method Not Allowed", "Not allowed", "Use GET for this file.", len);
         return stylesheet(len);  // no login needed: public CSS
     }
+    if (strcmp(path, LOGO_FAVICON_PATH) == 0) {
+        if (!get) return notice(405, "Method Not Allowed", "Not allowed", "Use GET for this file.", len);
+        return favicon(len);  // no login needed: the logo
+    }
 
     if (strcmp(path, "/") == 0) {
         if (!get) return notice(405, "Method Not Allowed", "Not allowed", "Use GET for this page.", len);
@@ -436,7 +499,7 @@ const char* WebApp::handle(const HttpRequest& req, uint32_t sourceIP, uint32_t n
 
     bool action = strcmp(path, "/logout") == 0 || strcmp(path, "/network") == 0 ||
                   strcmp(path, "/community") == 0 || strcmp(path, "/reboot") == 0 ||
-                  strcmp(path, "/hostname") == 0;
+                  strcmp(path, "/hostname") == 0 || strcmp(path, "/disable") == 0;
     if (!action) return notice(404, "Not Found", "Not found", "There is no such page.", len);
     if (!post) return notice(405, "Method Not Allowed", "Not allowed", "Use the buttons on the start page.", len);
     if (slot < 0) {
@@ -455,6 +518,7 @@ const char* WebApp::handle(const HttpRequest& req, uint32_t sourceIP, uint32_t n
     if (strcmp(path, "/network") == 0) return network(req, (size_t)slot, backend, len);
     if (strcmp(path, "/community") == 0) return community(req, (size_t)slot, backend, len);
     if (strcmp(path, "/hostname") == 0) return hostname(req, (size_t)slot, backend, len);
+    if (strcmp(path, "/disable") == 0) return disable(req, (size_t)slot, backend, len);
     backend.requestReboot();
     return notice(200, "OK", "Restarting", "The device restarts now. Log in again in a few seconds.", len);
 }

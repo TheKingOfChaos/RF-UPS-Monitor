@@ -24,3 +24,6 @@ void hostnameApply();
 
 /// The hostname in use (valid, at most 32 characters)
 const char* hostnameCurrent();
+
+/// Announce (or stop announcing) the web page over mDNS as _http._tcp; follows the web on/off setting
+void hostnameAdvertiseWeb(bool on);

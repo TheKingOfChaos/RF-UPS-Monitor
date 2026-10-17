@@ -51,6 +51,8 @@ struct Settings {
     char sysLocation[SYS_TEXT_MAX_LENGTH + 1];  ///< SNMP sysLocation, 0-63 printable characters
     char trapTarget[16];  ///< SNMP trap destination (IPv4, UDP 162), empty = traps off
     uint8_t trapVersion;  ///< TRAP_VERSION_V1 or TRAP_VERSION_V2C
+    bool trapFromDhcp;    ///< true: trap destination from DHCP option 224 instead of trapTarget
+    bool webEnabled;      ///< false: no web server on TCP 80 (serial menu only)
     char webPassword[SETTINGS_WEB_PASSWORD_LEN + 1];  ///< Salted hash of the web password, empty = device default
     uint32_t version;     ///< Layout version, must equal SETTINGS_VERSION
     uint32_t sequence;    ///< Save counter, newest valid copy wins on load
@@ -103,7 +105,7 @@ size_t settingsToJson(const Settings& s, char* buf, size_t size);
  * @brief Parse and validate a settings document
  *
  * Unknown fields are ignored. "sequence", "sysName", "sysContact",
- * "sysLocation", "trapTarget", "trapVersion" and "webPassword" are optional and take their
+ * "sysLocation", "trapTarget", "trapVersion", "trapFromDhcp", "webEnabled" and "webPassword" are optional and take their
  * defaults, so files written by older firmware still load.
  *
  * @param json NUL-terminated JSON text

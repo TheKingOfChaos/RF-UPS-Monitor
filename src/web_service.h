@@ -27,6 +27,21 @@ void webBegin();
 /// Serve the web page; call from loop() on core 0
 void webPoll();
 
+/// true while the web interface is switched on (setting webEnabled)
+bool webEnabled();
+
+/// true while TCP port 80 is open (on, and not still waiting for the port)
+bool webListening();
+
+/**
+ * @brief Switch the web interface on or off (serial menu option 8) and save it
+ *
+ * Off closes TCP port 80 (after a response in progress), ends every session
+ * and stops announcing the page over mDNS. A factory reset switches it on.
+ * @return false if saving failed (nothing changed then)
+ */
+bool webSetEnabled(bool on);
+
 /// The device default password (shown on the serial status screen)
 const char* webDefaultPassword();
 

@@ -172,6 +172,7 @@ void setup() {
     // Bring up Ethernet and the SNMP agent
     if (startEthernet()) {
         netStatsBegin(eth.getNetIf());
+        netStatsRequestDhcpTrapTarget(currentSettings.trapFromDhcp);  // before the first DISCOVER
         snmpBegin();
         webBegin();
     }

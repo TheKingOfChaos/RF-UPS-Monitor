@@ -103,6 +103,7 @@ $env:RFUPS_STATIC_MASK = "255.255.0.0" # optional, default 255.255.0.0
 $env:RFUPS_STATIC_GW = "10.10.0.1"     # optional, default: current DHCP gateway
 $env:RFUPS_MANUAL_MAINS = "1"          # optional, mains off/on tests where you switch mains when asked
 $env:RFUPS_MANUAL_BUTTON = "1"         # optional, interactive factory reset button test
+$env:RFUPS_DHCP_TRAP_TARGET = "10.10.6.65" # optional: the address your DHCP server sends in option 224
 ```
 
 ### Mains tests with a smart plug

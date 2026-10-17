@@ -339,7 +339,7 @@ def test_layers():
 def settings_storage():
     d = Diagram("settings-storage", "RF-UPS-Monitor: power-cut safe settings (A/B slots)")
     d.text(40, 90, "Saving", size=24)
-    d.box("new", 40, 140, 220, 90, "New settings\n(menu option 2, 3, 4)", BLUE, 16)
+    d.box("new", 40, 140, 220, 90, "New settings\n(serial menu or web page)", BLUE, 16)
     d.box("codec", 310, 140, 220, 90, "settings_codec\nvalidate, to JSON", GREEN, 16)
     d.box("write", 580, 135, 230, 100, "Write the slot\nnot in use,\nsequence + 1", YELLOW, 16)
     d.box("verify", 860, 140, 220, 90, "Read back\nand validate", YELLOW, 16)
@@ -369,6 +369,103 @@ def settings_storage():
     d.save()
 
 
+def web_request_flow():
+    d = Diagram("web-request-flow", "RF-UPS-Monitor: how a web page request is handled")
+    d.box("conn", 40, 300, 200, 90, "Browser connects\nTCP port 80", CYAN, 18)
+    d.box("read", 290, 285, 220, 120, "Read the request\nnon-blocking,\nat most 2 KB, 5 s", BLUE, 16)
+    d.box("closed", 290, 80, 220, 100, "Closed, or\n400 / 413", RED, 18)
+    d.box("path", 560, 280, 180, 130, "path?", YELLOW, 18, shape="diamond")
+    d.box("static", 560, 80, 260, 100, "Logo and stylesheet\n(gzip, from flash)\nsent without login", GREEN, 16)
+    d.arrow("conn", "right", "read", "left")
+    d.arrow("read", "top", "closed", "bottom", "too slow, malformed\nor too large")
+    d.arrow("read", "right", "path", "left")
+    d.arrow("path", "top", "static", "bottom", "/favicon.svg\n/static/...", b_frac=0.35)
+
+    # GET /
+    d.box("getdia", 900, 190, 200, 120, "session\ncookie valid?", YELLOW, 16, shape="diamond")
+    d.box("login", 900, 50, 200, 80, "Login page", BLUE, 18)
+    d.box("page", 1170, 205, 300, 90, "Status and settings page\nforms carry the CSRF token", GREEN, 16)
+    d.arrow("path", "right", "getdia", "left", "GET /", a_frac=0.2, via=[(820, 306), (820, 250)])
+    d.arrow("getdia", "top", "login", "bottom", "no")
+    d.arrow("getdia", "right", "page", "left", "yes")
+
+    # POST /login
+    d.box("lock", 900, 380, 200, 120, "login\nlocked?", YELLOW, 18, shape="diamond")
+    d.box("locked", 900, 560, 200, 90, "429\naccess log", RED, 16)
+    d.box("check", 1170, 385, 300, 110, "Check the password\nsalted SHA-256, 2000 rounds,\nin steps: SNMP keeps answering",
+          BLUE, 16)
+    d.box("ok", 1640, 380, 180, 120, "right?", YELLOW, 18, shape="diamond")
+    d.box("session", 1630, 190, 300, 120, "New session: cookie sid\nHttpOnly, SameSite=Strict\nmax 2, ends after 15 min idle",
+          GREEN, 16)
+    d.box("wrong", 1620, 560, 220, 90, "401, access log\n5 in a row: 30 s lock", RED, 16)
+    d.arrow("path", "right", "lock", "left", "POST /login", a_frac=0.8, via=[(820, 384), (820, 440)])
+    d.arrow("lock", "bottom", "locked", "top", "yes")
+    d.arrow("lock", "right", "check", "left", "no")
+    d.arrow("check", "right", "ok", "left")
+    d.arrow("ok", "top", "session", "bottom", "yes", b_frac=0.35)
+    d.arrow("ok", "bottom", "wrong", "top", "no")
+    d.arrow("session", "left", "page", "right", "redirect\nto /")
+
+    # Actions
+    d.box("post", 900, 740, 240, 110, "POST /network /ipv6\n/hostname /community\n/reboot /disable", BLUE, 16)
+    d.box("csrf", 1200, 730, 200, 130, "session and\nCSRF token\nvalid?", YELLOW, 16, shape="diamond")
+    d.box("forbid", 1200, 920, 200, 90, "403: Not logged in /\nForm expired", RED, 16)
+    d.box("valid", 1470, 735, 180, 120, "fields\nvalid?", YELLOW, 18, shape="diamond")
+    d.box("bad", 1460, 920, 200, 90, "400: reason on\nthe page, nothing saved", RED, 16)
+    d.box("save", 1720, 730, 300, 130, "Save to flash\ncommunity, hostname: active now\nnetwork, IPv6, reboot: restart\n"
+          "off: port 80 closed", GREEN, 16)
+    d.arrow("path", "bottom", "post", "left", "POST action", via=[(650, 795)])
+    d.arrow("post", "right", "csrf", "left")
+    d.arrow("csrf", "bottom", "forbid", "top", "no")
+    d.arrow("csrf", "right", "valid", "left", "yes")
+    d.arrow("valid", "bottom", "bad", "top", "no")
+    d.arrow("valid", "right", "save", "left", "yes")
+    d.text(40, 560, "One connection at a time, never\nblocking: SNMP keeps answering\nin between.\n\n"
+                    "Plain HTTP: use the page on a\ntrusted management network.", size=16, color="#495057")
+    d.save()
+
+
+def network_addresses():
+    d = Diagram("network-addresses", "RF-UPS-Monitor: where the addresses come from (dual stack)")
+    d.zone("z-v4", 20, 80, 1180, 380, "IPv4", ZONE_BLUE)
+    d.box("dhcpsrv", 40, 180, 300, 90, "DHCP server\non the LAN", GRAY, 18)
+    d.box("dhcp", 400, 160, 320, 130, "DHCP (default)\naddress, mask, gateway, DNS;\nsends the hostname (option 12)",
+          BLUE, 16)
+    d.box("static4", 400, 330, 320, 100, "Static IPv4\nserial menu 3 or web page\n(restart)", BLUE, 16)
+    d.box("trap", 860, 120, 300, 100, "Trap destination\nfixed (menu 4) or\nDHCP option 224", ORANGE, 16)
+    d.box("ip4", 860, 270, 300, 100, "IPv4 address\nDHCP or static", GREEN, 18)
+    d.arrow("dhcpsrv", "right", "dhcp", "left")
+    d.arrow("dhcp", "right", "trap", "left", "option 224", a_frac=0.25)
+    d.arrow("dhcp", "right", "ip4", "left", a_frac=0.75, b_frac=0.3)
+    d.arrow("static4", "right", "ip4", "left", "or", b_frac=0.75)
+
+    d.zone("z-v6", 20, 490, 1180, 460, "IPv6", ZONE_GREEN)
+    d.box("ra", 40, 660, 300, 100, "IPv6 router\nrouter advertisements", GRAY, 18)
+    d.box("ll", 400, 540, 320, 90, "Link-local fe80::\nfrom the MAC (EUI-64), always", BLUE, 16)
+    d.box("slaac", 400, 665, 320, 90, "SLAAC\none address per advertised /64", BLUE, 16)
+    d.box("static6", 400, 790, 320, 100, "Static IPv6 (/64)\nserial menu 9 or web page\n(restart)", BLUE, 16)
+    d.box("ip6", 860, 610, 300, 120, "IPv6 addresses\nup to 4, each passes\nduplicate address detection",
+          GREEN, 16)
+    d.box("gw", 860, 790, 300, 110, "IPv6 gateway\nthe static one if set,\nelse advertised routers",
+          YELLOW, 16)
+    d.arrow("ra", "right", "slaac", "left")
+    d.arrow("ll", "right", "ip6", "left", b_frac=0.2)
+    d.arrow("slaac", "right", "ip6", "left")
+    d.arrow("static6", "right", "ip6", "left", "next to SLAAC", a_frac=0.3, b_frac=0.8)
+    d.arrow("static6", "right", "gw", "left", "gateway", a_frac=0.75, b_frac=0.6)
+    d.arrow("ra", "bottom", "gw", "bottom", "routers", via=[(190, 930), (1010, 930)])
+
+    d.box("traps", 1260, 120, 320, 100, "Traps (UDP 162)\nIPv4 only", ORANGE, 18)
+    d.box("svc", 1260, 270, 320, 480, "Services on every address\n\nSNMP, UDP 161\n\nweb page, TCP 80\n\n"
+          "mDNS name.local\n(A and AAAA)\n\nping", VIOLET, 18)
+    d.arrow("trap", "right", "traps", "left")
+    d.arrow("ip4", "right", "svc", "left", b_frac=0.08)
+    d.arrow("ip6", "right", "svc", "left", b_frac=0.82)
+    d.text(1260, 790, "IPv4 and IPv6 run side by side.\nRate limits and the access log\nwork per full source address.",
+           size=16, color="#495057")
+    d.save()
+
+
 if __name__ == "__main__":
     system_overview()
     firmware_architecture()
@@ -376,3 +473,5 @@ if __name__ == "__main__":
     mains_flow()
     test_layers()
     settings_storage()
+    web_request_flow()
+    network_addresses()

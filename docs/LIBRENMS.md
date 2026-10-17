@@ -45,6 +45,16 @@ If the device was added before the files were copied, rediscover it (device → 
 
 LibreNMS's daily update and `validate.php` may complain about these extra files, since they are not part of the LibreNMS repository. Keep a copy, and copy them again if an update removes them.
 
+### IPv6
+
+The device answers SNMP over IPv6 too (see the README's IPv6 section). To poll it over IPv6, add it with the IPv6 transport:
+
+```bash
+./lnms device:add --v2c -c <community> -t udp6 <device IPv6 address>
+```
+
+or choose transport `udp6` in Devices → Add Device. The firmware side is tested with net-snmp over IPv6 (`snmpget udp6:[...]`); LibreNMS itself has not been tried over IPv6 yet: the Docker test setup below runs in WSL with NAT networking, which has no IPv6 route to the LAN. A static IPv6 address (serial menu option 9) gives the device an address that does not change with the router's prefix, which suits a monitoring system.
+
 ## Traps
 
 Set the device's trap destination (menu option 4) to the LibreNMS server and the trap version to `2c` (or enter `dhcp` and let the DHCP server hand out the LibreNMS address in option 224, see [MIB.md](MIB.md#trap-destination-from-dhcp)), and set up snmptrapd on the server as described in the LibreNMS documentation (SNMP Trap Handler). LibreNMS has no trap handler for the RF-UPS-MONITOR-MIB notifications, so it logs them as unhandled traps: the device's event log shows an entry of type `trap` with the message `RF-UPS-MONITOR-MIB::mainsPowerLost` (or `...Restored`), checked with LibreNMS 26.9.1. The sensors change on the next poll.

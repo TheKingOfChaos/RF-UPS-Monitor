@@ -10,6 +10,8 @@ Excalidraw diagrams of the project. Each `.excalidraw` file opens and edits at [
 | [mains-flow](mains-flow.svg) | GPIO27 sampling and debouncing on core 1, seqlock, status/SNMP/traps on core 0, LibreNMS; the reset button path | README, mains monitoring |
 | [settings-storage](settings-storage.svg) | Saving to the A/B slots and choosing a copy at boot | README, settings storage |
 | [test-layers](test-layers.svg) | Native, sanitizer, net-snmp, on-device, HIL, mains and LibreNMS tests, and what CI runs | docs/TESTING.md |
+| [web-request-flow](web-request-flow.svg) | Web page: request reading, login and lockout, sessions, CSRF check, validation, save | README, web page |
+| [network-addresses](network-addresses.svg) | Where the IPv4 and IPv6 addresses, the IPv6 gateway and the trap destination come from | README, IPv6 |
 
 ## Changing a diagram
 

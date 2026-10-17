@@ -255,6 +255,8 @@ Security:
 - Settings changed on the page are saved to flash like those from the serial menu, and are written to the serial log (`Web: network settings saved ...`).
 - The server handles one connection at a time without ever blocking: requests are read as they arrive (at most 2 KB), responses are written as fast as the network takes them, and a connection that does not finish within 5 seconds is closed. SNMP keeps answering in between.
 
+![Web page: a request is read without blocking, then served, logged in, or checked for session and CSRF token before anything is saved](docs/diagrams/web-request-flow.svg)
+
 Pages and forms, for scripts (e.g. `curl` with a cookie jar). Every POST except `/login` needs the session cookie `sid` and the form field `csrf` with the token from the page (`name="csrf" value="..."`); forms are `application/x-www-form-urlencoded`.
 
 | Path | Method | Fields | Does |
@@ -296,9 +298,12 @@ A sysName set with older firmware may contain spaces or other characters; it is 
 
 The device runs IPv4 and IPv6 side by side (dual stack):
 
+![Addresses: IPv4 from DHCP or static, IPv6 link-local, SLAAC and static, the IPv6 gateway, and the trap destination](docs/diagrams/network-addresses.svg)
+
+
 - **Addresses:** a link-local address (`fe80::`, from the MAC as EUI-64) always, a global or ULA address from the router's advertisement (SLAAC) when the LAN has an IPv6 router, and optionally a static address (below). The status screen lists them (`IPv6: FD16:D833:4F0E:3ECE:1CB2:CFFF:FE4E:A22C`), the web page shows them in the status table.
 - **Static address:** serial menu option 9 or the web page set one static IPv6 address (always /64) and an optional gateway. It is added next to SLAAC, not instead of it, and goes through duplicate address detection: if another host already uses it, the status screen says `(DUPLICATE: another host uses it, not in use)`. With a gateway set, all off-link IPv6 traffic goes through it (it overrides routers from advertisements); without one, the advertised routers are used. Takes effect after the restart that saving triggers.
-- **SNMP** answers over IPv6 on UDP 161 like over IPv4 (replies up to 1452 bytes, one Ethernet frame: the device does not fragment IPv6 packets), e.g. `snmpget -v2c -c public udp6:[fd16:d833:4f0e:3ece:1cb2:cfff:fe4e:a22c] 1.3.6.1.2.1.1.1.0`. LibreNMS can poll the device by its IPv6 address.
+- **SNMP** answers over IPv6 on UDP 161 like over IPv4 (replies up to 1452 bytes, one Ethernet frame: the device does not fragment IPv6 packets), e.g. `snmpget -v2c -c public udp6:[fd16:d833:4f0e:3ece:1cb2:cfff:fe4e:a22c] 1.3.6.1.2.1.1.1.0`. LibreNMS can add it with transport `udp6` (see [docs/LIBRENMS.md](docs/LIBRENMS.md#ipv6)); polling over IPv6 is tested with net-snmp, not yet in a running LibreNMS.
 - **Web page:** `http://[<IPv6 address>]/`; **mDNS:** `rf-ups-monitor.local` resolves to the IPv6 address too.
 - **Rate limiting and access log:** per full source address, as for IPv4; the access log shows the address (`fd16:d833:4f0e:3ece:9000:9aaa:490a:3189`). Not per /64: on a LAN every host shares one /64, and a manager's trust must not pass to its neighbours. A host that rotates through many IPv6 addresses is held by the shared limit for untrusted sources, like faked IPv4 addresses.
 - **Still IPv4 only:** traps (the trap destination is an IPv4 address; v1 traps cannot carry an IPv6 agent address anyway), DHCP option 224, and the IP and IF tables in the MIB stay as they are. There is no DHCPv6 address assignment.

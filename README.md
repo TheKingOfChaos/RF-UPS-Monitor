@@ -325,7 +325,7 @@ The input must be a clean DC level from an isolated circuit (optocoupler with fi
 
 1. Press and hold the button on GPIO22. The onboard LED blinks slowly (2 Hz) while it is held, and the serial log prints `Factory reset button pressed`.
 2. After 10 seconds the LED blinks fast, and the log prints `Factory reset after 10000 ms hold`. You can release the button.
-3. Settings return to defaults: DHCP on, community `public`, sysName `rf-ups-monitor`, empty sysContact and sysLocation, no trap destination (fixed), the web interface on, and the web page back on the device default password (the default password itself stays the same).
+3. Settings return to defaults: DHCP on (stored static IP back to `192.168.1.100`), no static IPv6 address, community `public`, sysName `rf-ups-monitor`, empty sysContact and sysLocation, no trap destination (fixed), the web interface on, and the web page back on the device default password (the default password itself stays the same).
 4. The device reboots, well within 2 seconds of the trigger.
 
 Releasing the button earlier cancels the reset (`released after ... ms, no reset`). The device keeps working normally while the button is held: SNMP answers, the menu responds and mains monitoring continues. A button held down while the device starts is ignored until it has been released once, so a stuck button cannot cause a reset loop.
@@ -338,9 +338,9 @@ Settings are stored as JSON on the Pico's internal flash (LittleFS) in two copie
 
 ```json
 {"community":"public","dhcpEnabled":true,"staticIP":"192.168.1.100",
- "subnetMask":"255.255.255.0","gateway":"192.168.1.1","sysName":"rf-ups-monitor",
- "sysContact":"","sysLocation":"","trapTarget":"","trapVersion":2,"webPassword":"",
- "version":1,"sequence":7}
+ "subnetMask":"255.255.255.0","gateway":"192.168.1.1","ipv6Address":"","ipv6Gateway":"",
+ "sysName":"rf-ups-monitor","sysContact":"","sysLocation":"","trapTarget":"",
+ "trapVersion":2,"trapFromDhcp":false,"webEnabled":true,"webPassword":"","version":1,"sequence":7}
 ```
 
 | Field | Meaning |
@@ -355,6 +355,7 @@ Settings are stored as JSON on the Pico's internal flash (LittleFS) in two copie
 | `webPassword` | Salted SHA-256 hash of the web password (`<salt>$<hash>`), empty = device default password; optional |
 | `dhcpEnabled` | `true` = DHCP, `false` = use the static fields |
 | `staticIP`, `subnetMask`, `gateway` | Static configuration, validated when DHCP is off |
+| `ipv6Address`, `ipv6Gateway` | Static IPv6 address (/64) and gateway, short form, empty = none; independent of `dhcpEnabled`; optional |
 | `version` | Layout version, currently 1 |
 | `sequence` | Save counter |
 
@@ -393,6 +394,8 @@ Setup, coverage and how to add tests: [docs/TESTING.md](docs/TESTING.md). Rules 
 
 ```
 include/pins.h              GPIO assignments
+include/version.h           Firmware version (FIRMWARE_VERSION)
+include/lwip_hooks.h        lwIP hook: static IPv6 gateway as next hop
 src/main.cpp                Boot, Ethernet bring-up, main loop
 src/cli.cpp                 Serial menu
 src/factory_reset.cpp       Reset button on core 1, reset on core 0
@@ -402,7 +405,7 @@ src/hostname.cpp            Hostname for DHCP and mDNS (name.local), applied wit
 src/source_key.h            Source address -> rate-limit key (full IPv4 or IPv6 address)
 src/ipv6_static.cpp         Static IPv6 address and gateway (lwIP hook in include/lwip_hooks.h)
 src/diag.cpp                Hang diagnosis build (-DRFUPS_DIAG): watchdog, crash and panic capture
-lib/netconfig/              IPv4 parsing and validation (pure C++)
+lib/netconfig/              IPv4/IPv6 parsing, formatting and validation, hostnames (pure C++)
 lib/settings_codec/         Settings JSON, validation, A/B selection (pure C++)
 lib/settings/               LittleFS storage on top of settings_codec
 lib/power_monitor/          Mains input debouncer, reset button logic (pure C++)
@@ -430,6 +433,7 @@ scripts/host_agent_check.sh Agent against real net-snmp tools, no hardware (run 
 docs/TESTING.md             Test guide
 docs/MIB.md                 SNMP objects, traps, errors, limits
 docs/LIBRENMS.md            Adding the device to LibreNMS
+docs/diagrams/              Excalidraw diagrams and their SVGs (make_diagrams.py)
 CHANGELOG.md                Release history
 .github/workflows/tests.yml CI: unit tests, sanitizers, net-snmp check, firmware build
 ```

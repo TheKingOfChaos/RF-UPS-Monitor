@@ -4,7 +4,16 @@ A mains power monitor built on a Raspberry Pi Pico with a W5500 Ethernet module.
 
 Current version: **1.0.2** (see [CHANGELOG.md](CHANGELOG.md)).
 
+## Overview
+
 ![System overview: mains detector, Pico with W5500, PC and network](docs/diagrams/system-overview.svg)
+
+- **Mains side:** an isolated detector (optocoupler with filtering) turns mains presence into a clean 3.3 V level on GPIO27. In the test setup an IKEA smart plug in front of it lets the tests switch mains off and on.
+- **Board:** the Pico's core 1 samples GPIO27 and the reset button (GPIO22) every millisecond; core 0 runs the network, the SNMP agent and the serial menu. Settings live in the Pico's flash in two copies, and the W5500 provides 10/100 Ethernet over SPI.
+- **Network:** the device gets its address by DHCP (or a static IP), answers SNMP v1/v2c on UDP 161 for LibreNMS or net-snmp, and sends traps on UDP 162.
+- **PC:** the USB serial port carries the configuration menu and the hardware-in-the-loop tests.
+
+More diagrams (firmware architecture, SNMP request flow, mains flow, settings, tests) are in [docs/diagrams/](docs/diagrams/README.md).
 
 ## Status
 

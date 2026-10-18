@@ -1,0 +1,4 @@
+(fp_lib_table
+	(version 7)
+	(lib (name "PicoPoE_Carrier")(type "KiCad")(uri "${KIPRJMOD}/PicoPoE_Carrier.pretty")(options "")(descr "Project footprints"))
+)

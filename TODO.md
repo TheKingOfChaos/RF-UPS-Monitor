@@ -190,6 +190,13 @@ An item is only ticked when it is implemented **and** its tests exist and pass (
 - [ ] Check that the DHCP server really shows the name (needs access to the router's lease list)
 - [ ] SNMP latency spikes: on 2.0.1/2.1.0 about 3 % of requests took 50-97 ms (median 3.7 ms); on 2.3.0 (8 KB stacks, IPv6) 600 requests: median 3.8 ms, max 42.5 ms, none over 50 ms. One 116 ms sample in a full HIL run (not reproduced in 3 reruns); keep watching
 
+## 14. Hardware: carrier board (`hardware/pico-poe-mains-carrier`)
+- [x] Carrier PCB for the W5500-EVB-Pico-PoE: isolated mains detector on GP27, LEDs, TMP1075; KiCad 10, ERC/DRC, fab files (documented in the README)
+- [ ] Order and assemble the first boards; run the mains HIL tests (Dirigera) on the carrier
+- [ ] Read the TMP1075 (I2C0, GP4/GP5, 0x48) in the firmware, e.g. as a second temperature object, and keep the RP2040 sensor
+- [ ] Factory reset button: nothing is on GP22. The module's buttons are BOOTSEL and RUN (WIZnet model: SW1, SW2); RUN resets the chip and cannot be read. Options: accept a 10 s BOOTSEL hold in the firmware (Arduino-Pico `BOOTSEL`, read every ~100 ms: each read takes the flash offline and pauses the other core briefly, so check SNMP latency), or add a GP22 button to the carrier (`tools/generate.py`). Decided 2026-10-18: document only for now
+- [ ] Mains loss timing: the carrier's RC delays the loss by about 30-50 ms against the 10 ms in `.clinerules`; measure it on the board and decide (smaller RC, or change the requirement)
+
 ## Notes
 - SNMP must be v1 and v2c (no v3) and our own code; networking may use libraries
 - Memory limits: 70 % flash, 50 % RAM (2.3.0: 14.2 % / 41 %, built with -Os)

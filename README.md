@@ -48,16 +48,33 @@ See [TODO.md](TODO.md) for the detailed plan.
 | [docs/LIBRENMS.md](docs/LIBRENMS.md) | Monitoring the device with LibreNMS: install, sensors, alerts, traps, Docker test setup |
 | [docs/TESTING.md](docs/TESTING.md) | Test layers, how to run them, automated mains tests with a smart plug, what each suite covers |
 | [CHANGELOG.md](CHANGELOG.md) | What changed in each version |
+| [hardware/pico-poe-mains-carrier/](hardware/pico-poe-mains-carrier/README.md) | Carrier PCB (KiCad 10): circuit, isolation, mounting, fab files for JLCPCB, 3D models |
 | [docs/diagrams/](docs/diagrams/README.md) | Excalidraw diagrams (editable) of the system, firmware, SNMP, mains flow, settings and tests |
 | [.clinerules](.clinerules) | Project and test rules |
 
 ## Hardware
 
-- Raspberry Pi Pico (RP2040)
-- W5500 Ethernet module on SPI0
+- Raspberry Pi Pico (RP2040) with a W5500 Ethernet module on SPI0, or the WIZnet **W5500-EVB-Pico-PoE**, which has both on one board (same pins) and is powered over PoE
 - Mains detection circuit on GPIO27 (must be galvanically isolated, 3.3 V max)
 - Factory reset push button from GPIO22 to GND
-- USB cable for power, flashing and the serial menu
+- USB cable for flashing and the serial menu (and for power without PoE)
+
+### Carrier board
+
+![Carrier board with the W5500-EVB-Pico-PoE soldered on](hardware/pico-poe-mains-carrier/images/iso.png)
+
+[hardware/pico-poe-mains-carrier/](hardware/pico-poe-mains-carrier/README.md) is a 2-layer carrier PCB (KiCad 10, 80 x 51.5 mm) for the W5500-EVB-Pico-PoE; the module is soldered flat by its castellated edges or plugged into two 1x20 female headers. It carries the isolated mains detector: 230 VAC on a screw terminal, four 68 k 200 V resistors, an LTV-814S AC optocoupler (5 kVrms), an RC that bridges the zero crossings and a 74LVC1G14 Schmitt inverter driving GPIO27 (HIGH = mains present) and two LEDs (green = mains on, red = off, without firmware). It also has a TMP1075 temperature sensor on I2C0. Mains copper keeps at least 6.5 mm clearance and 6.4 mm creepage to the low-voltage side, enforced as DRC rules, with a slot under the optocoupler. Gerbers, BOM and placement files for JLCPCB, the schematic PDF and STEP/GLB models are in [hardware/pico-poe-mains-carrier/fab/](hardware/pico-poe-mains-carrier/fab/README.md) and `3d/`; `tools/generate.py` generates the whole KiCad project.
+
+How the carrier and the firmware fit together:
+
+| | Carrier | Firmware |
+|---|---|---|
+| Mains detection | MAINS_OK on GP27, HIGH = present | GPIO27, HIGH = present: matches |
+| W5500 | On the module, GP16-GP21 | `include/pins.h` GP16-GP21: matches |
+| Power | PoE through the module, 3V3(OUT) feeds the carrier | No dependency |
+| Temperature | TMP1075 on I2C0 (GP4 SDA, GP5 SCL, address 0x48) | Not read yet: boardTemperature is the RP2040's internal sensor (TODO) |
+| Factory reset button | GP22 is not connected. The module's two buttons (SW1/SW2, BOOTSEL and RUN) are not on GPIO22: RUN restarts the chip, BOOTSEL enters the USB bootloader when held at power-up | Expects a button from GPIO22 to GND, so the 10 s factory reset cannot be triggered on this hardware yet (TODO) |
+| Mains loss timing | The RC holds the signal about 30-50 ms after mains is lost (bridges zero crossings) | The firmware sees the loss that much later; `.clinerules` asks for 10 ms (TODO) |
 
 ### Pin configuration
 
@@ -71,6 +88,7 @@ All assignments are in [include/pins.h](include/pins.h).
 | GPIO19 | W5500 MOSI | SPI0 TX |
 | GPIO20 | W5500 RST | Pulsed low at boot |
 | GPIO21 | W5500 INT | Interrupt-driven receive |
+| GPIO4 / GPIO5 | I2C0 SDA / SCL | TMP1075 on the carrier board, address 0x48; not used by the firmware yet |
 | GPIO22 | Factory reset | Active low, internal pull-up |
 | GPIO27 | Mains power detection | HIGH = power present, internal pull-down |
 | LED | Onboard LED | Status / reset feedback |
@@ -425,6 +443,7 @@ src/snmp_service.cpp        UDP port 161, device state for the MIB
 src/net_stats.cpp           Counts frames at the lwIP driver, reads the W5500 PHY register
 src/board_temp.cpp          RP2040 die temperature, averaged
 mibs/                       RF-UPS-MONITOR-MIB
+hardware/                   Carrier PCB for the W5500-EVB-Pico-PoE (KiCad project, fab files, 3D, renders)
 logo/                       RF logo (SVG), used on the web page
 librenms/                   LibreNMS OS detection and discovery definitions, Docker test setup
 test/host/                  Host build of the agent for net-snmp checks
@@ -507,7 +526,8 @@ Object details, traps, error behaviour, limits and the MIB file: [docs/MIB.md](d
 
 ## Safety
 
-- The mains detection circuit must be galvanically isolated (optocoupler).
+- The mains detection circuit must be galvanically isolated (optocoupler). The carrier board's isolation (clearance, creepage, slot) is described in its [README](hardware/pico-poe-mains-carrier/README.md#isolation).
+- Mains wiring must be done by a qualified person, in a closed enclosure, with the supply fused upstream.
 - No GPIO may see more than 3.3 V.
 - Ground all modules properly.
 

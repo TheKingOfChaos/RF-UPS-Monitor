@@ -1,0 +1,13 @@
+(version 1)
+# Reinforced isolation between 230VAC and the SELV side (IEC 62368-1, 250 Vrms, PD2):
+# >= 6.5 mm clearance and >= 6.4 mm creepage from any mains copper to anything else.
+(rule "Mains to SELV clearance"
+	(condition "A.NetClass == 'Mains' && B.NetClass != 'Mains'")
+	(constraint clearance (min 6.5mm)))
+(rule "Mains to SELV creepage"
+	(condition "A.NetClass == 'Mains' && B.NetClass != 'Mains'")
+	(constraint creepage (min 6.4mm)))
+# Functional spacing between mains nodes (L vs N side of the divider)
+(rule "Mains internal"
+	(condition "A.NetClass == 'Mains' && B.NetClass == 'Mains'")
+	(constraint clearance (min 0.7mm)))

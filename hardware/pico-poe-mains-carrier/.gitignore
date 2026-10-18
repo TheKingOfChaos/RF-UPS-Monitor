@@ -1,0 +1,20 @@
+# KiCad lock files, backups, caches and per-user view settings
+~*.lck
+*.lck
+*-backups/
+_autosave-*
+*.bak
+*.kicad_sch-bak
+*.kicad_pcb-bak
+fp-info-cache
+*.kicad_prl
+\#auto_saved_files\#
+
+# Intermediate export folder (the zipped Gerbers in fab/ are kept)
+fab/gerber/
+
+# Python
+__pycache__/
+
+# KiCad local history (its own git repository)
+.history/

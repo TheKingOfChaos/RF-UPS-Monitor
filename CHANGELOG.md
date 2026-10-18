@@ -6,6 +6,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+- Hardware: carrier PCB for the W5500-EVB-Pico-PoE in `hardware/pico-poe-mains-carrier/` (KiCad 10 project, fab files for JLCPCB, 3D models, renders), documented in the README with how it maps to the firmware.
+
 ## [2.4.0] - 2026-10-17
 
 ### Added

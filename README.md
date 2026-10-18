@@ -1,4 +1,4 @@
-# RF-UPS-Monitor v3
+# RF-UPS-Monitor
 
 A mains power monitor built on a Raspberry Pi Pico with a W5500 Ethernet module. It reports whether mains power is present over SNMP v1 and v2c, including traps, together with standard interface statistics (IF-MIB) and the board temperature, so it can be monitored by LibreNMS or any other SNMP manager. It is configured through a menu on the USB serial port.
 

@@ -6,6 +6,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Changed
+- Project name is RF-UPS-Monitor (without "v3", which looked like a version number). The firmware already reported this name in sysDescr; the README, CLAUDE.md and the test fixtures follow.
+
 ## [2.4.1] - 2026-10-18
 
 The firmware is unchanged apart from its version number.

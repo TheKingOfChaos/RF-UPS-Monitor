@@ -1,4 +1,4 @@
-# RF-UPS-Monitor v3
+# RF-UPS-Monitor
 
 Raspberry Pi Pico (RP2040) with a W5500 Ethernet module: a mains power monitor read over SNMP v1/v2c (traps, IF-MIB counters, board temperature; LibreNMS definitions in `librenms/`), configured over a USB serial menu. The version is in `include/version.h`; record changes in `CHANGELOG.md`.
 

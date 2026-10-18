@@ -57,7 +57,7 @@ int main(int argc, char** argv) {
         state.mainsPresent = true;
         state.mainsChanges = 2;
         state.mainsLastChangeTicks = 42;
-        state.sysDescr = "RF-UPS-Monitor v3 host test";
+        state.sysDescr = "RF-UPS-Monitor host test";
         state.sysContact = "ops@example.com";
         state.sysName = "host-agent";
         state.sysLocation = "WSL";

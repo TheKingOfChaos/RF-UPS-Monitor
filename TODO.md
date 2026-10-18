@@ -194,7 +194,8 @@ An item is only ticked when it is implemented **and** its tests exist and pass (
 - [x] Carrier PCB for the W5500-EVB-Pico-PoE: isolated mains detector on GP27, LEDs, TMP1075; KiCad 10, ERC/DRC, fab files (documented in the README)
 - [ ] Order and assemble the first boards; run the mains HIL tests (Dirigera) on the carrier
 - [ ] Read the TMP1075 (I2C0, GP4/GP5, 0x48) in the firmware, e.g. as a second temperature object, and keep the RP2040 sensor
-- [ ] Factory reset button: nothing is on GP22. The module's buttons are BOOTSEL and RUN (WIZnet model: SW1, SW2); RUN resets the chip and cannot be read. Options: accept a 10 s BOOTSEL hold in the firmware (Arduino-Pico `BOOTSEL`, read every ~100 ms: each read takes the flash offline and pauses the other core briefly, so check SNMP latency), or add a GP22 button to the carrier (`tools/generate.py`). Decided 2026-10-18: document only for now
+- [x] Factory reset button: SW1 (XKB TS-1187A) from GP22 to GND on the carrier, board v1.1; ERC/DRC clean. Test it with the real button once boards are built
+- [x] Fuse in the mains input: F1 Schurter UMT 250, T 100 mA, 250 VAC, in the single series loop; ERC/DRC clean
 - [ ] Mains loss timing: the carrier's RC delays the loss by about 30-50 ms against the 10 ms in `.clinerules`; measure it on the board and decide (smaller RC, or change the requirement)
 
 ## Notes

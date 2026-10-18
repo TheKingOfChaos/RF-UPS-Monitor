@@ -65,7 +65,7 @@
 		(layer "F.SilkS")
 	)
 	(fp_text user "<- RJ45"
-		(at 30 10.5 0)
+		(at 38.5 10.5 0)
 		(layer "F.SilkS")
 		(effects
 			(font
@@ -75,7 +75,7 @@
 		)
 	)
 	(fp_text user "USB ->"
-		(at 67 10.5 0)
+		(at 47.5 10.5 0)
 		(layer "F.SilkS")
 		(effects
 			(font

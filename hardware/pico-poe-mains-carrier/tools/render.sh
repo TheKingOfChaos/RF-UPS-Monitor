@@ -5,10 +5,18 @@ set -e
 P=$(cd "$(dirname "$0")/.." && pwd)
 N=pico-poe-mains-carrier
 cd "$P"
+# without the model library kicad-cli silently renders bare pads; in WSL use the Windows install, e.g.
+# KICAD10_3DMODEL_DIR=/mnt/c/Users/<user>/AppData/Local/Programs/KiCad/10.0/share/kicad/3dmodels
+M=${KICAD10_3DMODEL_DIR:-/usr/share/kicad/3dmodels}
+if [ ! -f "$M/Connector_PinSocket_2.54mm.3dshapes/PinSocket_1x20_P2.54mm_Vertical.step" ]; then
+  echo "KiCad 3D models not found in $M: set KICAD10_3DMODEL_DIR" >&2
+  exit 1
+fi
 mkdir -p images 3d
 
 # Two variants in temp folders: the carrier on its own (no module model), and the
-# module raised on two 1x20 female headers (8.5 mm) instead of soldered flat
+# module on headers instead of soldered flat: two 1x20 female headers on the carrier (8.5 mm)
+# and two 1x20 male headers under the module (2.5 mm body), so the module sits 11.0 mm up
 T=$(mktemp -d)
 H=$(mktemp -d)
 cp $N.kicad_pro $N.kicad_dru "$T/"
@@ -20,13 +28,18 @@ s = open(sys.argv[1]).read()
 model = r'\n\t\t\(model "\$\{KIPRJMOD\}/3d/W5500-EVB-Pico-PoE[^"]*"[\s\S]*?\n\t\t\)'
 open(sys.argv[2], "w").write(re.sub(model, "", s, count=1))
 
-sockets = ""
+SOCKET_H, PIN_BODY_H, MODULE_T = 8.5, 2.5, 0.62
+def header(path, z, rot):
+    return (f'\n\t\t(model "${{KICAD10_3DMODEL_DIR}}/{path}"'
+            f'\n\t\t\t(offset\n\t\t\t\t(xyz 75.63 {-row_y} {z})\n\t\t\t)\n\t\t\t(scale\n\t\t\t\t(xyz 1 1 1)\n\t\t\t)'
+            f'\n\t\t\t(rotate\n\t\t\t\t(xyz {rot})\n\t\t\t)\n\t\t)')
+headers = ""
 for row_y in (1.61, 19.39):  # header rows; pin 1/40 end at x = 75.63, rows run towards -x
-    sockets += ('\n\t\t(model "${KICAD10_3DMODEL_DIR}/Connector_PinSocket_2.54mm.3dshapes/PinSocket_1x20_P2.54mm_Vertical.step"'
-                f'\n\t\t\t(offset\n\t\t\t\t(xyz 75.63 {-row_y} 0)\n\t\t\t)\n\t\t\t(scale\n\t\t\t\t(xyz 1 1 1)\n\t\t\t)'
-                '\n\t\t\t(rotate\n\t\t\t\t(xyz 0 0 90)\n\t\t\t)\n\t\t)')
+    headers += header("Connector_PinSocket_2.54mm.3dshapes/PinSocket_1x20_P2.54mm_Vertical.step", 0, "0 0 90")
+    # male header upside down under the module: body on the socket, pins down into it
+    headers += header("Connector_PinHeader_2.54mm.3dshapes/PinHeader_1x20_P2.54mm_Vertical.step", SOCKET_H + PIN_BODY_H, "0 180 90")
 def raise_module(m):
-    return m.group(0).replace("(xyz 0 -21 0.62)", "(xyz 0 -21 9.12)") + sockets
+    return m.group(0).replace("(xyz 0 -21 0.62)", f"(xyz 0 -21 {SOCKET_H + PIN_BODY_H + MODULE_T})") + headers
 open(sys.argv[3], "w").write(re.sub(model, raise_module, s, count=1))
 PY
 

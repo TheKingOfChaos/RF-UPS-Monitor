@@ -63,7 +63,7 @@ See [TODO.md](TODO.md) for the detailed plan.
 
 ![Carrier board with the W5500-EVB-Pico-PoE soldered on](hardware/pico-poe-mains-carrier/images/iso.png)
 
-[hardware/pico-poe-mains-carrier/](hardware/pico-poe-mains-carrier/README.md) is a 2-layer carrier PCB (KiCad 10, 80 x 51.5 mm) for the W5500-EVB-Pico-PoE; the module is soldered flat by its castellated edges or plugged into two 1x20 female headers. It carries the isolated mains detector: 230 VAC on a screw terminal, four 68 k 200 V resistors, an LTV-814S AC optocoupler (5 kVrms), an RC that bridges the zero crossings and a 74LVC1G14 Schmitt inverter driving GPIO27 (HIGH = mains present) and two LEDs (green = mains on, red = off, without firmware). It also has a TMP1075 temperature sensor on I2C0. Mains copper keeps at least 6.5 mm clearance and 6.4 mm creepage to the low-voltage side, enforced as DRC rules, with a slot under the optocoupler. Gerbers, BOM and placement files for JLCPCB, the schematic PDF and STEP/GLB models are in [hardware/pico-poe-mains-carrier/fab/](hardware/pico-poe-mains-carrier/fab/README.md) and `3d/`; `tools/generate.py` generates the whole KiCad project.
+[hardware/pico-poe-mains-carrier/](hardware/pico-poe-mains-carrier/README.md) is a 2-layer carrier PCB (KiCad 10, 80 x 51.5 mm) for the W5500-EVB-Pico-PoE; the module is soldered flat by its castellated edges or plugged into two 1x20 female headers. It carries the isolated mains detector: 230 VAC on a screw terminal, a T 100 mA fuse, four 68 k 200 V resistors, an LTV-814S AC optocoupler (5 kVrms), an RC that bridges the zero crossings and a 74LVC1G14 Schmitt inverter driving GPIO27 (HIGH = mains present) and two LEDs (green = mains on, red = off, without firmware). It also has a TMP1075 temperature sensor on I2C0 and the factory reset button on GPIO22. Mains copper keeps at least 6.5 mm clearance and 6.4 mm creepage to the low-voltage side, enforced as DRC rules, with a slot under the optocoupler. Gerbers, BOM and placement files for JLCPCB, the schematic PDF and STEP/GLB models are in [hardware/pico-poe-mains-carrier/fab/](hardware/pico-poe-mains-carrier/fab/README.md) and `3d/`; `tools/generate.py` generates the whole KiCad project.
 
 How the carrier and the firmware fit together:
 
@@ -73,7 +73,7 @@ How the carrier and the firmware fit together:
 | W5500 | On the module, GP16-GP21 | `include/pins.h` GP16-GP21: matches |
 | Power | PoE through the module, 3V3(OUT) feeds the carrier | No dependency |
 | Temperature | TMP1075 on I2C0 (GP4 SDA, GP5 SCL, address 0x48) | Not read yet: boardTemperature is the RP2040's internal sensor (TODO) |
-| Factory reset button | GP22 is not connected. The module's two buttons (SW1/SW2, BOOTSEL and RUN) are not on GPIO22: RUN restarts the chip, BOOTSEL enters the USB bootloader when held at power-up | Expects a button from GPIO22 to GND, so the 10 s factory reset cannot be triggered on this hardware yet (TODO) |
+| Factory reset button | SW1 from GP22 to GND, below the module (board v1.1) | Reads GPIO22 with the internal pull-up, hold 10 s: matches |
 | Mains loss timing | The RC holds the signal about 30-50 ms after mains is lost (bridges zero crossings) | The firmware sees the loss that much later; `.clinerules` asks for 10 ms (TODO) |
 
 ### Pin configuration

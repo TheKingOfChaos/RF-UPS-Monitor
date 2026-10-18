@@ -59,7 +59,7 @@ PICO_PINS = {
 }
 GND_PINS = [3, 8, 13, 18, 23, 28, 33, 38]
 MODULE_NETS = {p: "GND" for p in GND_PINS}
-MODULE_NETS.update({6: "I2C_SDA", 7: "I2C_SCL", 32: "MAINS_OK", 36: "+3V3"})
+MODULE_NETS.update({6: "I2C_SDA", 7: "I2C_SCL", 29: "FACTORY_RESET", 32: "MAINS_OK", 36: "+3V3"})
 
 
 def pico_pad_xy(n):
@@ -82,7 +82,7 @@ def pico_pin_plan(n):
 # mains section on the right with J1 at the USB end. MAINS_OK, +3V3 and I2C
 # reach the left block in bottom-layer lanes between the two header rows.
 # ---------------------------------------------------------------------------
-MAINS_NETS = ["AC_L", "AC_N", "L_MID", "N_MID", "OPTO_A", "OPTO_K"]
+MAINS_NETS = ["AC_L", "AC_N", "L_FUSED", "N_MID1", "N_MID2", "OPTO_A", "OPTO_K"]
 YN, YL = 29.92, 35.0          # N and L rows of the divider
 OPTO = (45.0, (YN + YL) / 2)   # optocoupler centre, rotated 180: inputs right, outputs left
 
@@ -93,14 +93,17 @@ PARTS = [
      {"MPN": "W5500-EVB-Pico-PoE", "Note": "Plug-in module, 2x 1x20 female header 2.54mm"}),
     ("J1", "Screw_Terminal_2", "230VAC L/N", "TerminalBlock_Phoenix:TerminalBlock_Phoenix_MKDS-1,5-2-5.08_1x02_P5.08mm_Horizontal",
      74.8, YL, 90, {"1": "AC_L", "2": "AC_N"}, {"MPN": "Phoenix 1715721 (MKDS 1,5/2-5,08)"}),
-    ("R1", "R", "68k 1206 200V", "Resistor_SMD:R_1206_3216Metric", 63.0, YL, 0,
-     {"1": "L_MID", "2": "AC_L"}, {"LCSC": "C2889820"}),
-    ("R2", "R", "68k 1206 200V", "Resistor_SMD:R_1206_3216Metric", 55.0, YL, 0,
-     {"1": "OPTO_A", "2": "L_MID"}, {"LCSC": "C2889820"}),
-    ("R3", "R", "68k 1206 200V", "Resistor_SMD:R_1206_3216Metric", 63.0, YN, 0,
-     {"1": "N_MID", "2": "AC_N"}, {"LCSC": "C2889820"}),
+    # one series loop L -> F1 -> R1 -> opto -> R4 -> R3 -> R2 -> N: F1 carries any fault current
+    ("F1", "Fuse", "T100mA 250VAC", "Fuse:Fuse_Schurter_UMT250", 63.3, YL, 0,
+     {"1": "L_FUSED", "2": "AC_L"}, {"MPN": "Schurter 3403.0156.11 (UMT 250, T 100 mA, 250 VAC)"}),
+    ("R1", "R", "68k 1206 200V", "Resistor_SMD:R_1206_3216Metric", 55.0, YL, 0,
+     {"1": "OPTO_A", "2": "L_FUSED"}, {"LCSC": "C2889820"}),
+    ("R2", "R", "68k 1206 200V", "Resistor_SMD:R_1206_3216Metric", 66.6, YN, 0,
+     {"1": "N_MID1", "2": "AC_N"}, {"LCSC": "C2889820"}),
+    ("R3", "R", "68k 1206 200V", "Resistor_SMD:R_1206_3216Metric", 60.9, YN, 0,
+     {"1": "N_MID2", "2": "N_MID1"}, {"LCSC": "C2889820"}),
     ("R4", "R", "68k 1206 200V", "Resistor_SMD:R_1206_3216Metric", 55.0, YN, 0,
-     {"1": "OPTO_K", "2": "N_MID"}, {"LCSC": "C2889820"}),
+     {"1": "OPTO_K", "2": "N_MID2"}, {"LCSC": "C2889820"}),
     ("U2", "LTV-814S", "LTV-814S", "Package_DIP:SMDIP-4_W9.53mm", OPTO[0], OPTO[1], 180,
      {"1": "OPTO_A", "2": "OPTO_K", "3": "GND", "4": "SENSE"}, {"LCSC": "C125118", "MPN": "LTV-814S-TA1"}),
     ("C1", "C", "1uF", "Capacitor_SMD:C_0603_1608Metric", 36.8, 30.2, 90,
@@ -124,13 +127,28 @@ PARTS = [
      {"LCSC": "C2878381"}),
     ("C2", "C", "100nF", "Capacitor_SMD:C_0603_1608Metric", 18.6, 47.475, 0,
      {"1": "+3V3", "2": "GND"}, {"LCSC": "C14663"}),
-    ("R9", "R", "4.7k", "Resistor_SMD:R_0603_1608Metric", 17.6, 40.2, 0,
+    ("R8", "R", "4.7k", "Resistor_SMD:R_0603_1608Metric", 17.6, 40.2, 0,
      {"1": "I2C_SDA", "2": "+3V3"}, {"LCSC": "C23162"}),
-    ("R10", "R", "4.7k", "Resistor_SMD:R_0603_1608Metric", 13.0, 39.0, 90,
+    ("R9", "R", "4.7k", "Resistor_SMD:R_0603_1608Metric", 13.0, 39.0, 90,
      {"1": "I2C_SCL", "2": "+3V3"}, {"LCSC": "C23162"}),
+    # factory reset: GP22 to GND, the firmware's internal pull-up holds it high; hold 10 s
+    ("SW1", "SW_Push", "FACTORY RESET", "Button_Switch_SMD:SW_Push_1P1T_XKB_TS-1187A", 11.5, 24.875, 0,
+     {"1": "FACTORY_RESET", "2": "GND"}, {"LCSC": "C318884", "MPN": "XKB TS-1187A-B-A-B"}),
 ]
-REF_POS = {"C3": (30.4, 36.75), "D2": (27.5, 28.9), "C2": (21.3, 47.475), "H1": (4.0, 29.6), "H3": (71.3, 46.0)}
-HOLES = [("H1", 4.0, 25.5), ("H2", 4.0, 46.0), ("H3", 76.0, 46.0)]  # board coords
+REF_POS = {"C3": (30.4, 36.75), "D2": (27.5, 28.9), "C2": (21.3, 47.475), "H1": (4.0, 29.6), "H3": (71.3, 46.0),
+           "F1": (63.3, 37.9), "R2": (66.6, 32.0), "SW1": (11.5, 28.9)}
+HOLES = [("H1", 4.0, 25.5), ("H2", 4.0, 46.0), ("H3", 76.0, 46.0),
+         # under the module, between the header rows: reachable only with the module on headers
+         ("H4", 30.0, 10.5), ("H5", 66.5, 10.5)]  # board coords
+# these use a project footprint without courtyard (under_module_hole_text), so the courtyard check
+# stays on for all real parts; the mounting holes are the board's only NPTHs, so "NPTH inside
+# courtyard" is off in the project (see main())
+UNDER_MODULE_HOLES = ("H4", "H5")
+HOLE_UNDER_MODULE = "MountingHole_3.2mm_M3_UnderModule"
+
+
+def hole_fpid(ref):
+    return f"{LIB}:{HOLE_UNDER_MODULE}" if ref in UNDER_MODULE_HOLES else "MountingHole:MountingHole_3.2mm_M3"
 
 # ---------------------------------------------------------------------------
 # Routing (plan coords): (net, layer, width, [points])
@@ -138,13 +156,17 @@ HOLES = [("H1", 4.0, 25.5), ("H2", 4.0, 46.0), ("H3", 76.0, 46.0)]  # board coor
 WM, WS, WP = 0.5, 0.25, 0.4
 X_SCL, X_SDA, X_3V3, X_OK = 14.635, 15.905, 18.375, 20.5   # lane drops into the left block
 TRACKS = [
-    # mains side: J1 -> R1/R3 -> R2/R4 -> optocoupler
-    ("AC_L", "F.Cu", WM, [(74.8, YL), (64.4625, YL)]),
-    ("L_MID", "F.Cu", WM, [(61.5375, YL), (56.4625, YL)]),
+    # mains side: J1 -> F1 -> R1 -> optocoupler (L), J1 -> R2 -> R3 -> R4 -> optocoupler (N)
+    ("AC_L", "F.Cu", WM, [(74.8, YL), (67.55, YL)]),
+    ("L_FUSED", "F.Cu", WM, [(59.05, YL), (56.4625, YL)]),
     ("OPTO_A", "F.Cu", WM, [(53.5375, YL), (51.035, YL), (49.765, YL - 1.27)]),
-    ("AC_N", "F.Cu", WM, [(74.8, YN), (64.4625, YN)]),
-    ("N_MID", "F.Cu", WM, [(61.5375, YN), (56.4625, YN)]),
+    ("AC_N", "F.Cu", WM, [(74.8, YN), (68.0625, YN)]),
+    ("N_MID1", "F.Cu", WM, [(65.1375, YN), (62.3625, YN)]),
+    ("N_MID2", "F.Cu", WM, [(59.4375, YN), (56.4625, YN)]),
     ("OPTO_K", "F.Cu", WM, [(53.5375, YN), (51.035, YN), (49.765, YN + 1.27)]),
+    # factory reset: GP22 (module pin 29, bottom row) out below the module, along its edge to SW1 next to H1
+    # (on to SW1's second pin-1 pad; the GND pads join the pour)
+    ("FACTORY_RESET", "F.Cu", WS, [pico_pin_plan(29), (47.69, 21.0), (45.69, 23.0), (8.5, 23.0)]),
     # opto output -> C1, R5 pull-up, Schmitt trigger input
     ("SENSE", "F.Cu", WS, [(40.235, 33.73), (36.8, 33.73)]),
     ("SENSE", "F.Cu", WS, [(36.8, 30.975), (36.8, 36.9)]),
@@ -180,7 +202,7 @@ VIAS = [
     ("+3V3", X_3V3, 38.5), ("MAINS_OK", X_OK, 30.0),
     ("I2C_SCL", X_SCL, 38.9), ("I2C_SDA", X_SDA, 39.6),
     # GND stitching
-    ("GND", 35.0, 8.0), ("GND", 45.0, 12.0), ("GND", 50.0, 8.0), ("GND", 66.0, 13.0),
+    ("GND", 35.0, 8.0), ("GND", 45.0, 12.0), ("GND", 50.0, 8.0), ("GND", 62.0, 13.0),
     ("GND", 70.0, 7.0), ("GND", 40.0, 13.0), ("GND", 70.0, 17.5),
     ("GND", 10.0, 30.0), ("GND", 30.0, 26.0), ("GND", 40.5, 36.5), ("GND", 34.0, 37.0),
     ("GND", 22.0, 33.5), ("GND", 10.0, 41.0), ("GND", 24.0, 44.0), ("GND", 35.0, 45.0),
@@ -231,8 +253,8 @@ def module_footprint_text():
     rect(-5.05, -0.25, 80.25, 21.25, "F.CrtYd", 0.05)
     # pin-1 marker
     line(77.0, 3.0, 78.3, 3.0, "F.SilkS", 0.12)
-    text("<- RJ45", 30.0, 10.5, "F.SilkS", 1.0)
-    text("USB ->", 67.0, 10.5, "F.SilkS", 1.0)
+    text("<- RJ45", 38.5, 10.5, "F.SilkS", 1.0)
+    text("USB ->", 47.5, 10.5, "F.SilkS", 1.0)
     text("${REFERENCE}", 40, 13.0, "F.Fab")
     for n in range(1, 41):
         x, y = pico_pad_xy(n)
@@ -251,10 +273,22 @@ def module_footprint_text():
 AT_RE = re.compile(r"\(at (-?[\d.]+) (-?[\d.]+)(?: (-?[\d.]+))?\)")
 
 
+def under_module_hole_text():
+    """Stock M3 hole without courtyard, for holes that sit under the module (used with the module on headers)."""
+    src = open(os.path.join(STOCK, "MountingHole_3.2mm_M3.kicad_mod")).read()
+    src = re.sub(r'\n\t\(fp_\w+\n(?:\t\t[^\n]*\n)*?\t\t\(layer "F\.CrtYd"\)\n(?:\t\t[^\n]*\n)*?\t\)', "", src)
+    src = src.replace('(footprint "MountingHole_3.2mm_M3"', f'(footprint "{HOLE_UNDER_MODULE}"', 1)
+    src = re.sub(r'\(descr "[^"]*"\)', '(descr "Mounting Hole 3.2mm, M3, no annular, no courtyard: sits under the W5500-EVB-Pico-PoE '
+                 'and is used with the module on headers (screw in before plugging the module in)")', src, count=1)
+    src = src.replace("(attr exclude_from_pos_files exclude_from_bom)", "(attr exclude_from_pos_files exclude_from_bom allow_missing_courtyard)", 1)
+    src = re.sub(r'\(generator "[^"]*"\)', f'(generator "{NAME}-gen")', src, count=1)
+    return src
+
+
 def load_fp(fpid):
     lib, name = fpid.split(":", 1)
     if lib == LIB:
-        return module_footprint_text()
+        return under_module_hole_text() if name == HOLE_UNDER_MODULE else module_footprint_text()
     with open(os.path.join(STOCK, name + ".kicad_mod")) as fh:
         return fh.read()
 
@@ -364,10 +398,70 @@ def keepout(pts, name):
             f'\t\t(polygon\n\t\t\t(pts\n\t\t\t\t{p}\n\t\t\t)\n\t\t)\n\t)\n')
 
 
+def svg_path_points(d, steps=12):
+    """Flatten an SVG path (M/L/H/V/C/Z, absolute and relative) into closed point lists."""
+    toks = re.findall(r"[MmLlHhVvCcZz]|[-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?", d)
+    polys, cur, x, y, i, cmd = [], [], 0.0, 0.0, 0, None
+    while i < len(toks):
+        if toks[i].isalpha():
+            cmd = toks[i]
+            i += 1
+            if cmd in "Zz":
+                if cur:
+                    polys.append(cur)
+                cur = []
+                continue
+        rel = cmd.islower()
+        c = cmd.upper()
+        n = [float(v) for v in toks[i:i + {"M": 2, "L": 2, "H": 1, "V": 1, "C": 6}[c]]]
+        i += len(n)
+        if c == "M":
+            if cur:
+                polys.append(cur)
+            x, y = (x + n[0], y + n[1]) if rel else (n[0], n[1])
+            cur = [(x, y)]
+            cmd = "l" if rel else "L"   # further pairs are implicit line-tos
+        elif c in "LHV":
+            if c == "L":
+                x, y = (x + n[0], y + n[1]) if rel else (n[0], n[1])
+            elif c == "H":
+                x = x + n[0] if rel else n[0]
+            else:
+                y = y + n[0] if rel else n[0]
+            cur.append((x, y))
+        else:
+            ox, oy = (x, y) if rel else (0.0, 0.0)
+            p1, p2, p3 = (ox + n[0], oy + n[1]), (ox + n[2], oy + n[3]), (ox + n[4], oy + n[5])
+            for k in range(1, steps + 1):
+                t = k / steps
+                a, b, c3, e = (1 - t) ** 3, 3 * (1 - t) ** 2 * t, 3 * (1 - t) * t * t, t ** 3
+                cur.append((a * x + b * p1[0] + c3 * p2[0] + e * p3[0], a * y + b * p1[1] + c3 * p2[1] + e * p3[1]))
+            x, y = p3
+    if cur:
+        polys.append(cur)
+    return polys
+
+
+def logo_polys(cx, cy, width, layer="F.SilkS"):
+    """The RF logo (../logo/RF-canopy-RGB-Orange.svg) as filled polygons, centred on (cx, cy) plan coords."""
+    svg = open(os.path.join(OUT, "logo", "RF-canopy-RGB-Orange.svg"), encoding="utf-8").read()
+    polys = [p for d in re.findall(r'\sd="([^"]+)"', svg) for p in svg_path_points(d)]
+    xs = [px for p in polys for px, _ in p]
+    ys = [py for p in polys for _, py in p]
+    s = width / (max(xs) - min(xs))
+    mx, my = (max(xs) + min(xs)) / 2, (max(ys) + min(ys)) / 2
+    out = ""
+    for p in polys:
+        pts = " ".join("(xy {} {})".format(*map(f, P(cx + (px - mx) * s, cy + (py - my) * s))) for px, py in p)
+        out += (f'\t(gr_poly\n\t\t(pts\n\t\t\t{pts}\n\t\t)\n\t\t(stroke\n\t\t\t(width 0)\n\t\t\t(type solid)\n\t\t)\n'
+                f'\t\t(fill yes)\n\t\t(layer "{layer}")\n\t\t(uuid "{U()}")\n\t)\n')
+    return out
+
+
 def make_board(sym_uuids):
     o = []
     o.append(f'(kicad_pcb\n\t(version 20260206)\n\t(generator "pcbnew")\n\t(generator_version "10.0")\n\t(general\n\t\t(thickness 1.6)\n\t\t(legacy_teardrops no)\n\t)\n\t(paper "A4")\n')
-    o.append('\t(title_block\n\t\t(title "W5500-EVB-Pico-PoE mains monitor carrier")\n\t\t(rev "1.0")\n\t)\n')
+    o.append('\t(title_block\n\t\t(title "RF-UPS-Monitor carrier for the W5500-EVB-Pico-PoE")\n\t\t(date "2026")\n\t\t(rev "1.1")\n\t\t(company "Kenneth Foli Jørgensen")\n\t)\n')
     demo = open(os.path.join(STOCK, "board_header.txt")).read()
     o.append(demo)
     for ref, sym, val, fp, x, y, rot, nets, props in PARTS:
@@ -382,7 +476,7 @@ def make_board(sym_uuids):
     for ref, x, y in HOLES:
         hx, hy = B(x, y)
         rp = P(*REF_POS[ref]) if ref in REF_POS else None
-        o.append(board_footprint("MountingHole:MountingHole_3.2mm_M3", ref, "MountingHole_3.2mm_M3", hx, hy, 0, {}, {}, sym_uuids[ref], False, rp))
+        o.append(board_footprint(hole_fpid(ref), ref, "MountingHole_3.2mm_M3", hx, hy, 0, {}, {}, sym_uuids[ref], False, rp))
     # outline with the clearance notches; rounded outer corners
     r = 2.0
     k = r * (1 - math.sqrt(0.5))
@@ -431,15 +525,19 @@ def make_board(sym_uuids):
             o.append(gr_line(*P(*a), *P(*b_), layer, 0.3))
     o.append(gr_text("DANGER 230VAC", *P(59.5, 39.9), size=1.2, bold=True))
     o.append(gr_text("HAZARDOUS VOLTAGE", *P(62.0, 39.9), "B.SilkS", 1.0, justify="mirror"))
-    o.append(gr_text("L", *P(67.6, 36.9), size=1.2, bold=True))
+    o.append(gr_text("L", *P(68.4, 37.9), size=1.2, bold=True))
     o.append(gr_text("N", *P(67.6, 28.0), size=1.2, bold=True))
+    o.append(gr_text("RESET 10s", *P(15.6, 24.875), size=0.8, justify="left"))
     o.append(gr_text("230VAC IN", *P(74.6, 39.9), size=1.0))
     o.append(gr_text("ON", *P(24.0, 38.0), size=0.8))
     o.append(gr_text("OFF", *P(29.0, 32.4), size=0.8, justify="left"))
     o.append(gr_text("TEMP", *P(14.0, 49.0), size=0.8))
     o.append(gr_text("GP27=MAINS_OK (1=ON)", *P(29.0, 42.6), size=0.8, justify="left"))
-    o.append(gr_text("Pico-PoE Mains Monitor v1.0", *P(45.0, 46.4), size=1.0))
-    o.append(gr_text("I2C 0x48 GP4/GP5", *P(45.0, 48.2), size=0.8))
+    # logo, project name and maker in the free strip along the bottom edge
+    o.append(logo_polys(28.0, 46.4, 8.0))
+    o.append(gr_text("RF-UPS-Monitor v1.1", *P(33.2, 44.9), size=1.2, bold=True, justify="left"))
+    o.append(gr_text("Made by Kenneth Foli Jørgensen 2026", *P(33.2, 46.7), size=0.8, justify="left"))
+    o.append(gr_text("I2C 0x48 GP4/GP5", *P(33.2, 48.3), size=0.8, justify="left"))
     # tracks + vias
     for net, layer, w, pts in TRACKS:
         for (xa, ya), (xb, yb) in zip(pts, pts[1:]):
@@ -531,6 +629,19 @@ def build_symbols():
                     [prop("Reference", "C", 2.794, 1.27), prop("Value", "C", 2.794, -1.27), prop("Footprint", "", 0, 0, True),
                      prop("Datasheet", "", 0, 0, True), prop("Description", "Capacitor", 0, 0, True)],
                     pin_names_hidden=True, pin_numbers_hidden=True, offset=0)
+    S["Fuse"] = symdef("Fuse", "F", rect_g(-0.762, 2.54, 0.762, -2.54, "none") + " " + poly_g([(0, 2.54), (0, -2.54)]),
+                       [P_("passive", 0, 3.81, 270, 1, length=1.27), P_("passive", 0, -3.81, 90, 2, length=1.27)],
+                       [prop("Reference", "F", 2.032, 1.27), prop("Value", "Fuse", 2.032, -1.27), prop("Footprint", "", 0, 0, True),
+                        prop("Datasheet", "https://www.schurter.com/en/datasheet/typ_UMT_250.pdf", 0, 0, True),
+                        prop("Description", "Fuse", 0, 0, True)],
+                       pin_names_hidden=True, pin_numbers_hidden=True, offset=0)
+    S["SW_Push"] = symdef("SW_Push", "SW", "(circle (center 0 2.032) (radius 0.508) (stroke (width 0) (type default)) (fill (type none))) "
+                          "(circle (center 0 -2.032) (radius 0.508) (stroke (width 0) (type default)) (fill (type none))) "
+                          + poly_g([(-1.27, 2.54), (-1.27, -2.54)]) + " " + poly_g([(-1.27, 0), (-3.048, 0)]),
+                          [P_("passive", 0, 5.08, 270, 1, length=2.54), P_("passive", 0, -5.08, 90, 2, length=2.54)],
+                          [prop("Reference", "SW", 2.032, 1.27), prop("Value", "SW_Push", 2.032, -1.27), prop("Footprint", "", 0, 0, True),
+                           prop("Datasheet", "", 0, 0, True), prop("Description", "Push button, normally open", 0, 0, True)],
+                          pin_names_hidden=True, pin_numbers_hidden=True, offset=0)
     S["LED"] = symdef("LED", "D", poly_g([(-1.27, -1.27), (-1.27, 1.27)]) + " " + poly_g([(1.27, -1.27), (1.27, 1.27), (-1.27, 0), (1.27, -1.27)])
                       + " " + poly_g([(-0.254, 1.524), (0.762, 2.54)]) + " " + poly_g([(0.508, 1.524), (1.524, 2.54)]),
                       [P_("passive", -3.81, 0, 0, 1, "K"), P_("passive", 3.81, 0, 180, 2, "A")],
@@ -708,18 +819,20 @@ def make_schematic(symbols):
     # placement on an A3 sheet, everything on the 1.27 grid
     SPOT = {
         "U1": (80.01, 110.49, 0), "J1": (40.64, 210.82, 0),
-        "R1": (66.04, 203.2, 0), "R2": (66.04, 233.68, 0), "R3": (99.06, 203.2, 0), "R4": (99.06, 233.68, 0),
+        "F1": (66.04, 203.2, 0), "R1": (99.06, 203.2, 0),
+        "R2": (66.04, 233.68, 0), "R3": (82.55, 233.68, 0), "R4": (99.06, 233.68, 0),
         "U2": (127.0, 214.63, 0), "R5": (165.1, 201.93, 0), "C1": (180.34, 220.98, 0),
         "U3": (213.36, 209.55, 0), "C3": (236.22, 201.93, 0),
         "R6": (279.4, 201.93, 0), "D1": (279.4, 220.98, 0), "D2": (309.88, 220.98, 0), "R7": (309.88, 201.93, 180),
-        "U4": (304.8, 106.68, 0), "C2": (342.9, 106.68, 180), "R9": (261.62, 104.14, 180), "R10": (274.32, 104.14, 180),
+        "U4": (304.8, 106.68, 0), "C2": (342.9, 106.68, 180), "R8": (261.62, 104.14, 180), "R9": (274.32, 104.14, 180),
+        "SW1": (142.24, 120.65, 0),
     }
     # vertical R/C get their reference to the right
     for ref, sym, val, fp, x, y, rot, nets, props in PARTS:
         sx, sy, sr = SPOT[ref]
         lr = "Screw_Terminal_2" if sym == "Screw_Terminal_2" else sym
-        ro = (3.81, -1.27) if sym in ("R", "C") else None
-        vo = (3.81, 1.27) if sym in ("R", "C") else None
+        ro = (3.81, -1.27) if sym in ("R", "C", "Fuse", "SW_Push") else None
+        vo = (3.81, 1.27) if sym in ("R", "C", "Fuse", "SW_Push") else None
         if sym == "W5500-EVB-Pico-PoE":
             ro, vo = (0, -29.21), (0, 29.21)
         if sym == "LED":
@@ -734,7 +847,7 @@ def make_schematic(symbols):
         sch.connect(lr, sx, sy, sr, {str(k): v for k, v in nets.items()})
     for i, (ref, _, _) in enumerate(HOLES):
         uids[ref] = sch.place("MountingHole", ref, "MountingHole_3.2mm_M3", 355.6 + i * 12.7, 254.0, 0,
-                              "MountingHole:MountingHole_3.2mm_M3", ref_off=(0, -3.81), val_off=(0, 3.81), hide_value=True)
+                              hole_fpid(ref), ref_off=(0, -3.81), val_off=(0, 3.81), hide_value=True)
     # power flag on GND (the +3V3 rail is driven by the module's 3V3 output)
     sch.place("PWR_FLAG", "#FLG01", "PWR_FLAG", 139.7, 66.04, 0, val_off=(0, -3.81))
     sch.wire([(139.7, 66.04), (139.7, 68.58)])
@@ -743,10 +856,10 @@ def make_schematic(symbols):
     # frames and notes
     sch.rect(20.32, 50.8, 160.02, 175.26)
     sch.text("W5500-EVB-Pico-PoE (plugs into 2x 1x20 female headers)", 22.86, 55.88, 2, True)
-    sch.text("GP16..GP21 are used by the on-board W5500 - do not use.\nGP27 (pin 32) = MAINS_OK input: HIGH = 230VAC present.\nGP4/GP5 = I2C0 SDA/SCL to TMP1075 (address 0x48).\n+3V3 comes from the module's 3V3(OUT) pin 36 (PoE powered).", 22.86, 158.75)
+    sch.text("GP16..GP21 are used by the on-board W5500 - do not use.\nGP27 (pin 32) = MAINS_OK input: HIGH = 230VAC present.\nGP4/GP5 = I2C0 SDA/SCL to TMP1075 (address 0x48).\nGP22 (pin 29) = SW1 to GND: hold 10 s for a factory reset (internal pull-up).\n+3V3 comes from the module's 3V3(OUT) pin 36 (PoE powered).", 22.86, 158.75)
     sch.rect(20.32, 182.88, 147.32, 259.08)
     sch.text("HAZARDOUS VOLTAGE - 230VAC MAINS SENSE", 22.86, 187.96, 2, True)
-    sch.text("4x 68k 1206 (>=200V) split between L and N: ~1.2 mA peak, ~50 mW each.\nLTV-814S AC-input optocoupler, 5 kVrms. PCB: >=7.5 mm creepage + routed slot.", 22.86, 254.0)
+    sch.text("F1 T100mA 250VAC in the only current loop. 4x 68k 1206 (>=200V): ~1.2 mA peak, ~50 mW each.\nLTV-814S AC-input optocoupler, 5 kVrms. PCB: >=6.5 mm clearance, >=6.4 mm creepage + routed slot.", 22.86, 254.0)
     sch.rect(152.4, 182.88, 330.2, 259.08)
     sch.text("Mains detect + LED indication (works without firmware)", 154.94, 187.96, 2, True)
     sch.text("Opto pulls SENSE low while mains is present; C1 holds it low over the zero crossings (47k x 1uF = 47 ms).\nMAINS_OK = NOT SENSE: green LED on = mains ON, red LED on = mains OFF.", 154.94, 254.0)
@@ -757,7 +870,7 @@ def make_schematic(symbols):
     lib_syms = "(lib_symbols " + " ".join(
         sch.S[n][0].replace(f'(symbol "{n}"', f'(symbol "{LIB}:{n}"', 1) for n in sorted(sch.used)) + ")"
     out = (f'(kicad_sch (version 20260101) (generator "eeschema") (generator_version "10.0") (uuid "{root}") (paper "A3") '
-           f'(title_block (title "W5500-EVB-Pico-PoE mains monitor carrier") (rev "1.0") (comment 1 "Mains detect on GP27, LED status, TMP1075 temperature")) '
+           f'(title_block (title "RF-UPS-Monitor carrier for the W5500-EVB-Pico-PoE") (date "2026") (rev "1.1") (company "Kenneth Foli Jørgensen") (comment 1 "Mains detect on GP27, LED status, TMP1075 temperature, factory reset button on GP22")) '
            + lib_syms + " " + " ".join(sch.items) +
            ' (sheet_instances (path "/" (page "1"))) (embedded_fonts no))\n')
     return out, uids, root
@@ -771,16 +884,17 @@ def sym_lib_file(symbols):
 def main():
     symbols = build_symbols()
     sch, uids, root = make_schematic(symbols)
-    open(os.path.join(OUT, f"{NAME}.kicad_sch"), "w").write(sch)
-    open(os.path.join(OUT, f"{NAME}.kicad_pcb"), "w").write(make_board(uids))
-    open(os.path.join(OUT, f"{LIB}.kicad_sym"), "w").write(sym_lib_file(symbols))
+    open(os.path.join(OUT, f"{NAME}.kicad_sch"), "w", encoding="utf-8").write(sch)
+    open(os.path.join(OUT, f"{NAME}.kicad_pcb"), "w", encoding="utf-8").write(make_board(uids))
+    open(os.path.join(OUT, f"{LIB}.kicad_sym"), "w", encoding="utf-8").write(sym_lib_file(symbols))
     os.makedirs(os.path.join(OUT, f"{LIB}.pretty"), exist_ok=True)
-    open(os.path.join(OUT, f"{LIB}.pretty", "W5500-EVB-Pico-PoE_Socket.kicad_mod"), "w").write(module_footprint_text())
-    open(os.path.join(OUT, "sym-lib-table"), "w").write(
+    open(os.path.join(OUT, f"{LIB}.pretty", "W5500-EVB-Pico-PoE_Socket.kicad_mod"), "w", encoding="utf-8").write(module_footprint_text())
+    open(os.path.join(OUT, f"{LIB}.pretty", f"{HOLE_UNDER_MODULE}.kicad_mod"), "w", encoding="utf-8").write(under_module_hole_text())
+    open(os.path.join(OUT, "sym-lib-table"), "w", encoding="utf-8").write(
         f'(sym_lib_table\n\t(version 7)\n\t(lib (name "{LIB}")(type "KiCad")(uri "${{KIPRJMOD}}/{LIB}.kicad_sym")(options "")(descr "Project symbols"))\n)\n')
-    open(os.path.join(OUT, "fp-lib-table"), "w").write(
+    open(os.path.join(OUT, "fp-lib-table"), "w", encoding="utf-8").write(
         f'(fp_lib_table\n\t(version 7)\n\t(lib (name "{LIB}")(type "KiCad")(uri "${{KIPRJMOD}}/{LIB}.pretty")(options "")(descr "Project footprints"))\n)\n')
-    open(os.path.join(OUT, f"{NAME}.kicad_dru"), "w").write(DRU)
+    open(os.path.join(OUT, f"{NAME}.kicad_dru"), "w", encoding="utf-8").write(DRU)
     import json
     pro = json.load(open(os.path.join(STOCK, "template.kicad_pro")))
     pro["meta"]["filename"] = f"{NAME}.kicad_pro"
@@ -795,10 +909,11 @@ def main():
     pro["net_settings"]["netclass_patterns"] = [{"netclass": "Mains", "pattern": "/" + n} for n in MAINS_NETS] + \
         [{"netclass": "Power", "pattern": n} for n in ("GND", "+3V3")]
     r = pro["board"]["design_settings"]["rules"]
+    pro["board"]["design_settings"]["rule_severities"]["npth_inside_courtyard"] = "ignore"
     r.update(min_clearance=0.2, min_track_width=0.2, min_via_diameter=0.5, min_via_annular_width=0.1,
              min_through_hole_diameter=0.3, min_copper_edge_clearance=0.5, min_hole_to_hole=0.25)
     pro["libraries"] = {"pinned_footprint_libs": [], "pinned_symbol_libs": []}
-    json.dump(pro, open(os.path.join(OUT, f"{NAME}.kicad_pro"), "w"), indent=2)
+    json.dump(pro, open(os.path.join(OUT, f"{NAME}.kicad_pro"), "w", encoding="utf-8"), indent=2)
     print("written to", OUT)
 
 

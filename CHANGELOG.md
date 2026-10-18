@@ -6,8 +6,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [2.4.1] - 2026-10-18
+
+The firmware is unchanged apart from its version number.
+
 ### Added
-- Hardware: carrier PCB for the W5500-EVB-Pico-PoE in `hardware/pico-poe-mains-carrier/` (KiCad 10 project, fab files for JLCPCB, 3D models, renders), documented in the README with how it maps to the firmware.
+- Hardware: carrier PCB for the W5500-EVB-Pico-PoE in `hardware/pico-poe-mains-carrier/` (KiCad 10 project, fab files for JLCPCB, 3D models, renders), documented in the README with how it maps to the firmware. Open points are in TODO.md: the TMP1075 is not read yet, nothing is on GP22 for the factory reset (the module's buttons are BOOTSEL and RUN), and the detector reports a mains loss about 30-50 ms late.
+- Diagrams: web page request flow and where the IPv4/IPv6 addresses come from.
+- LibreNMS over IPv6 checked (transport `udp6`, LibreNMS 26.9.1); the Docker test network has IPv6.
+
+### Changed
+- Docs: web page section with every feature, the URLs for scripts and troubleshooting; static IPv6 in the settings file and factory reset; project structure.
 
 ## [2.4.0] - 2026-10-17
 
@@ -135,7 +144,8 @@ First release.
 - The network stack queues 5 UDP packets; larger bursts are dropped (SNMP managers retry).
 - Not yet tested with the real hardware: mains traps with real mains, the factory reset button, the "no link" and "no DHCP server" states. The LibreNMS definitions are validated against the schema but not yet tried in a running LibreNMS (done after 1.0.1).
 
-[Unreleased]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.4.0...HEAD
+[Unreleased]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.4.1...HEAD
+[2.4.1]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.4.0...v2.4.1
 [2.4.0]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.1.1...v2.2.0

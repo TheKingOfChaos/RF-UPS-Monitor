@@ -6,6 +6,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [2.4.2] - 2026-10-19
+
+The firmware is unchanged apart from its version number.
+
 ### Changed
 - Project name is RF-UPS-Monitor (without "v3", which looked like a version number). The firmware already reported this name in sysDescr; the README, CLAUDE.md and the test fixtures follow.
 - Hardware: carrier board v1.1. F1 (T 100 mA, 250 VAC, Schurter UMT 250) after the L terminal; the divider is now R1 in L and R2-R4 in N, one series loop through F1. SW1 factory reset button from GP22 to GND, so the firmware's 10 s factory reset works on the carrier. The I2C pull-ups are renumbered R8/R9 (no gap after R7). The silkscreen carries the RF logo (from `logo/`, flattened to a filled polygon by `tools/generate.py`), "RF-UPS-Monitor v1.1" and "Made by Kenneth Foli Jørgensen 2026"; the schematic and board title blocks name RF-UPS-Monitor, the maker and the year. Two more M3 holes, H4 and H5, under the module between the header rows, for mounting the carrier when the module is on headers (a project footprint without courtyard, so the courtyard check stays on for the parts). ERC and DRC clean; fab files, renders and 3D models regenerated.
@@ -148,7 +152,8 @@ First release.
 - The network stack queues 5 UDP packets; larger bursts are dropped (SNMP managers retry).
 - Not yet tested with the real hardware: mains traps with real mains, the factory reset button, the "no link" and "no DHCP server" states. The LibreNMS definitions are validated against the schema but not yet tried in a running LibreNMS (done after 1.0.1).
 
-[Unreleased]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.4.1...HEAD
+[Unreleased]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.4.2...HEAD
+[2.4.2]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.4.1...v2.4.2
 [2.4.1]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.4.0...v2.4.1
 [2.4.0]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/TheKingOfChaos/RF-UPS-Monitor-v3/compare/v2.2.0...v2.3.0
